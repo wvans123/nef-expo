@@ -281,6 +281,46 @@ def register_af(req: RegisterAfReq, authorization: str = Header(None)):
             "message": "能力已注册，已出现在能力超市（third_party 标记），可被网络 Agent 发现和调用"}
 
 
+@app.post("/api/v1/third-party/{cap_id}/simulate-call")
+def simulate_reverse_call(cap_id: str, authorization: str = Header(None)):
+    """手动模拟一次「网络内部 Agent 反向调用 AF 能力」"""
+    key, rec = _auth(authorization)
+    meta = THIRD_PARTY_META.get(cap_id)
+    if not meta:
+        raise HTTPException(404, f"第三方能力 {cap_id} 不存在")
+    if meta["owner"] != rec["account"]:
+        raise HTTPException(403, f"能力 {cap_id} 不属于账号 {rec['account']}")
+    record = record_reverse_call(cap_id, trigger="manual", trigger_detail="手动模拟网络调用")
+    request_payload = {"payload": {"source": "nef_outbound_gateway",
+                                   "caller": record["caller_agent"],
+                                   "task_ref": "demo_task"}}
+    return {"record": record,
+            "request_payload": request_payload,
+            "response_payload": invoke_stub(cap_id, request_payload)}
+
+
+@app.get("/api/v1/third-party/my-calls")
+def my_reverse_calls(authorization: str = Header(None)):
+    """当前账号注册的第三方能力 + 各自反向调用台账"""
+    key, rec = _auth(authorization)
+    out = []
+    for cap in THIRD_PARTY:
+        meta = THIRD_PARTY_META.get(cap.id, {})
+        if meta.get("owner") != rec["account"]:
+            continue
+        calls = REVERSE_CALLS.get(cap.id, [])
+        out.append({
+            "id": cap.id, "name": cap.name,
+            "cap_type": meta.get("cap_type"), "endpoint": meta.get("endpoint"),
+            "call_count": len(calls),
+            "last_call_ts": calls[-1]["ts"] if calls else None,
+            "total_fee": round(sum(c["fee"] for c in calls), 2),
+            "discovered": bool(calls),
+            "recent_calls": list(reversed(calls[-10:])),
+        })
+    return {"count": len(out), "capabilities": out}
+
+
 # ===== Skill 双文档生成 =====
 def skill_steps(pkg):
     steps = []

@@ -55,3 +55,47 @@ def test_registered_cap_visible_in_marketplace():
     r = client.get("/api/v1/capabilities")
     ids = [c["id"] for c in r.json()["capabilities"]]
     assert cap_id in ids
+
+
+def test_simulate_call_creates_ledger_record():
+    key = _key()
+    cap_id = _register(key)
+    r = client.post(f"/api/v1/third-party/{cap_id}/simulate-call", headers=_hdr(key))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["record"]["trigger"] == "manual"
+    assert body["record"]["caller_agent"] == "Computing Agent"  # ai_model → Computing
+    assert body["response_payload"]["result"]["provided_by"] == "third_party_af"
+
+
+def test_simulate_call_404_unknown():
+    key = _key()
+    r = client.post("/api/v1/third-party/tp_nonexist/simulate-call", headers=_hdr(key))
+    assert r.status_code == 404
+
+
+def test_simulate_call_403_not_owner():
+    key1 = _key("owner_a")
+    cap_id = _register(key1)
+    key2 = _key("other_b")
+    r = client.post(f"/api/v1/third-party/{cap_id}/simulate-call", headers=_hdr(key2))
+    assert r.status_code == 403
+
+
+def test_my_calls_summary():
+    key = _key()
+    cap_id = _register(key)
+    client.post(f"/api/v1/third-party/{cap_id}/simulate-call", headers=_hdr(key))
+    client.post(f"/api/v1/third-party/{cap_id}/simulate-call", headers=_hdr(key))
+    r = client.get("/api/v1/third-party/my-calls", headers=_hdr(key))
+    assert r.status_code == 200
+    caps = r.json()["capabilities"]
+    assert len(caps) == 1
+    c = caps[0]
+    assert c["id"] == cap_id
+    assert c["call_count"] == 2
+    assert c["total_fee"] == 0.1
+    assert c["discovered"] is True
+    assert len(c["recent_calls"]) == 2
+    # 倒序：最新在前
+    assert c["recent_calls"][0]["ts"] >= c["recent_calls"][1]["ts"]
