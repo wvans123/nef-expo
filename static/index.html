@@ -6,27 +6,28 @@
 <title>6G NEF 能力开放平台</title>
 <style>
 :root{
-  --bg:#0d1117; --panel:#161b22; --card:#21262d; --border:#30363d;
-  --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff;
-  --green:#3fb950; --red:#f85149; --orange:#d29922; --purple:#bc8cff;
+  --bg:#050b1f; --panel:#0a142e; --card:#0e1d3f; --border:#2a4a8a;
+  --text:#eaf1ff; --muted:#8fa6d9; --accent:#39d2ff;
+  --green:#39ffb0; --red:#ff6b6b; --orange:#ffc857; --purple:#bc8cff;
+  --grad:linear-gradient(90deg,#1f6feb,#7048e8);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5}
+body{background:linear-gradient(160deg,#050b1f 0%,#0a1733 55%,#06122b 100%) fixed;color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5}
 code,pre,.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
-pre{background:#0a0e14;border:1px solid var(--border);border-radius:8px;padding:12px;overflow:auto;font-size:12px;max-height:420px}
+pre{background:#081227;border:1px solid var(--border);border-radius:8px;padding:12px;overflow:auto;font-size:12px;max-height:420px}
 button{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:8px;padding:6px 14px;font-size:13px;transition:.15s}
 button:hover{border-color:var(--accent);background:#2a3038}
-button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
-button.primary:hover{background:#388bfd}
+button.primary{background:var(--grad);border-color:transparent;color:#fff}
+button.primary:hover{filter:brightness(1.15)}
 button.success{background:#238636;border-color:#238636;color:#fff}
 button.success:hover{background:#2ea043}
 button:disabled{opacity:.45;cursor:not-allowed}
-input,select,textarea{background:#0a0e14;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font-size:13px;width:100%}
+input,select,textarea{background:#081227;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font-size:13px;width:100%}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
 label{font-size:12px;color:var(--muted);display:block;margin:8px 0 3px}
 /* 顶栏 */
-#topbar{position:sticky;top:0;z-index:50;background:var(--panel);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:14px}
-#topbar h1{font-size:16px;font-weight:600}
+#topbar{position:sticky;top:0;z-index:50;background:#0a142eb8;backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:14px}
+#topbar h1{font-size:16px;font-weight:700;background:linear-gradient(90deg,#7cc7ff,#bc8cff);-webkit-background-clip:text;background-clip:text;color:transparent}
 #topbar .ver{font-size:11px;color:var(--muted);background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1px 8px}
 #topbar .spacer{flex:1}
 #acct-status{font-size:12px;color:var(--muted)}
@@ -42,10 +43,13 @@ main{padding:18px 20px;max-width:1280px;margin:0 auto}
 .banner{background:linear-gradient(135deg,#161b22,#1c2333);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:18px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
 .banner .stat b{font-size:20px;color:var(--accent)}
 .banner .stat span{font-size:12px;color:var(--muted);display:block}
+.hero-title{font-size:26px;font-weight:800;background:linear-gradient(90deg,#7cc7ff,#bc8cff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero-sub{font-size:13px;color:var(--muted);margin-top:2px}
+.method-chip{display:inline-block;border:1px solid #39d2ff55;color:var(--accent);border-radius:14px;padding:2px 12px;font-size:12px;margin-right:8px;background:#39d2ff0d}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:12px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:13px;transition:.15s;cursor:pointer}
-.card:hover{border-color:#58a6ff66;box-shadow:0 4px 14px #0008;transform:translateY(-1px)}
-.cat-dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px}
+.card:hover{border-color:#39d2ff88;box-shadow:0 0 16px #39d2ff2e;transform:translateY(-1px)}
+.cat-dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px;box-shadow:0 0 6px currentColor}
 .tier{font-size:11px;border-radius:10px;padding:1px 8px;border:1px solid}
 .tier.basic{color:var(--green);border-color:#3fb95055;background:#3fb95012}
 .tier.advanced{color:var(--accent);border-color:#58a6ff55;background:#58a6ff12}
@@ -307,10 +311,20 @@ async function loadMarket(){
   ]);
   CAPS = capRes.capabilities; CATS = capRes.categories; PKGS = pkgRes.packages;
   $('#market-banner').innerHTML = `
+    <div style="flex:1 1 100%">
+      <div class="hero-title">一张网络，无限调用</div>
+      <div class="hero-sub">6G NEF 能力开放平台 —— 网络能力即服务，双向开放生态</div>
+      <div style="margin-top:10px">
+        <span class="method-chip">REST API</span>
+        <span class="method-chip">MCP Tool</span>
+        <span class="method-chip">Intent 意图</span>
+        <span class="method-chip">Pipeline 编排</span>
+        <span class="method-chip">↩ AF 反向开放</span>
+      </div>
+    </div>
     <div class="stat"><b>${CAPS.length}</b><span>项网络能力</span></div>
-    <div class="stat"><b>3</b><span>种调用方式 API · Tool · Intent</span></div>
+    <div class="stat"><b>3</b><span>种调用方式</span></div>
     <div class="stat"><b>${PKGS.length}</b><span>个场景套餐</span></div>
-    <div class="spacer" style="flex:1"></div>
     <div class="stat"><span>API Key 状态</span><b style="font-size:13px" class="${apiKey()?'ok':'muted'}">${apiKey()?'已激活':'未订阅'}</b></div>`;
   $('#pkg-row').innerHTML = PKGS.map(p =>
     `<div class="pkg-chip" onclick="showPkg('${p.id}')"><b>${esc(p.name)}</b><span>${esc(p.price)}</span></div>`).join('');
