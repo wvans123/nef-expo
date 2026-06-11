@@ -117,3 +117,24 @@ def test_intent_triggers_reverse_call():
     calls = registry.REVERSE_CALLS[cap_id]
     assert len(calls) == 1
     assert calls[0]["trigger"] == "intent"
+
+
+def test_intent_package_match_keeps_third_party_step():
+    key = _key()
+    cap_id = _register(key, keywords=["质检"])
+    # “检测”+“质检”命中 smart_factory 套餐的两个能力，同时命中第三方能力
+    r = client.post("/api/v1/intent", json={"text": "帮我检测产线并做质检"}, headers=_hdr(key))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["scenario_id"] == "smart_factory"
+    tp_steps = [e for e in body["executions"] if e.get("source") == "third_party"]
+    assert len(tp_steps) == 1
+    assert tp_steps[0]["capability"] == cap_id
+
+
+def test_register_af_blank_name_422():
+    key = _key()
+    r = client.post("/api/v1/register-af",
+                    json={"name": "  ", "cap_type": "tool", "endpoint": "https://x.com"},
+                    headers=_hdr(key))
+    assert r.status_code == 422

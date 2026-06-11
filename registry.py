@@ -39,5 +39,7 @@ def record_reverse_call(cap_id: str, trigger: str, trigger_detail: str) -> dict:
         "status": "success",
         "fee": REVERSE_FEE,
     }
-    REVERSE_CALLS.setdefault(cap_id, []).append(rec)
+    calls = REVERSE_CALLS.setdefault(cap_id, [])
+    calls.append(rec)
+    del calls[:-500]   # demo 内存保护：每能力最多保留 500 条
     return rec

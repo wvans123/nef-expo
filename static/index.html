@@ -16,7 +16,7 @@ body{background:linear-gradient(160deg,#050b1f 0%,#0a1733 55%,#06122b 100%) fixe
 code,pre,.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
 pre{background:#081227;border:1px solid var(--border);border-radius:8px;padding:12px;overflow:auto;font-size:12px;max-height:420px}
 button{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:8px;padding:6px 14px;font-size:13px;transition:.15s}
-button:hover{border-color:var(--accent);background:#2a3038}
+button:hover{border-color:var(--accent);background:#13265c}
 button.primary{background:var(--grad);border-color:transparent;color:#fff}
 button.primary:hover{filter:brightness(1.15)}
 button.success{background:#238636;border-color:#238636;color:#fff}
@@ -51,7 +51,7 @@ main{padding:18px 20px;max-width:1280px;margin:0 auto}
 .card:hover{border-color:#39d2ff88;box-shadow:0 0 16px #39d2ff2e;transform:translateY(-1px)}
 .cat-dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px;box-shadow:0 0 6px currentColor}
 .tier{font-size:11px;border-radius:10px;padding:1px 8px;border:1px solid}
-.tier.basic{color:var(--green);border-color:#3fb95055;background:#3fb95012}
+.tier.basic{color:var(--green);border-color:#39ffb055;background:#39ffb012}
 .tier.advanced{color:var(--accent);border-color:#39d2ff55;background:#39d2ff12}
 .tier.premium{color:var(--purple);border-color:#bc8cff55;background:#bc8cff12}
 .price{color:var(--orange);font-size:12px}
@@ -101,7 +101,7 @@ th{background:var(--card);color:var(--muted)}
 .afflow .afnode.nef{border-color:#ffc85788;color:var(--orange)}
 .afflow .afnode.lit{box-shadow:0 0 14px #39d2ff88;border-color:var(--accent);color:var(--accent)}
 .afflow .afarrow{color:var(--muted);font-size:11px;text-align:center}
-.afflow .afarrow small{display:block;font-size:9px}
+.afflow .afnode small{display:block;font-size:9px}
 .tp-card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--green);border-radius:8px;padding:12px 14px;margin:10px 0}
 .tp-card .badge-found{font-size:10px;color:var(--green);border:1px solid #39ffb066;border-radius:8px;padding:0 6px;margin-left:6px}
 .tp-card .badge-wait{font-size:10px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:0 6px;margin-left:6px}
@@ -358,7 +358,7 @@ async function loadMarket(){
       </div>
     </div>
     <div class="stat"><b>${CAPS.length}</b><span>项网络能力</span></div>
-    <div class="stat"><b>3</b><span>种调用方式</span></div>
+    <div class="stat"><b>5</b><span>种调用与开放方式</span></div>
     <div class="stat"><b>${PKGS.length}</b><span>个场景套餐</span></div>
     <div class="stat"><span>API Key 状态</span><b style="font-size:13px" class="${apiKey()?'ok':'muted'}">${apiKey()?'已激活':'未订阅'}</b></div>`;
   $('#pkg-row').innerHTML = PKGS.map(p =>
@@ -399,7 +399,9 @@ window.showCap = async id => {
     <label>示例请求 JSON</label><pre>${esc(jfmt(example))}</pre>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
       <button onclick="hideModal()">关闭</button>
-      <button class="success" onclick="confirmSubscribe('cap','${c.id}','${esc(c.name)}','${esc(c.unit_price)}')">订阅 ${esc(c.unit_price)}</button>
+      ${c.source==='third_party'
+        ? '<span class="muted" style="font-size:12px;align-self:center">第三方能力 · 由网络 Agent 反向调用，无需订阅</span>'
+        : `<button class="success" onclick="confirmSubscribe('cap','${c.id}','${esc(c.name)}','${esc(c.unit_price)}')">订阅 ${esc(c.unit_price)}</button>`}
     </div>`);
 };
 
@@ -431,11 +433,13 @@ window.confirmSubscribe = (kind, id, name, price) => {
 window.doSubscribe = async (kind, id) => {
   try{
     const body = {account: current, capability_ids: kind==='cap'?[id]:[], package_ids: kind==='pkg'?[id]:[]};
-    const res = await fetch('/api/v1/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+    const r = await fetch('/api/v1/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const res = await r.json();
+    if(!r.ok || !res.api_key) throw res;
     accounts[current] = {api_key: res.api_key}; saveAccounts();
     hideModal(); renderAccounts(); loadMarket();
     toast('订阅成功！API Key: ' + res.api_key.slice(0,18) + '…');
-  }catch(e){ toast('订阅失败', false); }
+  }catch(e){ toast(e.detail || '订阅失败', false); }
 };
 
 /* ============ 我的订阅 ============ */
@@ -711,7 +715,7 @@ window.runPipe = async id=>{
 };
 
 /* ============ AF 注册 · 反向调用 ============ */
-let afPollTimer = null, afTotalCalls = -1;
+let afPollTimer = null, afTotalCalls = -1, afBoardCache = '';
 
 function lightFlow(){
   const nodes = $$('#af-flow .afnode');
@@ -731,6 +735,9 @@ async function loadAfBoard(){
     const total = res.capabilities.reduce((s,c)=>s+c.call_count,0);
     if(afTotalCalls >= 0 && total > afTotalCalls) lightFlow();   // 轮询发现新调用 → 点亮链路
     afTotalCalls = total;
+    const snapshot = JSON.stringify(res);
+    if(snapshot === afBoardCache) return;   // 数据没变不重绘（保留日志滚动位置）
+    afBoardCache = snapshot;
     if(!res.capabilities.length){
       el.innerHTML = '<p class="muted">尚未注册任何能力。注册你的第一个能力，让网络发现并调用它 →</p>';
       return;
@@ -757,7 +764,6 @@ async function loadAfBoard(){
 window.simCall = async id=>{
   try{
     await api(`/api/v1/third-party/${id}/simulate-call`,{method:'POST'});
-    lightFlow();
     await loadAfBoard();
     toast('网络已调用你的能力');
   }catch(e){ toast(e.data?.detail||'调用失败', false); }
@@ -780,7 +786,7 @@ $('#af-submit').onclick = async ()=>{
 };
 
 /* ============ 初始化 ============ */
-function refreshAll(){ renderAccounts(); loadMarket(); }
+function refreshAll(){ afTotalCalls = -1; afBoardCache = ''; renderAccounts(); loadMarket(); }
 renderAccounts();
 loadMarket();
 </script>

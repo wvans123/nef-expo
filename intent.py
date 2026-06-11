@@ -44,6 +44,7 @@ def process_intent(text: str):
 
     if pkg:
         exec_caps = [c for c, _, _ in matched if c.id in pkg["capabilities"]]
+        exec_caps += [c for c, _, _ in matched if c.source == "third_party" and c not in exec_caps]
         pipeline.append({"stage": "skill_match", "label": "Skill 匹配",
                          "detail": f"识别为场景级调用 → 匹配 Skill「{pkg['name']}」({pkg['id']})"})
     else:

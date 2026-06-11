@@ -14,7 +14,7 @@ from skills import (CAPABILITIES, CAP_INDEX, PACKAGES, PKG_INDEX, CATEGORIES,
 from stubs import invoke_stub
 from intent import process_intent
 from registry import (THIRD_PARTY, THIRD_PARTY_META, REVERSE_CALLS,
-                      record_reverse_call)
+                      record_reverse_call, caller_agent_for)
 
 app = FastAPI(title="6G NEF Capability Exposure Platform", version="0.9.0-demo")
 
@@ -85,9 +85,13 @@ def get_capability(cap_id: str):
     cap = CAP_INDEX.get(cap_id) or next((c for c in THIRD_PARTY if c.id == cap_id), None)
     if not cap:
         raise HTTPException(404, f"能力 {cap_id} 不存在")
-    akey, agent = agent_for_capability(cap.id)
+    if cap.source == "third_party":
+        agent_name, _ = caller_agent_for(cap.id)
+    else:
+        akey, agent = agent_for_capability(cap.id)
+        agent_name = agent["name"]
     return {**cap.to_dict(), "mcp_tool": cap.mcp_tool(),
-            "internal_agent": agent["name"],
+            "internal_agent": agent_name,
             "rest_endpoint": f"POST /api/v1/capabilities/{cap.id}/invoke"}
 
 
@@ -264,8 +268,10 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
 @app.post("/api/v1/register-af")
 def register_af(req: RegisterAfReq, authorization: str = Header(None)):
     key, rec = _auth(authorization)
+    if not req.name.strip():
+        raise HTTPException(422, "能力名称不能为空")
     cap_id = "tp_" + uuid.uuid4().hex[:8]
-    keywords = [k.strip() for k in req.intent_keywords if k.strip()] or [req.name]
+    keywords = [k.strip() for k in req.intent_keywords if k.strip()] or [req.name.strip()]
     cap = Capability(
         id=cap_id, name=req.name, description=req.description or f"第三方能力（{req.cap_type}）",
         category="ecosystem", tier="basic",
