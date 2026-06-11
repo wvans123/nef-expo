@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>6G NEF 能力开放平台</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#161b22; --card:#21262d; --border:#30363d;
+  --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff;
+  --green:#3fb950; --red:#f85149; --orange:#d29922; --purple:#bc8cff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5}
+code,pre,.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+pre{background:#0a0e14;border:1px solid var(--border);border-radius:8px;padding:12px;overflow:auto;font-size:12px;max-height:420px}
+button{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:8px;padding:6px 14px;font-size:13px;transition:.15s}
+button:hover{border-color:var(--accent);background:#2a3038}
+button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
+button.primary:hover{background:#388bfd}
+button.success{background:#238636;border-color:#238636;color:#fff}
+button.success:hover{background:#2ea043}
+button:disabled{opacity:.45;cursor:not-allowed}
+input,select,textarea{background:#0a0e14;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font-size:13px;width:100%}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+label{font-size:12px;color:var(--muted);display:block;margin:8px 0 3px}
+/* 顶栏 */
+#topbar{position:sticky;top:0;z-index:50;background:var(--panel);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:14px}
+#topbar h1{font-size:16px;font-weight:600}
+#topbar .ver{font-size:11px;color:var(--muted);background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1px 8px}
+#topbar .spacer{flex:1}
+#acct-status{font-size:12px;color:var(--muted)}
+#acct-status .key{color:var(--green)}
+/* 标签栏 */
+#tabs{display:flex;gap:2px;background:var(--panel);border-bottom:1px solid var(--border);padding:0 14px;overflow-x:auto}
+#tabs button{border:none;background:none;border-radius:0;padding:11px 14px;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap}
+#tabs button.active{color:var(--text);border-bottom-color:var(--accent)}
+#tabs button:hover{color:var(--text);background:none}
+main{padding:18px 20px;max-width:1280px;margin:0 auto}
+.tabpane{display:none}.tabpane.active{display:block}
+/* 通用 */
+.banner{background:linear-gradient(135deg,#161b22,#1c2333);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:18px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.banner .stat b{font-size:20px;color:var(--accent)}
+.banner .stat span{font-size:12px;color:var(--muted);display:block}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:13px;transition:.15s;cursor:pointer}
+.card:hover{border-color:#58a6ff66;box-shadow:0 4px 14px #0008;transform:translateY(-1px)}
+.cat-dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px}
+.tier{font-size:11px;border-radius:10px;padding:1px 8px;border:1px solid}
+.tier.basic{color:var(--green);border-color:#3fb95055;background:#3fb95012}
+.tier.advanced{color:var(--accent);border-color:#58a6ff55;background:#58a6ff12}
+.tier.premium{color:var(--purple);border-color:#bc8cff55;background:#bc8cff12}
+.price{color:var(--orange);font-size:12px}
+.cat-title{margin:22px 0 10px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.cat-title small{color:var(--muted);font-weight:400}
+h3.sec{margin:18px 0 10px;font-size:15px}
+.muted{color:var(--muted)}
+.tag-tp{font-size:10px;color:#f0883e;border:1px solid #f0883e55;border-radius:8px;padding:0 6px}
+/* 套餐 chips */
+#pkg-row{display:flex;gap:10px;overflow-x:auto;padding:4px 0 8px}
+.pkg-chip{flex:0 0 auto;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:8px 16px;cursor:pointer;transition:.15s}
+.pkg-chip:hover{border-color:var(--accent)}
+.pkg-chip b{font-size:13px}.pkg-chip span{color:var(--orange);font-size:12px;margin-left:8px}
+/* 弹窗 */
+#modal-bg{display:none;position:fixed;inset:0;background:#000a;z-index:100;align-items:center;justify-content:center}
+#modal-bg.show{display:flex}
+#modal{background:var(--panel);border:1px solid var(--border);border-radius:8px;width:min(640px,92vw);max-height:86vh;overflow:auto;padding:20px}
+#modal h2{font-size:16px;margin-bottom:8px}
+table{width:100%;border-collapse:collapse;font-size:12px;margin:8px 0}
+th,td{border:1px solid var(--border);padding:5px 8px;text-align:left}
+th{background:var(--card);color:var(--muted)}
+/* 流水线 */
+.flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:12px 0}
+.flow .node{background:var(--card);border:1px solid var(--accent);border-radius:8px;padding:6px 12px;font-size:12px}
+.flow .arrow{color:var(--muted)}
+.agent-block{border:1px solid var(--border);border-left-width:4px;border-radius:8px;padding:10px 14px;margin:10px 0;background:var(--card)}
+/* 编排器 */
+#composer-wrap{display:grid;grid-template-columns:1fr 340px;gap:16px}
+@media(max-width:900px){#composer-wrap{grid-template-columns:1fr}}
+.pool,.pipe-zone{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px;min-height:90px}
+.pipe-zone{border-style:dashed;margin-top:10px}
+.pipe-zone.over{border-color:var(--accent);background:#58a6ff0d}
+.pill{display:inline-flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:5px 12px;margin:4px;font-size:12px;cursor:grab;user-select:none}
+.pill.dragging{opacity:.4;transform:scale(.95)}
+.pill .x{color:var(--red);cursor:pointer;margin-left:4px}
+/* skill 视图 */
+#skill-wrap{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:1000px){#skill-wrap{grid-template-columns:1fr}}
+.step-card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;padding:10px 14px;margin:8px 0}
+.copy{cursor:pointer;color:var(--accent);font-size:11px}
+.kv{font-size:12px;margin:3px 0}.kv b{color:var(--muted);font-weight:400;margin-right:6px}
+.ok{color:var(--green)}.err{color:var(--red)}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;border-radius:8px;padding:9px 18px;z-index:200;display:none}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>⬡ 6G NEF 能力开放平台</h1><span class="ver">v0.9 demo</span>
+  <div class="spacer"></div>
+  <span id="acct-status">未登录</span>
+  <select id="acct-select" style="width:170px"></select>
+  <button id="btn-register-acct" class="primary">注册账号</button>
+</div>
+
+<div id="tabs">
+  <button data-tab="market" class="active">能力超市</button>
+  <button data-tab="subs">我的订阅</button>
+  <button data-tab="api">API 调试</button>
+  <button data-tab="mcp">MCP 工具</button>
+  <button data-tab="intent">Intent 意图</button>
+  <button data-tab="skill">Skill 文档</button>
+  <button data-tab="composer">能力编排器</button>
+  <button data-tab="afreg">AF 注册</button>
+</div>
+
+<main>
+  <!-- Tab 1 能力超市 -->
+  <div class="tabpane active" id="pane-market">
+    <div class="banner" id="market-banner"></div>
+    <h3 class="sec">场景套餐</h3>
+    <div id="pkg-row"></div>
+    <div id="cap-list"></div>
+  </div>
+
+  <!-- Tab 2 我的订阅 -->
+  <div class="tabpane" id="pane-subs"><div id="subs-content"></div></div>
+
+  <!-- Tab 3 API 调试 -->
+  <div class="tabpane" id="pane-api">
+    <h3 class="sec">API 调试</h3>
+    <div style="display:grid;grid-template-columns:340px 1fr;gap:16px">
+      <div>
+        <label>选择已订阅的能力</label>
+        <select id="api-cap-select"></select>
+        <div id="api-endpoint" class="mono muted" style="font-size:12px;margin:8px 0"></div>
+        <div id="api-params"></div>
+        <button class="primary" id="api-send" style="margin-top:12px;width:100%">发送请求</button>
+      </div>
+      <div>
+        <label>请求</label><pre id="api-req">--</pre>
+        <label>响应</label><pre id="api-resp">--</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 4 MCP -->
+  <div class="tabpane" id="pane-mcp">
+    <h3 class="sec">MCP (Model Context Protocol) 模拟</h3>
+    <div style="display:grid;grid-template-columns:340px 1fr;gap:16px">
+      <div>
+        <button id="mcp-list-btn" style="width:100%">tools/list — 列出所有 Tool</button>
+        <label style="margin-top:14px">选择 Tool（tools/call）</label>
+        <select id="mcp-tool-select"></select>
+        <div id="mcp-params"></div>
+        <button class="primary" id="mcp-call" style="margin-top:12px;width:100%">tools/call</button>
+      </div>
+      <div>
+        <label>JSON-RPC 请求</label><pre id="mcp-req">--</pre>
+        <label>JSON-RPC 响应</label><pre id="mcp-resp">--</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 5 Intent -->
+  <div class="tabpane" id="pane-intent">
+    <h3 class="sec">自然语言 Intent 调用</h3>
+    <div class="muted" style="margin-bottom:8px">示例意图（点击填入）：</div>
+    <div id="intent-examples"></div>
+    <div style="display:flex;gap:10px;margin:12px 0">
+      <input id="intent-input" placeholder="用自然语言描述你的需求，例如：帮我检测一下仓库里有没有异常物体">
+      <button class="primary" id="intent-send" style="flex:0 0 auto">发送意图</button>
+    </div>
+    <div id="intent-result"></div>
+  </div>
+
+  <!-- Tab 6 Skill -->
+  <div class="tabpane" id="pane-skill">
+    <h3 class="sec">Skill 编排文档 <span class="muted" style="font-weight:400;font-size:12px">— 一份 Skill，双重角色：外部指导 AF 调用，内部驱动 Agent 编排</span></h3>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <select id="skill-pkg-select" style="width:240px"></select>
+      <div>
+        <button id="skill-view-ext" class="primary">外部视图（AF）</button>
+        <button id="skill-view-int">内部视图（Agent）</button>
+      </div>
+    </div>
+    <div id="skill-wrap">
+      <div id="skill-left"></div>
+      <div><label>Skill Markdown 原文</label><pre id="skill-md" style="max-height:640px">--</pre></div>
+    </div>
+  </div>
+
+  <!-- Tab 7 编排器 -->
+  <div class="tabpane" id="pane-composer">
+    <h3 class="sec">能力编排器</h3>
+    <div class="banner" style="display:block">
+      <b style="font-size:13px">快速订阅套餐</b>
+      <div id="composer-quick-pkgs" style="margin-top:8px"></div>
+    </div>
+    <div id="composer-wrap">
+      <div>
+        <label>能力池（已订阅，拖拽到下方 Pipeline）</label>
+        <div class="pool" id="cap-pool"></div>
+        <label>Pipeline（可拖拽排序）</label>
+        <div class="pipe-zone" id="pipe-zone"><span class="muted">将能力拖到这里…</span></div>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <input id="pipe-name" placeholder="Pipeline 名称" style="width:240px">
+          <button class="success" id="pipe-create">创建 Pipeline</button>
+        </div>
+        <h3 class="sec">已创建的 Pipeline</h3>
+        <div id="pipe-list"></div>
+      </div>
+      <div>
+        <label>Pipeline JSON 预览</label>
+        <pre id="pipe-json">{}</pre>
+        <label>执行结果</label>
+        <pre id="pipe-run-result">--</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 8 AF 注册 -->
+  <div class="tabpane" id="pane-afreg">
+    <h3 class="sec">AF 能力注册（双向开放）</h3>
+    <p class="muted" style="max-width:680px;margin-bottom:14px">NEF 不仅将网络能力对外开放，外部 AF 也可以把自己的能力（AI 模型 / 工具 / 数据源）注册进网络，供网络内部 Agent 发现和调用。注册成功后将出现在能力超市中（third_party 标记）。</p>
+    <div style="max-width:480px">
+      <label>能力名称</label><input id="af-name" placeholder="如：工业缺陷识别模型">
+      <label>类型</label>
+      <select id="af-type"><option value="ai_model">ai_model — AI 模型</option><option value="tool">tool — 工具</option><option value="data_source">data_source — 数据源</option></select>
+      <label>描述</label><textarea id="af-desc" rows="2" placeholder="能力说明"></textarea>
+      <label>端点 URL</label><input id="af-endpoint" placeholder="https://your-af.example.com/api/capability">
+      <button class="primary" id="af-submit" style="margin-top:14px">注册到 NEF</button>
+    </div>
+    <div id="af-result" style="margin-top:14px"></div>
+  </div>
+</main>
+
+<div id="modal-bg"><div id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ 核心状态 ============ */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+let CAPS = [], CATS = {}, PKGS = [];
+let accounts = JSON.parse(localStorage.getItem('nef_accounts') || '{}'); // name -> {api_key}
+let current = localStorage.getItem('nef_current') || '';
+let pipeSteps = [];
+
+function saveAccounts(){ localStorage.setItem('nef_accounts', JSON.stringify(accounts)); localStorage.setItem('nef_current', current); }
+function apiKey(){ return (accounts[current] || {}).api_key || ''; }
+function toast(msg, ok=true){ const t=$('#toast'); t.textContent=msg; t.style.background= ok?'#238636':'#da3633'; t.style.display='block'; setTimeout(()=>t.style.display='none', 2200); }
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function jfmt(o){ return JSON.stringify(o, null, 2); }
+
+async function api(path, opts={}){
+  opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+  if(apiKey()) opts.headers['Authorization'] = 'Bearer ' + apiKey();
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok) throw {status:r.status, data};
+  return data;
+}
+
+/* ============ 账号体系 ============ */
+function renderAccounts(){
+  const sel = $('#acct-select');
+  sel.innerHTML = '<option value="">— 选择账号 —</option>' +
+    Object.keys(accounts).map(a=>`<option ${a===current?'selected':''}>${esc(a)}</option>`).join('');
+  const st = $('#acct-status');
+  if(current && apiKey()) st.innerHTML = `<b>${esc(current)}</b> · <span class="key mono">${apiKey().slice(0,14)}…</span>`;
+  else if(current) st.innerHTML = `<b>${esc(current)}</b> · <span class="muted">未订阅（无 Key）</span>`;
+  else st.textContent = '未登录';
+}
+$('#acct-select').onchange = e => { current = e.target.value; saveAccounts(); refreshAll(); };
+$('#btn-register-acct').onclick = () => {
+  const name = prompt('输入账号名称（如 developer_zhang）：');
+  if(!name) return;
+  if(!accounts[name]) accounts[name] = {api_key:''};
+  current = name; saveAccounts(); renderAccounts(); refreshAll();
+  toast('账号 ' + name + ' 已创建/切换');
+};
+
+/* ============ Tab 切换 ============ */
+$$('#tabs button').forEach(b => b.onclick = () => {
+  $$('#tabs button').forEach(x=>x.classList.remove('active'));
+  $$('.tabpane').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  $('#pane-'+b.dataset.tab).classList.add('active');
+  if(b.dataset.tab==='subs') renderSubs();
+  if(b.dataset.tab==='api') renderApiTab();
+  if(b.dataset.tab==='mcp') renderMcpTab();
+  if(b.dataset.tab==='composer') renderComposer();
+  if(b.dataset.tab==='skill') loadSkill();
+});
+
+/* ============ 弹窗 ============ */
+function showModal(html){ $('#modal').innerHTML = html; $('#modal-bg').classList.add('show'); }
+function hideModal(){ $('#modal-bg').classList.remove('show'); }
+$('#modal-bg').onclick = e => { if(e.target.id==='modal-bg') hideModal(); };
+
+/* ============ 能力超市 ============ */
+async function loadMarket(){
+  const [capRes, pkgRes] = await Promise.all([
+    fetch('/api/v1/capabilities').then(r=>r.json()),
+    fetch('/api/v1/packages').then(r=>r.json()),
+  ]);
+  CAPS = capRes.capabilities; CATS = capRes.categories; PKGS = pkgRes.packages;
+  $('#market-banner').innerHTML = `
+    <div class="stat"><b>${CAPS.length}</b><span>项网络能力</span></div>
+    <div class="stat"><b>3</b><span>种调用方式 API · Tool · Intent</span></div>
+    <div class="stat"><b>${PKGS.length}</b><span>个场景套餐</span></div>
+    <div class="spacer" style="flex:1"></div>
+    <div class="stat"><span>API Key 状态</span><b style="font-size:13px" class="${apiKey()?'ok':'muted'}">${apiKey()?'已激活':'未订阅'}</b></div>`;
+  $('#pkg-row').innerHTML = PKGS.map(p =>
+    `<div class="pkg-chip" onclick="showPkg('${p.id}')"><b>${esc(p.name)}</b><span>${esc(p.price)}</span></div>`).join('');
+  const byCat = {};
+  CAPS.forEach(c => (byCat[c.category] = byCat[c.category]||[]).push(c));
+  let html = '';
+  for(const [cat, meta] of Object.entries(CATS)){
+    const list = byCat[cat]||[]; if(!list.length) continue;
+    html += `<div class="cat-title"><span class="cat-dot" style="background:${meta.color}"></span>${esc(meta.name)} <small>${list.length} 项</small></div><div class="grid">`;
+    html += list.map(c => `
+      <div class="card" onclick="showCap('${c.id}')">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <b><span class="cat-dot" style="background:${meta.color}"></span>${esc(c.name)}</b>
+          <span class="tier ${c.tier}">${c.tier}</span>
+        </div>
+        <div class="muted" style="font-size:12px;margin:7px 0;min-height:36px">${esc(c.description.slice(0,46))}${c.description.length>46?'…':''}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="price">${esc(c.unit_price)}</span>
+          ${c.source==='third_party'?'<span class="tag-tp">third_party</span>':`<span class="mono muted" style="font-size:11px">${c.id}</span>`}
+        </div>
+      </div>`).join('');
+    html += '</div>';
+  }
+  $('#cap-list').innerHTML = html;
+}
+
+window.showCap = async id => {
+  const c = await fetch('/api/v1/capabilities/'+id).then(r=>r.json());
+  const rows = c.params.map(p=>`<tr><td class="mono">${p.name}</td><td>${p.type}</td><td>${p.required?'是':'否'}</td><td>${esc(p.description)}</td></tr>`).join('');
+  const example = {}; c.params.forEach(p=>example[p.name]= p.default!==undefined?p.default:(p.enum?p.enum[0]:'...'));
+  showModal(`
+    <h2><span class="cat-dot" style="background:${CATS[c.category].color}"></span>${esc(c.name)} <span class="tier ${c.tier}">${c.tier}</span></h2>
+    <p class="muted">${esc(c.description)}</p>
+    <div class="kv"><b>REST</b><code>${esc(c.rest_endpoint)}</code></div>
+    <div class="kv"><b>MCP Tool</b><code>${c.id}</code> · <b>内部 Agent</b>${esc(c.internal_agent)} · <b>价格</b><span class="price">${esc(c.unit_price)}</span></div>
+    <table><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr>${rows||'<tr><td colspan=4>无参数</td></tr>'}</table>
+    <label>示例请求 JSON</label><pre>${esc(jfmt(example))}</pre>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
+      <button onclick="hideModal()">关闭</button>
+      <button class="success" onclick="confirmSubscribe('cap','${c.id}','${esc(c.name)}','${esc(c.unit_price)}')">订阅 ${esc(c.unit_price)}</button>
+    </div>`);
+};
+
+window.showPkg = id => {
+  const p = PKGS.find(x=>x.id===id);
+  const capList = p.capability_details.map(c=>`<div class="step-card"><b>${esc(c.name)}</b> <span class="tier ${c.tier}">${c.tier}</span><div class="muted" style="font-size:12px">${esc(c.description)}</div><div class="price" style="font-size:11px">单订 ${esc(c.unit_price)}</div></div>`).join('');
+  showModal(`
+    <h2>${esc(p.name)} <span class="price">${esc(p.price)}</span></h2>
+    <p class="muted">${esc(p.description)} · 场景：${esc(p.scenario)}</p>
+    ${capList}
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
+      <button onclick="hideModal()">关闭</button>
+      <button class="success" onclick="confirmSubscribe('pkg','${p.id}','${esc(p.name)}','${esc(p.price)}')">订阅套餐 ${esc(p.price)}</button>
+    </div>`);
+};
+
+window.confirmSubscribe = (kind, id, name, price) => {
+  if(!current){ toast('请先注册/选择账号', false); return; }
+  showModal(`
+    <h2>确认订阅</h2>
+    <p style="margin:14px 0">即将为账号 <b>${esc(current)}</b> 订阅 <b>${esc(name)}</b>，费用 <span class="price">${esc(price)}</span></p>
+    <p class="muted" style="font-size:12px">确认后将自动完成支付并生成/更新 API Key（Demo 模拟）</p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+      <button onclick="hideModal()">取消</button>
+      <button class="primary" onclick="doSubscribe('${kind}','${id}')">一键确认支付</button>
+    </div>`);
+};
+
+window.doSubscribe = async (kind, id) => {
+  try{
+    const body = {account: current, capability_ids: kind==='cap'?[id]:[], package_ids: kind==='pkg'?[id]:[]};
+    const res = await fetch('/api/v1/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+    accounts[current] = {api_key: res.api_key}; saveAccounts();
+    hideModal(); renderAccounts(); loadMarket();
+    toast('订阅成功！API Key: ' + res.api_key.slice(0,18) + '…');
+  }catch(e){ toast('订阅失败', false); }
+};
+
+/* ============ 我的订阅 ============ */
+async function renderSubs(){
+  const el = $('#subs-content');
+  if(!apiKey()){ el.innerHTML = '<p class="muted">当前账号尚未订阅任何能力。前往「能力超市」订阅后将自动生成 API Key。</p>'; return; }
+  try{
+    const info = await api('/api/v1/auth/info');
+    const capCards = info.subscribed_capabilities.map(cid=>{
+      const c = CAPS.find(x=>x.id===cid); if(!c) return '';
+      const viaPkg = !info.direct_subscriptions.includes(cid);
+      return `<div class="card" style="cursor:default"><b>${esc(c.name)}</b> <span class="tier ${c.tier}">${c.tier}</span>
+        <div class="muted" style="font-size:12px;margin:5px 0">${esc(c.description.slice(0,50))}…</div>
+        <span class="mono muted" style="font-size:11px">${c.id}</span> ${viaPkg?'<span class="tag-tp" style="color:#58a6ff;border-color:#58a6ff55">套餐内</span>':''}</div>`;
+    }).join('');
+    el.innerHTML = `
+      <div class="banner">
+        <div class="stat"><span>账号</span><b style="font-size:15px">${esc(info.account)}</b></div>
+        <div class="stat"><span>API Key（点击复制）</span><b class="mono copy" style="font-size:13px" onclick="navigator.clipboard.writeText('${info.api_key}');toast('已复制 API Key')">${info.api_key}</b></div>
+        <div class="stat"><span>估算月费用</span><b>¥${info.estimated_monthly_cost}</b></div>
+      </div>
+      ${info.packages.length?`<h3 class="sec">已订阅套餐</h3><div>${info.packages.map(p=>{const pk=PKGS.find(x=>x.id===p);return `<span class="pkg-chip" style="display:inline-block;margin:4px"><b>${esc(pk.name)}</b><span>${esc(pk.price)}</span></span>`}).join('')}</div>`:''}
+      <h3 class="sec">已订阅能力（${info.subscribed_capabilities.length}）</h3>
+      <div class="grid">${capCards}</div>`;
+  }catch(e){ el.innerHTML = `<p class="err">API Key 校验失败（服务可能已重启，请重新订阅）</p>`; }
+}
+window.toast = toast;
+
+/* ============ 参数表单生成 ============ */
+function paramForm(cap, prefix){
+  return cap.params.map(p=>{
+    const id = prefix + '-' + p.name;
+    let input;
+    if(p.enum) input = `<select id="${id}">${p.enum.map(v=>`<option ${v===p.default?'selected':''}>${v}</option>`).join('')}</select>`;
+    else input = `<input id="${id}" value="${p.default!==undefined&&p.default!==null?esc(JSON.stringify(p.default)===String(p.default)?p.default:(typeof p.default==='object'?JSON.stringify(p.default):p.default)):''}" placeholder="${p.type}">`;
+    return `<label>${p.name} <span class="muted">(${p.type}${p.required?' · 必填':''})</span> — ${esc(p.description)}</label>${input}`;
+  }).join('');
+}
+function collectParams(cap, prefix){
+  const out = {};
+  cap.params.forEach(p=>{
+    let v = $('#'+prefix+'-'+p.name)?.value;
+    if(v===''||v===undefined) return;
+    if(p.type==='integer') v = parseInt(v) || 0;
+    else if(p.type==='number') v = parseFloat(v) || 0;
+    else if(p.type==='array'){ try{ v = JSON.parse(v); }catch(_){ v = v.split(',').map(s=>s.trim()); } }
+    else if(p.type==='object'){ try{ v = JSON.parse(v); }catch(_){ } }
+    out[p.name] = v;
+  });
+  return out;
+}
+async function mySubscribedCaps(){
+  if(!apiKey()) return [];
+  try{ const info = await api('/api/v1/auth/info'); return info.subscribed_capabilities; }
+  catch(e){ return []; }
+}
+
+/* ============ API 调试 ============ */
+async function renderApiTab(){
+  const subs = await mySubscribedCaps();
+  const sel = $('#api-cap-select');
+  if(!subs.length){ sel.innerHTML = '<option value="">（请先订阅能力）</option>'; $('#api-params').innerHTML=''; $('#api-endpoint').textContent=''; return; }
+  sel.innerHTML = subs.map(id=>{ const c=CAPS.find(x=>x.id===id); return c?`<option value="${id}">${esc(c.name)} (${id})</option>`:''; }).join('');
+  sel.onchange = ()=>{ const c=CAPS.find(x=>x.id===sel.value); $('#api-endpoint').textContent = 'POST /api/v1/capabilities/'+c.id+'/invoke'; $('#api-params').innerHTML = paramForm(c,'apip'); };
+  sel.onchange();
+}
+$('#api-send').onclick = async ()=>{
+  const id = $('#api-cap-select').value; if(!id) return toast('请先订阅能力', false);
+  const c = CAPS.find(x=>x.id===id);
+  const params = collectParams(c,'apip');
+  $('#api-req').textContent = `POST /api/v1/capabilities/${id}/invoke\nAuthorization: Bearer ${apiKey().slice(0,20)}…\nContent-Type: application/json\n\n` + jfmt(params);
+  try{
+    const res = await api(`/api/v1/capabilities/${id}/invoke`, {method:'POST', body:JSON.stringify(params)});
+    $('#api-resp').innerHTML = `<span class="ok">200 OK</span>\n` + esc(jfmt(res));
+  }catch(e){ $('#api-resp').innerHTML = `<span class="err">${e.status||'ERR'}</span>\n` + esc(jfmt(e.data||{})); }
+};
+
+/* ============ MCP ============ */
+async function renderMcpTab(){
+  const sel = $('#mcp-tool-select');
+  sel.innerHTML = CAPS.map(c=>`<option value="${c.id}">${c.id} — ${esc(c.name)}</option>`).join('');
+  sel.onchange = ()=>{ const c=CAPS.find(x=>x.id===sel.value); $('#mcp-params').innerHTML = paramForm(c,'mcpp'); };
+  sel.onchange();
+}
+$('#mcp-list-btn').onclick = async ()=>{
+  const req = {jsonrpc:'2.0', id:1, method:'tools/list', params:{}};
+  $('#mcp-req').textContent = jfmt(req);
+  try{
+    const res = await api('/api/v1/mcp/tools/list',{method:'POST',body:JSON.stringify(req)});
+    $('#mcp-resp').textContent = jfmt(res);
+  }catch(e){ $('#mcp-resp').textContent = jfmt(e.data||{detail:'需要 API Key（请先订阅）'}); }
+};
+$('#mcp-call').onclick = async ()=>{
+  const id = $('#mcp-tool-select').value;
+  const c = CAPS.find(x=>x.id===id);
+  const req = {jsonrpc:'2.0', id:2, method:'tools/call', params:{name:id, arguments:collectParams(c,'mcpp')}};
+  $('#mcp-req').textContent = jfmt(req);
+  try{
+    const res = await api('/api/v1/mcp/tools/call',{method:'POST',body:JSON.stringify(req)});
+    $('#mcp-resp').textContent = jfmt(res);
+  }catch(e){ $('#mcp-resp').textContent = jfmt(e.data||{detail:'需要 API Key（请先订阅）'}); }
+};
+
+/* ============ Intent ============ */
+const INTENT_EXAMPLES = [
+  '帮我检测一下仓库里有没有异常物体',
+  '我需要低时延保障来直播，顺便帮我转码',
+  '追踪这架无人机并告诉我它的位置',
+  '帮我诊断一下为什么网速这么慢',
+  '我要给园区机器狗做定位和巡检识别',
+  '分析一下园区的人流移动模式',
+];
+$('#intent-examples').innerHTML = INTENT_EXAMPLES.map(t=>`<span class="pill" style="cursor:pointer" onclick="document.querySelector('#intent-input').value='${t}'">${t}</span>`).join('');
+$('#intent-send').onclick = async ()=>{
+  const text = $('#intent-input').value.trim();
+  if(!text) return;
+  if(!apiKey()) return toast('Intent 调用需要 API Key，请先订阅', false);
+  $('#intent-result').innerHTML = '<p class="muted">NEF 处理中…</p>';
+  try{
+    const res = await api('/api/v1/intent',{method:'POST',body:JSON.stringify({text})});
+    renderIntentResult(res);
+  }catch(e){ $('#intent-result').innerHTML = `<p class="err">${esc(jfmt(e.data||{}))}</p>`; }
+};
+function renderIntentResult(res){
+  let html = `<div class="flow">` + res.pipeline.map((s,i)=>
+    `<span class="node" title="${esc(s.detail)}">${esc(s.label)}</span>${i<res.pipeline.length-1?'<span class="arrow">→</span>':''}`).join('') + `</div>`;
+  html += `<div class="muted" style="font-size:12px;margin-bottom:10px">` + res.pipeline.map(s=>`<div>▸ <b>${esc(s.label)}</b>：${esc(s.detail)}</div>`).join('') + `</div>`;
+  if(!res.matched){ $('#intent-result').innerHTML = html + `<p class="err">${esc(res.message)}</p>`; return; }
+  if(res.scenario) html += `<p>识别场景：<b class="ok">${esc(res.scenario)}</b>（命中 Skill: <code>${res.scenario_id}</code>）</p>`;
+  const byAgent = {};
+  res.executions.forEach(ex => (byAgent[ex.agent] = byAgent[ex.agent]||{color:ex.agent_color, list:[]}).list.push(ex));
+  for(const [agent, g] of Object.entries(byAgent)){
+    html += `<div class="agent-block" style="border-left-color:${g.color}">
+      <b style="color:${g.color}">${esc(agent)}</b>
+      ${g.list.map(ex=>`
+        <div style="margin:8px 0">
+          <b>Step ${ex.step} · ${esc(ex.capability_name)}</b> <span class="mono muted" style="font-size:11px">${ex.capability}</span>
+          <span class="muted" style="font-size:11px"> · NF Tools: ${ex.nf_tools.join(', ')}</span>
+          <pre style="margin-top:5px;max-height:200px">${esc(jfmt(ex.result))}</pre>
+        </div>`).join('')}
+    </div>`;
+  }
+  $('#intent-result').innerHTML = html;
+}
+
+/* ============ Skill 文档 ============ */
+let skillView = 'ext', skillData = null;
+async function loadSkill(){
+  const sel = $('#skill-pkg-select');
+  if(!sel.options.length) sel.innerHTML = PKGS.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  sel.onchange = fetchSkill;
+  if(!skillData) await fetchSkill();
+}
+async function fetchSkill(){
+  const id = $('#skill-pkg-select').value || PKGS[0].id;
+  skillData = await fetch(`/api/v1/packages/${id}/skill`).then(r=>r.json());
+  renderSkill();
+}
+$('#skill-view-ext').onclick = ()=>{ skillView='ext'; $('#skill-view-ext').classList.add('primary'); $('#skill-view-int').classList.remove('primary'); renderSkill(); };
+$('#skill-view-int').onclick = ()=>{ skillView='int'; $('#skill-view-int').classList.add('primary'); $('#skill-view-ext').classList.remove('primary'); renderSkill(); };
+function renderSkill(){
+  if(!skillData) return;
+  $('#skill-md').textContent = skillView==='ext' ? skillData.external_markdown : skillData.internal_markdown;
+  const left = $('#skill-left');
+  if(skillView==='ext'){
+    left.innerHTML = `<label>AF 调用步骤（外部视图）</label>` + skillData.steps.map(s=>`
+      <div class="step-card" style="border-left-color:${s.agent_color}">
+        <b>Step ${s.step} · ${esc(s.name)}</b> <span class="mono muted" style="font-size:11px">${s.capability}</span>
+        <div class="kv"><b>REST</b><code style="font-size:11px">${esc(s.rest_endpoint)}</code></div>
+        <div class="kv"><b>MCP Tool</b><code>${s.mcp_tool}</code></div>
+        <div class="kv"><b>参数</b>${s.params.map(p=>`<code style="font-size:11px">${p.name}${p.required?'*':''}</code>`).join(' ')}</div>
+      </div>`).join('');
+  }else{
+    const flow = skillData.agent_flow;
+    left.innerHTML = `<label>Agent 调度流程（内部视图）</label>
+      <div class="flow"><span class="node">AF</span><span class="arrow">→</span><span class="node" style="border-color:var(--orange)">NEF</span><span class="arrow">→</span><span class="node" style="border-color:var(--purple)">Planning Agent</span></div>
+      <div style="margin-left:18px;border-left:2px dashed var(--border);padding-left:14px">` +
+      flow.map(g=>`
+        <div class="agent-block" style="border-left-color:${g.color}">
+          <b style="color:${g.color}">${esc(g.agent)}</b>
+          <div style="font-size:12px;margin:5px 0">${g.steps.map(s=>`<span class="pill" style="cursor:default">[${s.step}] ${esc(s.name)}</span>`).join('')}</div>
+          <table><tr><th>NF Tool</th><th>SBI Interface</th></tr>
+          ${g.nf_tools.map(t=>`<tr><td class="mono">${t.tool}</td><td class="mono">${t.sbi}</td></tr>`).join('')}</table>
+        </div>`).join('') +
+      `</div><div class="flow"><span class="node" style="border-color:var(--green)">结果聚合</span><span class="arrow">→</span><span class="node">返回 AF</span></div>`;
+  }
+}
+
+/* ============ 能力编排器 ============ */
+async function renderComposer(){
+  $('#composer-quick-pkgs').innerHTML = PKGS.map(p=>
+    `<button style="margin:3px" onclick="confirmSubscribe('pkg','${p.id}','${esc(p.name)}','${esc(p.price)}')">${esc(p.name)} ${esc(p.price)}</button>`).join('');
+  const subs = await mySubscribedCaps();
+  const pool = $('#cap-pool');
+  if(!subs.length){ pool.innerHTML = '<span class="muted">暂无已订阅能力，先订阅或使用上方快速订阅</span>'; }
+  else pool.innerHTML = subs.map(id=>{ const c=CAPS.find(x=>x.id===id); return c?`<span class="pill" draggable="true" data-cap="${id}">⠿ ${esc(c.name)}</span>`:''; }).join('');
+  bindDrag(); renderPipe(); loadPipeList();
+}
+function bindDrag(){
+  $$('#cap-pool .pill').forEach(p=>{
+    p.ondragstart = e=>{ e.dataTransfer.setData('cap', p.dataset.cap); e.dataTransfer.setData('from','pool'); p.classList.add('dragging'); };
+    p.ondragend = ()=>p.classList.remove('dragging');
+  });
+  const zone = $('#pipe-zone');
+  zone.ondragover = e=>{ e.preventDefault(); zone.classList.add('over'); };
+  zone.ondragleave = ()=>zone.classList.remove('over');
+  zone.ondrop = e=>{
+    e.preventDefault(); zone.classList.remove('over');
+    const cap = e.dataTransfer.getData('cap');
+    const fromIdx = e.dataTransfer.getData('idx');
+    if(e.dataTransfer.getData('from')==='pipe' && fromIdx!==''){
+      const item = pipeSteps.splice(+fromIdx,1)[0]; pipeSteps.push(item);
+    } else if(cap){ pipeSteps.push(cap); }
+    renderPipe();
+  };
+}
+function renderPipe(){
+  const zone = $('#pipe-zone');
+  if(!pipeSteps.length){ zone.innerHTML = '<span class="muted">将能力拖到这里…</span>'; }
+  else zone.innerHTML = pipeSteps.map((id,i)=>{
+    const c = CAPS.find(x=>x.id===id);
+    return `<span class="pill" draggable="true" data-idx="${i}"><b>${i+1}</b> ${esc(c?c.name:id)} <span class="x" onclick="pipeSteps.splice(${i},1);renderPipe()">✕</span></span>` + (i<pipeSteps.length-1?'<span class="arrow">→</span>':'');
+  }).join('');
+  $$('#pipe-zone .pill').forEach(p=>{
+    p.ondragstart = e=>{ e.dataTransfer.setData('from','pipe'); e.dataTransfer.setData('idx', p.dataset.idx); p.classList.add('dragging'); };
+    p.ondragend = ()=>p.classList.remove('dragging');
+    p.ondrop = e=>{
+      e.preventDefault(); e.stopPropagation();
+      const fromIdx = e.dataTransfer.getData('idx'); const cap = e.dataTransfer.getData('cap');
+      const toIdx = +p.dataset.idx;
+      if(e.dataTransfer.getData('from')==='pipe' && fromIdx!==''){
+        const item = pipeSteps.splice(+fromIdx,1)[0]; pipeSteps.splice(toIdx,0,item);
+      } else if(cap){ pipeSteps.splice(toIdx,0,cap); }
+      renderPipe();
+    };
+    p.ondragover = e=>e.preventDefault();
+  });
+  $('#pipe-json').textContent = jfmt({name: $('#pipe-name').value||'my_pipeline', steps: pipeSteps});
+}
+window.renderPipe = renderPipe; window.pipeSteps = pipeSteps;
+$('#pipe-name').oninput = renderPipe;
+$('#pipe-create').onclick = async ()=>{
+  if(!pipeSteps.length) return toast('Pipeline 为空', false);
+  if(!apiKey()) return toast('请先订阅获得 API Key', false);
+  try{
+    const res = await api('/api/v1/compose',{method:'POST',body:JSON.stringify({name:$('#pipe-name').value||'my_pipeline', steps:pipeSteps})});
+    toast('Pipeline 已创建: ' + res.id);
+    pipeSteps.length = 0; renderPipe(); loadPipeList();
+  }catch(e){ toast(e.data?.detail||'创建失败', false); }
+};
+async function loadPipeList(){
+  if(!apiKey()){ $('#pipe-list').innerHTML='<span class="muted">--</span>'; return; }
+  try{
+    const res = await api('/api/v1/pipelines');
+    if(!res.pipelines.length){ $('#pipe-list').innerHTML='<span class="muted">尚未创建 Pipeline</span>'; return; }
+    $('#pipe-list').innerHTML = res.pipelines.map(p=>`
+      <div class="step-card">
+        <b>${esc(p.name)}</b> <span class="mono muted" style="font-size:11px">${p.id}</span>
+        <div class="kv"><b>端点</b><code style="font-size:11px">${esc(p.endpoint)}</code></div>
+        <div class="kv"><b>流程</b>${p.steps.map(s=>{const c=CAPS.find(x=>x.id===s);return esc(c?c.name:s)}).join(' → ')}</div>
+        <button class="primary" style="margin-top:6px" onclick="runPipe('${p.id}')">▶ 执行</button>
+      </div>`).join('');
+  }catch(e){ $('#pipe-list').innerHTML='<span class="muted">--</span>'; }
+}
+window.runPipe = async id=>{
+  $('#pipe-run-result').textContent = '执行中…';
+  try{
+    const res = await api(`/api/v1/pipelines/${id}/run`,{method:'POST'});
+    $('#pipe-run-result').textContent = jfmt(res);
+    toast(`Pipeline 执行成功（${res.steps_executed} 步）`);
+  }catch(e){ $('#pipe-run-result').textContent = jfmt(e.data||{}); }
+};
+
+/* ============ AF 注册 ============ */
+$('#af-submit').onclick = async ()=>{
+  if(!apiKey()) return toast('注册 AF 能力需要 API Key，请先订阅任意能力', false);
+  const body = {name:$('#af-name').value.trim(), cap_type:$('#af-type').value,
+                description:$('#af-desc').value.trim(), endpoint:$('#af-endpoint').value.trim()};
+  if(!body.name || !body.endpoint) return toast('名称和端点必填', false);
+  try{
+    const res = await api('/api/v1/register-af',{method:'POST',body:JSON.stringify(body)});
+    $('#af-result').innerHTML = `<div class="agent-block" style="border-left-color:var(--green)">
+      <b class="ok">✓ 注册成功</b><pre style="margin-top:8px">${esc(jfmt(res))}</pre>
+      <p class="muted" style="font-size:12px">该能力已出现在能力超市（生态服务分类，third_party 标记）</p></div>`;
+    loadMarket();
+  }catch(e){ $('#af-result').innerHTML = `<p class="err">${esc(jfmt(e.data||{}))}</p>`; }
+};
+
+/* ============ 初始化 ============ */
+function refreshAll(){ renderAccounts(); loadMarket(); }
+renderAccounts();
+loadMarket();
+</script>
+</body>
+</html>
