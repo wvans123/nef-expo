@@ -88,6 +88,7 @@ th{background:var(--card);color:var(--muted)}
 /* 流水线 */
 .flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:12px 0}
 .flow .node{background:var(--card);border:1px solid var(--accent);border-radius:8px;padding:6px 12px;font-size:12px}
+.flow .node.planning{border-color:var(--purple);color:var(--purple);box-shadow:0 0 10px #bc8cff33}
 .flow .arrow{color:var(--muted)}
 .agent-block{border:1px solid var(--border);border-left-width:4px;border-radius:8px;padding:10px 14px;margin:10px 0;background:var(--card)}
 /* 编排器 */
@@ -474,7 +475,7 @@ async function renderSubs(){
         <div class="stat"><span>API Key（点击复制）</span><b class="mono copy" style="font-size:13px" onclick="navigator.clipboard.writeText('${info.api_key}');toast('已复制 API Key')">${info.api_key}</b></div>
         <div class="stat"><span>估算月费用</span><b>¥${info.estimated_monthly_cost}</b></div>
       </div>
-      ${info.packages.length?`<h3 class="sec">已订阅套餐</h3><div>${info.packages.map(p=>{const pk=PKGS.find(x=>x.id===p);return `<span class="pkg-chip" style="display:inline-block;margin:4px"><b>${esc(pk.name)}</b><span>${esc(pk.price)}</span></span>`}).join('')}</div>`:''}
+      ${info.packages.length?`<h3 class="sec">已订阅套餐</h3><div>${info.packages.map(p=>{const pk=PKGS.find(x=>x.id===p);return `<span class="pkg-chip" style="display:inline-block;margin:4px"><b>${esc(pk.name)}</b><span class="pprice">${esc(pk.price)}</span></span>`}).join('')}</div>`:''}
       <h3 class="sec">已订阅能力（${info.subscribed_capabilities.length}）</h3>
       <div class="grid">${capCards}</div>`;
   }catch(e){ el.innerHTML = `<p class="err">API Key 校验失败（服务可能已重启，请重新订阅）</p>`; }
@@ -562,11 +563,11 @@ $('#mcp-call').onclick = async ()=>{
 /* ============ Intent ============ */
 const INTENT_EXAMPLES = [
   '帮我检测一下仓库里有没有异常物体',
-  '我需要低时延保障来直播，顺便帮我转码',
+  '我要直播AI换脸，算力和网络都不能卡顿',
   '追踪这架无人机并告诉我它的位置',
-  '帮我诊断一下为什么网速这么慢',
-  '我要给园区机器狗做定位和巡检识别',
-  '分析一下园区的人流移动模式',
+  '帮我预测早高峰的车流量',
+  '机器狗巡检，雾天也要看得清',
+  'XR 会议把渲染放到边缘 GPU，画面不能卡顿',
 ];
 $('#intent-examples').innerHTML = INTENT_EXAMPLES.map(t=>`<span class="pill" style="cursor:pointer" onclick="document.querySelector('#intent-input').value='${t}'">${t}</span>`).join('');
 $('#intent-send').onclick = async ()=>{
@@ -581,7 +582,7 @@ $('#intent-send').onclick = async ()=>{
 };
 function renderIntentResult(res){
   let html = `<div class="flow">` + res.pipeline.map((s,i)=>
-    `<span class="node" title="${esc(s.detail)}">${esc(s.label)}</span>${i<res.pipeline.length-1?'<span class="arrow">→</span>':''}`).join('') + `</div>`;
+    `<span class="node${s.stage==='forward_planning'?' planning':''}" title="${esc(s.detail)}">${esc(s.label)}</span>${i<res.pipeline.length-1?'<span class="arrow">→</span>':''}`).join('') + `</div>`;
   html += `<div class="muted" style="font-size:12px;margin-bottom:10px">` + res.pipeline.map(s=>`<div>▸ <b>${esc(s.label)}</b>：${esc(s.detail)}</div>`).join('') + `</div>`;
   if(!res.matched){ $('#intent-result').innerHTML = html + `<p class="err">${esc(res.message)}</p>`; return; }
   if(res.scenario) html += `<p>识别场景：<b class="ok">${esc(res.scenario)}</b>（命中 Skill: <code>${res.scenario_id}</code>）</p>`;

@@ -162,3 +162,15 @@ def test_intent_pipeline_baseline_stages():
     r = client.post("/api/v1/intent", json={"text": "帮我诊断一下网络"}, headers=_hdr(key))
     stages = [s["stage"] for s in r.json()["pipeline"]]
     assert stages == ["nef_accept", "forward_planning", "semantic_parse", "skill_match", "agent_dispatch", "tool_exec", "aggregate"]
+
+
+def test_intent_live_offload_scenario():
+    key = _key()
+    r = client.post("/api/v1/intent", json={"text": "我要直播AI换脸，算力和网络都不能卡顿"}, headers=_hdr(key))
+    assert r.json()["scenario_id"] == "live_offload"
+
+
+def test_intent_xr_render_scenario():
+    key = _key()
+    r = client.post("/api/v1/intent", json={"text": "XR 会议把渲染放到边缘 GPU，画面不能卡顿"}, headers=_hdr(key))
+    assert r.json()["scenario_id"] == "xr_render"
