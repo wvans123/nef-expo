@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from fastapi.testclient import TestClient
 import registry
+import server
 from server import app
 
 client = TestClient(app)
@@ -101,35 +102,33 @@ def test_my_calls_summary():
     assert c["recent_calls"][0]["ts"] >= c["recent_calls"][1]["ts"]
 
 
-def test_intent_triggers_reverse_call():
+def test_intent_is_authenticated_and_handed_to_partner_agent():
     key = _key()
-    cap_id = _register(key, keywords=["质检", "缺陷识别"])
     r = client.post("/api/v1/intent", json={"text": "帮我对产线做质检"}, headers=_hdr(key))
     assert r.status_code == 200
     body = r.json()
-    assert body["matched"] is True
-    tp_steps = [e for e in body["executions"] if e.get("source") == "third_party"]
-    assert len(tp_steps) == 1
-    assert tp_steps[0]["direction"] == "reverse"
-    assert tp_steps[0]["capability"] == cap_id
-    assert tp_steps[0]["agent"] == "Computing Agent"
-    # 台账同步写入，触发源为 intent
-    calls = registry.REVERSE_CALLS[cap_id]
-    assert len(calls) == 1
-    assert calls[0]["trigger"] == "intent"
+    assert body["status"] == "dispatched"
+    assert body["intent_id"].startswith("intent_")
+    assert body["auth"]["status"] == "verified"
+    assert body["auth"]["account"] == "af_tester"
+    assert body["auth"]["scope"] == "intent:submit"
+    assert [c["status"] for c in body["auth"]["checks"]] == ["passed"] * 4
+    assert body["handoff"]["partner_agent"] == "Partner Network Agent"
+    assert body["handoff"]["task_id"].startswith("partner_task_")
+    assert body["handoff"]["status_owner"] == "partner_network_agent"
+    assert body["handoff"]["status_endpoint"].endswith(body["handoff"]["task_id"])
+    assert "matched" not in body
+    assert "executions" not in body
 
 
-def test_intent_package_match_keeps_third_party_step():
+def test_intent_does_not_match_or_execute_local_capabilities():
     key = _key()
     cap_id = _register(key, keywords=["质检"])
-    # “检测”+“质检”命中 smart_factory 套餐的两个能力，同时命中第三方能力
     r = client.post("/api/v1/intent", json={"text": "帮我检测产线并做质检"}, headers=_hdr(key))
     assert r.status_code == 200
     body = r.json()
-    assert body["scenario_id"] == "smart_factory"
-    tp_steps = [e for e in body["executions"] if e.get("source") == "third_party"]
-    assert len(tp_steps) == 1
-    assert tp_steps[0]["capability"] == cap_id
+    assert body["pipeline"][-1]["stage"] == "partner_accept"
+    assert cap_id not in registry.REVERSE_CALLS
 
 
 def test_register_af_blank_name_422():
@@ -161,16 +160,28 @@ def test_intent_pipeline_baseline_stages():
     key = _key()
     r = client.post("/api/v1/intent", json={"text": "帮我诊断一下网络"}, headers=_hdr(key))
     stages = [s["stage"] for s in r.json()["pipeline"]]
-    assert stages == ["nef_accept", "forward_planning", "semantic_parse", "skill_match", "agent_dispatch", "tool_exec", "aggregate"]
+    assert stages == ["auth_verify", "nef_accept", "partner_route", "partner_accept"]
 
 
-def test_intent_live_offload_scenario():
+def test_intent_rejects_missing_api_key_before_handoff():
+    r = client.post("/api/v1/intent", json={"text": "我要直播AI换脸"})
+    assert r.status_code == 401
+    assert "Authorization" in r.json()["detail"]
+
+
+def test_intent_rejects_api_key_without_required_scope():
+    key = _key("limited_scope")
+    server.API_KEYS[key]["scopes"].remove("intent:submit")
+    r = client.post("/api/v1/intent", json={"text": "我要直播AI换脸"}, headers=_hdr(key))
+    assert r.status_code == 403
+    assert "intent:submit" in r.json()["detail"]
+
+
+def test_auth_info_exposes_authentication_method_and_scopes():
     key = _key()
-    r = client.post("/api/v1/intent", json={"text": "我要直播AI换脸，算力和网络都不能卡顿"}, headers=_hdr(key))
-    assert r.json()["scenario_id"] == "live_offload"
-
-
-def test_intent_xr_render_scenario():
-    key = _key()
-    r = client.post("/api/v1/intent", json={"text": "XR 会议把渲染放到边缘 GPU，画面不能卡顿"}, headers=_hdr(key))
-    assert r.json()["scenario_id"] == "xr_render"
+    r = client.get("/api/v1/auth/info", headers=_hdr(key))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["authentication"]["scheme"] == "Bearer API Key"
+    assert body["authentication"]["status"] == "verified"
+    assert "intent:submit" in body["authentication"]["scopes"]

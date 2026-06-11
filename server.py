@@ -22,6 +22,13 @@ app = FastAPI(title="6G NEF Capability Exposure Platform", version="0.9.0-demo")
 API_KEYS = {}       # api_key -> {"account": str, "subscriptions": set, "packages": set, "created": ts}
 ACCOUNT_KEYS = {}   # account -> api_key
 PIPELINES = {}      # pipe_id -> pipeline def
+DEFAULT_SCOPES = {
+    "capabilities:invoke",
+    "mcp:tools",
+    "intent:submit",
+    "pipeline:manage",
+    "af:register",
+}
 
 
 # ===== 请求模型 =====
@@ -56,14 +63,39 @@ class RegisterAfReq(BaseModel):
 
 
 # ===== 鉴权 =====
-def _auth(authorization: str | None):
+def _auth(authorization: str | None, required_scope: str | None = None):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "缺少 Authorization: Bearer <api_key> 头")
     key = authorization.removeprefix("Bearer ").strip()
     rec = API_KEYS.get(key)
     if not rec:
         raise HTTPException(401, "无效的 API Key")
+    scopes = rec.get("scopes", DEFAULT_SCOPES)
+    if required_scope and required_scope not in scopes:
+        raise HTTPException(403, f"API Key 缺少权限范围: {required_scope}")
     return key, rec
+
+
+def _auth_evidence(key: str, rec: dict, scope: str, request_id: str) -> dict:
+    masked_key = f"{key[:8]}...{key[-4:]}"
+    return {
+        "status": "verified",
+        "scheme": "Bearer API Key",
+        "account": rec["account"],
+        "credential": masked_key,
+        "scope": scope,
+        "request_id": request_id,
+        "checks": [
+            {"step": "credential", "label": "凭证格式", "status": "passed",
+             "detail": "已读取 Authorization: Bearer <api_key>"},
+            {"step": "identity", "label": "身份识别", "status": "passed",
+             "detail": f"API Key 对应账号 {rec['account']}"},
+            {"step": "scope", "label": "权限范围", "status": "passed",
+             "detail": f"已授权 {scope}"},
+            {"step": "audit", "label": "审计追踪", "status": "passed",
+             "detail": f"请求审计 ID: {request_id}"},
+        ],
+    }
 
 
 def _subscribed_caps(rec) -> set:
@@ -97,7 +129,7 @@ def get_capability(cap_id: str):
 
 @app.post("/api/v1/capabilities/{cap_id}/invoke")
 async def invoke_capability(cap_id: str, request: Request, authorization: str = Header(None)):
-    key, rec = _auth(authorization)
+    key, rec = _auth(authorization, required_scope="capabilities:invoke")
     cap = CAP_INDEX.get(cap_id) or next((c for c in THIRD_PARTY if c.id == cap_id), None)
     if not cap:
         raise HTTPException(404, f"能力 {cap_id} 不存在")
@@ -152,7 +184,8 @@ def subscribe(req: SubscribeReq):
     if not key:
         key = "nef_" + secrets.token_hex(16)
         API_KEYS[key] = {"account": req.account, "subscriptions": set(),
-                         "packages": set(), "created": time.time()}
+                         "packages": set(), "scopes": set(DEFAULT_SCOPES),
+                         "created": time.time()}
         ACCOUNT_KEYS[req.account] = key
     rec = API_KEYS[key]
     rec["subscriptions"] |= set(req.capability_ids)
@@ -181,20 +214,28 @@ def auth_info(authorization: str = Header(None)):
             "subscribed_capabilities": caps,
             "direct_subscriptions": sorted(rec["subscriptions"]),
             "packages": sorted(rec["packages"]),
-            "estimated_monthly_cost": round(est, 1)}
+            "estimated_monthly_cost": round(est, 1),
+            "authentication": {
+                "scheme": "Bearer API Key",
+                "status": "verified",
+                "credential": f"{key[:8]}...{key[-4:]}",
+                "scopes": sorted(rec.get("scopes", DEFAULT_SCOPES)),
+            }}
 
 
 # ===== Intent =====
 @app.post("/api/v1/intent")
 def intent(req: IntentReq, authorization: str = Header(None)):
-    _auth(authorization)
-    return process_intent(req.text)
+    request_id = "req_" + uuid.uuid4().hex[:12]
+    key, rec = _auth(authorization, required_scope="intent:submit")
+    auth = _auth_evidence(key, rec, "intent:submit", request_id)
+    return process_intent(req.text, auth)
 
 
 # ===== Pipeline 编排 =====
 @app.post("/api/v1/compose")
 def compose(req: ComposeReq, authorization: str = Header(None)):
-    key, rec = _auth(authorization)
+    key, rec = _auth(authorization, required_scope="pipeline:manage")
     bad = [s for s in req.steps if s not in CAP_INDEX]
     if bad:
         raise HTTPException(404, f"能力不存在: {', '.join(bad)}")
@@ -210,14 +251,14 @@ def compose(req: ComposeReq, authorization: str = Header(None)):
 
 @app.get("/api/v1/pipelines")
 def list_pipelines(authorization: str = Header(None)):
-    key, rec = _auth(authorization)
+    key, rec = _auth(authorization, required_scope="pipeline:manage")
     mine = [p for p in PIPELINES.values() if p["owner"] == rec["account"]]
     return {"count": len(mine), "pipelines": mine}
 
 
 @app.post("/api/v1/pipelines/{pipe_id}/run")
 def run_pipeline(pipe_id: str, authorization: str = Header(None)):
-    key, rec = _auth(authorization)
+    key, rec = _auth(authorization, required_scope="pipeline:manage")
     pipe = PIPELINES.get(pipe_id)
     if not pipe:
         raise HTTPException(404, f"Pipeline {pipe_id} 不存在")
@@ -244,7 +285,7 @@ def _demo_value(p: CapParam):
 # ===== MCP 模拟 =====
 @app.post("/api/v1/mcp/tools/list")
 def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
-    key, rec = _auth(authorization)
+    key, rec = _auth(authorization, required_scope="mcp:tools")
     subscribed = _subscribed_caps(rec)
     tools = [c.mcp_tool() for c in CAPABILITIES
              if c.id in subscribed and c.status == "available"]
@@ -254,7 +295,7 @@ def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
 
 @app.post("/api/v1/mcp/tools/call")
 def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
-    key, rec = _auth(authorization)
+    key, rec = _auth(authorization, required_scope="mcp:tools")
     name = req.params.get("name")
     args = req.params.get("arguments", {})
     cap = CAP_INDEX.get(name) or next((c for c in THIRD_PARTY if c.id == name), None)
@@ -275,7 +316,7 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
 # ===== AF 注册（双向开放） =====
 @app.post("/api/v1/register-af")
 def register_af(req: RegisterAfReq, authorization: str = Header(None)):
-    key, rec = _auth(authorization)
+    key, rec = _auth(authorization, required_scope="af:register")
     if not req.name.strip():
         raise HTTPException(422, "能力名称不能为空")
     cap_id = "tp_" + uuid.uuid4().hex[:8]
@@ -298,7 +339,7 @@ def register_af(req: RegisterAfReq, authorization: str = Header(None)):
 @app.post("/api/v1/third-party/{cap_id}/simulate-call")
 def simulate_reverse_call(cap_id: str, authorization: str = Header(None)):
     """手动模拟一次「网络内部 Agent 反向调用 AF 能力」"""
-    key, rec = _auth(authorization)
+    key, rec = _auth(authorization, required_scope="af:register")
     meta = THIRD_PARTY_META.get(cap_id)
     if not meta:
         raise HTTPException(404, f"第三方能力 {cap_id} 不存在")
@@ -316,7 +357,7 @@ def simulate_reverse_call(cap_id: str, authorization: str = Header(None)):
 @app.get("/api/v1/third-party/my-calls")
 def my_reverse_calls(authorization: str = Header(None)):
     """当前账号注册的第三方能力 + 各自反向调用台账"""
-    key, rec = _auth(authorization)
+    key, rec = _auth(authorization, required_scope="af:register")
     out = []
     for cap in THIRD_PARTY:
         meta = THIRD_PARTY_META.get(cap.id, {})
@@ -354,7 +395,7 @@ def skill_steps(pkg):
 
 
 def agent_flow(pkg):
-    """内部视图的 Agent 调度结构"""
+    """伙伴侧参考视图的 Agent 调度结构"""
     groups = {}
     for i, cid in enumerate(pkg["capabilities"], 1):
         akey, agent = agent_for_capability(cid)
@@ -435,18 +476,18 @@ def build_external_skill(pkg):
     md += ["## 编排建议",
            "",
            f"按上述顺序依次调用。前一步的输出（如 target_id、task_id）可作为后一步的输入参数。",
-           f"也可直接通过 Intent 接口用自然语言触发整个场景：`POST /api/v1/intent`。",
+           "如使用 `POST /api/v1/intent`，NEF 仅完成鉴权、受理和转发；具体场景编排由合作伙伴网络 Agent 负责。",
            ""]
     return "\n".join(md)
 
 
 def build_internal_skill(pkg):
-    """内部 Skill：面向 Planning Agent 的编排蓝图"""
+    """伙伴侧 Skill：面向网络 Agent 的编排蓝图"""
     flow = agent_flow(pkg)
-    md = [f"# Skill: {pkg['name']}（内部版 / Agent 编排蓝图）",
+    md = [f"# Skill: {pkg['name']}（伙伴侧 / Agent 编排蓝图）",
           "",
-          f"> 触发条件：AF Intent 命中本场景，或 AF 显式调用套餐能力组合  ",
-          f"> 编排者：Planning Agent（NEF 内）",
+          f"> 触发条件：合作伙伴网络 Agent 接收 NEF 转发的 Intent，或 AF 显式调用套餐能力组合  ",
+          f"> 编排者：合作伙伴网络 Agent（不属于 NEF）",
           "",
           "## 执行流程图",
           "",
@@ -455,11 +496,11 @@ def build_internal_skill(pkg):
           "        │",
           "        ▼",
           "  ┌───────────┐",
-          "  │    NEF    │ 鉴权 · 语义解析 · Skill 匹配",
+          "  │    NEF    │ 鉴权 · 受理 · 审计 · 路由",
           "  └─────┬─────┘",
           "        ▼",
           "  ┌──────────────┐",
-          "  │ Planning Agent│ 按本 Skill 分派",
+          "  │ Partner Agent │ 语义理解 · 按本 Skill 分派",
           "  └─────┬────────┘"]
     for g in flow:
         md.append(f"        ├──▶ {g['agent']}: " +
@@ -493,7 +534,7 @@ def build_internal_skill(pkg):
     md += ["",
            "## 异常处理",
            "",
-           "- 任一步骤失败：Planning Agent 重试 1 次，仍失败则向 AF 返回部分结果 + 失败原因",
+           "- 任一步骤失败：伙伴网络 Agent 重试 1 次，仍失败则向 AF 返回部分结果 + 失败原因",
            "- QoS 类步骤失败不阻断感知/计算类步骤（弱依赖）",
            ""]
     return "\n".join(md)

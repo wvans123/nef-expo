@@ -1,113 +1,57 @@
 # -*- coding: utf-8 -*-
-"""Intent 意图解析与执行：文本 → 能力匹配 → Skill 匹配 → Agent 分派 → Tool 执行"""
-from skills import CAPABILITIES, PACKAGES, agent_for_capability
-from stubs import invoke_stub
-from registry import THIRD_PARTY, record_reverse_call, caller_agent_for
+"""Intent handoff: NEF authenticates, accepts, and forwards to a partner agent."""
+import time
+import uuid
 
 
-def match_capabilities(text: str):
-    """关键词匹配，按相关度排序。返回 [(cap, score, hit_keywords)]"""
-    scored = []
-    for cap in CAPABILITIES + THIRD_PARTY:
-        if cap.status != "available":
-            continue
-        hits = [kw for kw in cap.intent_keywords if kw.lower() in text.lower()]
-        if hits:
-            scored.append((cap, len(hits), hits))
-    scored.sort(key=lambda x: -x[1])
-    return scored
+PARTNER_AGENT_NAME = "Partner Network Agent"
+PARTNER_INTENT_ENDPOINT = "https://partner-agent.example.com/v1/intents"
 
 
-def match_package(matched_cap_ids):
-    """若匹配能力中 ≥2 个属于同一套餐，识别为场景级业务。
-    平手时取覆盖率（重叠数/套餐能力数）更高者，避免列表顺序决定结果。"""
-    best, best_key = None, (1, 0.0)
-    for pkg in PACKAGES:
-        overlap = len(set(pkg["capabilities"]) & set(matched_cap_ids))
-        key = (overlap, overlap / len(pkg["capabilities"]))
-        if key > best_key:
-            best, best_key = pkg, key
-    return best
+def process_intent(text: str, auth: dict) -> dict:
+    """Build a demo handoff receipt without interpreting or executing the intent."""
+    intent_id = "intent_" + uuid.uuid4().hex[:12]
+    partner_task_id = "partner_task_" + uuid.uuid4().hex[:12]
+    submitted_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    status_endpoint = f"{PARTNER_INTENT_ENDPOINT}/{partner_task_id}"
 
-
-def process_intent(text: str):
-    matched = match_capabilities(text)
     pipeline = [
-        {"stage": "nef_accept", "label": "NEF 受理", "detail": f"收到 AF 意图（{len(text)} 字符），完成鉴权与限流检查"},
-        {"stage": "forward_planning", "label": "转发 Planning Agent", "detail": "NEF 将意图转发至网络内部 Planning Agent 处理"},
-        {"stage": "semantic_parse", "label": "语义解析",
-         "detail": f"Planning Agent 提取关键词，识别出 {len(matched)} 个候选业务" if matched else "Planning Agent 未能从意图中识别出业务"},
+        {
+            "stage": "auth_verify",
+            "label": "NEF 鉴权",
+            "detail": f"Bearer API Key 已验证，账号 {auth['account']} 具备 intent:submit 权限",
+        },
+        {
+            "stage": "nef_accept",
+            "label": "NEF 受理",
+            "detail": f"已生成 Intent ID {intent_id} 与审计请求 ID {auth['request_id']}",
+        },
+        {
+            "stage": "partner_route",
+            "label": "转发网络 Agent",
+            "detail": f"Intent 原文透传至合作伙伴 {PARTNER_AGENT_NAME}，NEF 不做语义解析和业务执行",
+        },
+        {
+            "stage": "partner_accept",
+            "label": "伙伴侧接收",
+            "detail": f"伙伴侧任务 {partner_task_id} 已接收，后续状态与结果由伙伴系统维护",
+        },
     ]
 
-    if not matched:
-        return {"intent": text, "matched": False, "pipeline": pipeline,
-                "message": "未能理解该意图，请尝试包含具体场景关键词（如：检测、定位、低时延、转码）",
-                "executions": []}
-
-    cap_ids = [c.id for c, _, _ in matched]
-    pkg = match_package(cap_ids)
-
-    if pkg:
-        exec_caps = [c for c, _, _ in matched if c.id in pkg["capabilities"]]
-        exec_caps += [c for c, _, _ in matched if c.source == "third_party" and c not in exec_caps]
-        pipeline.append({"stage": "skill_match", "label": "业务识别",
-                         "detail": f"识别为场景级业务 → 匹配 Skill「{pkg['name']}」({pkg['id']})"})
-    else:
-        exec_caps = [matched[0][0]] + [c for c, s, _ in matched[1:] if s >= matched[0][1]]
-        exec_caps = exec_caps[:3]
-        pipeline.append({"stage": "skill_match", "label": "业务识别",
-                         "detail": "未命中场景套餐，按单业务执行"})
-
-    # Agent 分派计划
-    plan, agent_groups = [], {}
-    for i, cap in enumerate(exec_caps, 1):
-        if cap.source == "third_party":
-            agent_name, agent_color = caller_agent_for(cap.id)
-            step = {"step": i, "capability": cap.id, "capability_name": cap.name,
-                    "agent": agent_name, "agent_key": "third_party",
-                    "agent_color": agent_color,
-                    "source": "third_party", "direction": "reverse",
-                    "nf_tools": ["nef_outbound_gateway"]}
-        else:
-            akey, agent = agent_for_capability(cap.id)
-            step = {"step": i, "capability": cap.id, "capability_name": cap.name,
-                    "agent": agent["name"], "agent_key": akey, "agent_color": agent["color"],
-                    "nf_tools": [t["tool"] for t in agent["nf_tools"][:2]]}
-        plan.append(step)
-        agent_groups.setdefault(step["agent"], []).append(cap.name)
-
-    pipeline.append({"stage": "agent_dispatch", "label": "业务编排",
-                     "detail": "Planning Agent 将 " + str(len(plan)) + " 个业务分派至业务 Agent → " +
-                               "；".join(f"{a}: {', '.join(caps)}" for a, caps in agent_groups.items())})
-
-    # 执行
-    executions = []
-    for step in plan:
-        cap = next(c for c in CAPABILITIES + THIRD_PARTY if c.id == step["capability"])
-        params = {p.name: (p.default if p.default is not None else _demo_value(p)) for p in cap.params}
-        result = invoke_stub(cap.id, params)
-        if step.get("source") == "third_party":
-            record_reverse_call(cap.id, trigger="intent", trigger_detail=text[:40])
-        executions.append({**step, "params": params, "result": result})
-
-    pipeline.append({"stage": "tool_exec", "label": "Tool 执行",
-                     "detail": f"各业务 Agent 调用内部 NF Tool 执行，共 {len(executions)} 个业务步骤，全部成功"})
-    pipeline.append({"stage": "aggregate", "label": "结果聚合", "detail": "NEF 聚合各业务 Agent 结果并返回 AF"})
-
     return {
-        "intent": text, "matched": True,
-        "scenario": pkg["name"] if pkg else None,
-        "scenario_id": pkg["id"] if pkg else None,
-        "matched_capabilities": [{"id": c.id, "name": c.name, "score": s, "keywords_hit": h}
-                                 for c, s, h in matched],
+        "intent_id": intent_id,
+        "intent": text,
+        "status": "dispatched",
+        "submitted_at": submitted_at,
+        "auth": auth,
         "pipeline": pipeline,
-        "plan": plan,
-        "executions": executions,
+        "handoff": {
+            "status": "accepted",
+            "partner_agent": PARTNER_AGENT_NAME,
+            "endpoint": PARTNER_INTENT_ENDPOINT,
+            "task_id": partner_task_id,
+            "status_owner": "partner_network_agent",
+            "status_endpoint": status_endpoint,
+            "message": "Intent 已转交。业务理解、执行状态和最终结果由合作伙伴网络 Agent 负责。",
+        },
     }
-
-
-def _demo_value(p):
-    if p.enum:
-        return p.enum[0]
-    return {"string": "demo_" + p.name, "integer": 1, "number": 1.0,
-            "array": [], "boolean": True}.get(p.type, "demo")
