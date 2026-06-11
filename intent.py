@@ -2,12 +2,13 @@
 """Intent 意图解析与执行：文本 → 能力匹配 → Skill 匹配 → Agent 分派 → Tool 执行"""
 from skills import CAPABILITIES, PACKAGES, agent_for_capability
 from stubs import invoke_stub
+from registry import THIRD_PARTY, record_reverse_call, caller_agent_for
 
 
 def match_capabilities(text: str):
     """关键词匹配，按相关度排序。返回 [(cap, score, hit_keywords)]"""
     scored = []
-    for cap in CAPABILITIES:
+    for cap in CAPABILITIES + THIRD_PARTY:
         hits = [kw for kw in cap.intent_keywords if kw.lower() in text.lower()]
         if hits:
             scored.append((cap, len(hits), hits))
@@ -54,12 +55,20 @@ def process_intent(text: str):
     # Agent 分派计划
     plan, agent_groups = [], {}
     for i, cap in enumerate(exec_caps, 1):
-        akey, agent = agent_for_capability(cap.id)
-        step = {"step": i, "capability": cap.id, "capability_name": cap.name,
-                "agent": agent["name"], "agent_key": akey, "agent_color": agent["color"],
-                "nf_tools": [t["tool"] for t in agent["nf_tools"][:2]]}
+        if cap.source == "third_party":
+            agent_name, agent_color = caller_agent_for(cap.id)
+            step = {"step": i, "capability": cap.id, "capability_name": cap.name,
+                    "agent": agent_name, "agent_key": "third_party",
+                    "agent_color": agent_color,
+                    "source": "third_party", "direction": "reverse",
+                    "nf_tools": ["nef_outbound_gateway"]}
+        else:
+            akey, agent = agent_for_capability(cap.id)
+            step = {"step": i, "capability": cap.id, "capability_name": cap.name,
+                    "agent": agent["name"], "agent_key": akey, "agent_color": agent["color"],
+                    "nf_tools": [t["tool"] for t in agent["nf_tools"][:2]]}
         plan.append(step)
-        agent_groups.setdefault(agent["name"], []).append(cap.name)
+        agent_groups.setdefault(step["agent"], []).append(cap.name)
 
     pipeline.append({"stage": "agent_dispatch", "label": "Agent 分派",
                      "detail": "Planning Agent 按 Skill 分派 → " +
@@ -68,9 +77,11 @@ def process_intent(text: str):
     # 执行
     executions = []
     for step in plan:
-        cap = next(c for c in CAPABILITIES if c.id == step["capability"])
+        cap = next(c for c in CAPABILITIES + THIRD_PARTY if c.id == step["capability"])
         params = {p.name: (p.default if p.default is not None else _demo_value(p)) for p in cap.params}
         result = invoke_stub(cap.id, params)
+        if step.get("source") == "third_party":
+            record_reverse_call(cap.id, trigger="intent", trigger_detail=text[:40])
         executions.append({**step, "params": params, "result": result})
 
     pipeline.append({"stage": "tool_exec", "label": "Tool 执行",

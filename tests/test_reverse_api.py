@@ -99,3 +99,21 @@ def test_my_calls_summary():
     assert len(c["recent_calls"]) == 2
     # 倒序：最新在前
     assert c["recent_calls"][0]["ts"] >= c["recent_calls"][1]["ts"]
+
+
+def test_intent_triggers_reverse_call():
+    key = _key()
+    cap_id = _register(key, keywords=["质检", "缺陷识别"])
+    r = client.post("/api/v1/intent", json={"text": "帮我对产线做质检"}, headers=_hdr(key))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["matched"] is True
+    tp_steps = [e for e in body["executions"] if e.get("source") == "third_party"]
+    assert len(tp_steps) == 1
+    assert tp_steps[0]["direction"] == "reverse"
+    assert tp_steps[0]["capability"] == cap_id
+    assert tp_steps[0]["agent"] == "Computing Agent"
+    # 台账同步写入，触发源为 intent
+    calls = registry.REVERSE_CALLS[cap_id]
+    assert len(calls) == 1
+    assert calls[0]["trigger"] == "intent"
