@@ -57,14 +57,26 @@ main{padding:18px 20px;max-width:1280px;margin:0 auto}
 .price{color:var(--orange);font-size:12px}
 .cat-title{margin:22px 0 10px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
 .cat-title small{color:var(--muted);font-weight:400}
+/* 磁贴墙 */
+.tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:8px}
+.tile{position:relative;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 10px 8px;cursor:pointer;transition:.15s}
+.tile:hover{border-color:#39d2ff88;box-shadow:0 0 12px #39d2ff2e;transform:translateY(-1px)}
+.tile .ticon{font-size:20px;line-height:1}
+.tile .tname{font-size:12px;font-weight:600;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .tfoot{display:flex;justify-content:space-between;align-items:center;margin-top:5px;font-size:10px}
+.tile .tprice{color:var(--orange)}
+.tile.planned{opacity:.45;filter:grayscale(.35)}
+.tile.planned:hover{border-color:var(--border);box-shadow:none;transform:none}
+.tile .tbadge{position:absolute;top:6px;right:6px;font-size:9px;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:0 4px;background:var(--panel)}
 h3.sec{margin:18px 0 10px;font-size:15px}
 .muted{color:var(--muted)}
 .tag-tp{font-size:10px;color:#f0883e;border:1px solid #f0883e55;border-radius:8px;padding:0 6px}
 /* 套餐 chips */
 #pkg-row{display:flex;gap:10px;overflow-x:auto;padding:4px 0 8px}
-.pkg-chip{flex:0 0 auto;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:8px 16px;cursor:pointer;transition:.15s}
-.pkg-chip:hover{border-color:var(--accent)}
-.pkg-chip b{font-size:13px}.pkg-chip span{color:var(--orange);font-size:12px;margin-left:8px}
+.pkg-chip{flex:0 0 auto;width:200px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer;transition:.15s}
+.pkg-chip:hover{border-color:var(--accent);box-shadow:0 0 12px #39d2ff2e}
+.pkg-chip b{font-size:13px;display:block}.pkg-chip .pprice{color:var(--orange);font-size:11px}
+.pkg-chip .pscen{font-size:10px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* 弹窗 */
 #modal-bg{display:none;position:fixed;inset:0;background:#000a;z-index:100;align-items:center;justify-content:center}
 #modal-bg.show{display:flex}
@@ -357,28 +369,27 @@ async function loadMarket(){
         <span class="method-chip">↩ AF 反向开放</span>
       </div>
     </div>
-    <div class="stat"><b>${CAPS.length}</b><span>项网络能力</span></div>
+    <div class="stat"><b>${CAPS.filter(c=>c.status==='available').length}</b><span>项可用能力</span></div>
+    <div class="stat"><b>${CAPS.filter(c=>c.status==='planned').length}</b><span>项规划中</span></div>
     <div class="stat"><b>5</b><span>种调用与开放方式</span></div>
     <div class="stat"><b>${PKGS.length}</b><span>个场景套餐</span></div>
     <div class="stat"><span>API Key 状态</span><b style="font-size:13px" class="${apiKey()?'ok':'muted'}">${apiKey()?'已激活':'未订阅'}</b></div>`;
   $('#pkg-row').innerHTML = PKGS.map(p =>
-    `<div class="pkg-chip" onclick="showPkg('${p.id}')"><b>${esc(p.name)}</b><span>${esc(p.price)}</span></div>`).join('');
+    `<div class="pkg-chip" onclick="showPkg('${p.id}')"><b>${esc(p.name)}</b><span class="pprice">${esc(p.price)}</span><div class="pscen">${esc(p.scenario)}</div></div>`).join('');
   const byCat = {};
   CAPS.forEach(c => (byCat[c.category] = byCat[c.category]||[]).push(c));
   let html = '';
   for(const [cat, meta] of Object.entries(CATS)){
     const list = byCat[cat]||[]; if(!list.length) continue;
-    html += `<div class="cat-title"><span class="cat-dot" style="background:${meta.color}"></span>${esc(meta.name)} <small>${list.length} 项</small></div><div class="grid">`;
+    html += `<div class="cat-title"><span class="cat-dot" style="background:${meta.color}"></span>${esc(meta.name)} <small>${list.length} 项</small></div><div class="tile-grid">`;
     html += list.map(c => `
-      <div class="card" onclick="showCap('${c.id}')">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <b><span class="cat-dot" style="background:${meta.color}"></span>${esc(c.name)}</b>
-          <span class="tier ${c.tier}">${c.tier}</span>
-        </div>
-        <div class="muted" style="font-size:12px;margin:7px 0;min-height:36px">${esc(c.description.slice(0,46))}${c.description.length>46?'…':''}</div>
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <span class="price">${esc(c.unit_price)}</span>
-          ${c.source==='third_party'?'<span class="tag-tp">third_party</span>':`<span class="mono muted" style="font-size:11px">${c.id}</span>`}
+      <div class="tile ${c.status==='planned'?'planned':''}" onclick="showCap('${c.id}')">
+        ${c.status==='planned'?'<span class="tbadge">规划中</span>':c.source==='third_party'?'<span class="tbadge" style="color:#f0883e;border-color:#f0883e55">third_party</span>':''}
+        <div class="ticon">${c.icon||'⚙️'}</div>
+        <div class="tname" title="${esc(c.name)}">${esc(c.name)}</div>
+        <div class="tfoot">
+          <span class="cat-dot" style="background:${meta.color};width:7px;height:7px;margin:0"></span>
+          <span class="tprice">${esc(c.unit_price)}</span>
         </div>
       </div>`).join('');
     html += '</div>';
@@ -391,7 +402,7 @@ window.showCap = async id => {
   const rows = c.params.map(p=>`<tr><td class="mono">${p.name}</td><td>${p.type}</td><td>${p.required?'是':'否'}</td><td>${esc(p.description)}</td></tr>`).join('');
   const example = {}; c.params.forEach(p=>example[p.name]= p.default!==undefined?p.default:(p.enum?p.enum[0]:'...'));
   showModal(`
-    <h2><span class="cat-dot" style="background:${CATS[c.category].color}"></span>${esc(c.name)} <span class="tier ${c.tier}">${c.tier}</span></h2>
+    <h2>${c.icon||''} <span class="cat-dot" style="background:${CATS[c.category].color}"></span>${esc(c.name)} <span class="tier ${c.tier}">${c.tier}</span></h2>
     <p class="muted">${esc(c.description)}</p>
     <div class="kv"><b>REST</b><code>${esc(c.rest_endpoint)}</code></div>
     <div class="kv"><b>MCP Tool</b><code>${c.id}</code> · <b>内部 Agent</b>${esc(c.internal_agent)} · <b>价格</b><span class="price">${esc(c.unit_price)}</span></div>
@@ -399,9 +410,11 @@ window.showCap = async id => {
     <label>示例请求 JSON</label><pre>${esc(jfmt(example))}</pre>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
       <button onclick="hideModal()">关闭</button>
-      ${c.source==='third_party'
-        ? '<span class="muted" style="font-size:12px;align-self:center">第三方能力 · 由网络 Agent 反向调用，无需订阅</span>'
-        : `<button class="success" onclick="confirmSubscribe('cap','${c.id}','${esc(c.name)}','${esc(c.unit_price)}')">订阅 ${esc(c.unit_price)}</button>`}
+      ${c.status==='planned'
+        ? '<span class="muted" style="font-size:12px;align-self:center">🔜 规划中 · 即将上线，敬请期待</span>'
+        : c.source==='third_party'
+          ? '<span class="muted" style="font-size:12px;align-self:center">第三方能力 · 由网络 Agent 反向调用，无需订阅</span>'
+          : `<button class="success" onclick="confirmSubscribe('cap','${c.id}','${esc(c.name)}','${esc(c.unit_price)}')">订阅 ${esc(c.unit_price)}</button>`}
     </div>`);
 };
 
@@ -451,7 +464,7 @@ async function renderSubs(){
     const capCards = info.subscribed_capabilities.map(cid=>{
       const c = CAPS.find(x=>x.id===cid); if(!c) return '';
       const viaPkg = !info.direct_subscriptions.includes(cid);
-      return `<div class="card" style="cursor:default"><b>${esc(c.name)}</b> <span class="tier ${c.tier}">${c.tier}</span>
+      return `<div class="card" style="cursor:default"><b>${c.icon||''} ${esc(c.name)}</b> <span class="tier ${c.tier}">${c.tier}</span>
         <div class="muted" style="font-size:12px;margin:5px 0">${esc(c.description.slice(0,50))}…</div>
         <span class="mono muted" style="font-size:11px">${c.id}</span> ${viaPkg?'<span class="tag-tp" style="color:#39d2ff;border-color:#39d2ff55">套餐内</span>':''}</div>`;
     }).join('');
@@ -520,8 +533,11 @@ $('#api-send').onclick = async ()=>{
 /* ============ MCP ============ */
 async function renderMcpTab(){
   const sel = $('#mcp-tool-select');
-  sel.innerHTML = CAPS.map(c=>`<option value="${c.id}">${c.id} — ${esc(c.name)}</option>`).join('');
-  sel.onchange = ()=>{ const c=CAPS.find(x=>x.id===sel.value); $('#mcp-params').innerHTML = paramForm(c,'mcpp'); };
+  const subs = await mySubscribedCaps();
+  const ids = [...subs, ...CAPS.filter(c=>c.source==='third_party').map(c=>c.id)];
+  if(!ids.length){ sel.innerHTML = '<option value="">（请先订阅能力，工具箱为空）</option>'; $('#mcp-params').innerHTML=''; return; }
+  sel.innerHTML = ids.map(id=>{ const c=CAPS.find(x=>x.id===id); return c?`<option value="${id}">${c.id} — ${esc(c.name)}</option>`:''; }).join('');
+  sel.onchange = ()=>{ const c=CAPS.find(x=>x.id===sel.value); if(c) $('#mcp-params').innerHTML = paramForm(c,'mcpp'); };
   sel.onchange();
 }
 $('#mcp-list-btn').onclick = async ()=>{
@@ -533,7 +549,7 @@ $('#mcp-list-btn').onclick = async ()=>{
   }catch(e){ $('#mcp-resp').textContent = jfmt(e.data||{detail:'需要 API Key（请先订阅）'}); }
 };
 $('#mcp-call').onclick = async ()=>{
-  const id = $('#mcp-tool-select').value;
+  const id = $('#mcp-tool-select').value; if(!id) return toast('请先订阅能力', false);
   const c = CAPS.find(x=>x.id===id);
   const req = {jsonrpc:'2.0', id:2, method:'tools/call', params:{name:id, arguments:collectParams(c,'mcpp')}};
   $('#mcp-req').textContent = jfmt(req);
