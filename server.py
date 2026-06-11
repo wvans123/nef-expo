@@ -13,6 +13,8 @@ from skills import (CAPABILITIES, CAP_INDEX, PACKAGES, PKG_INDEX, CATEGORIES,
                     AGENTS, Capability, CapParam, agent_for_capability)
 from stubs import invoke_stub
 from intent import process_intent
+from registry import (THIRD_PARTY, THIRD_PARTY_META, REVERSE_CALLS,
+                      record_reverse_call)
 
 app = FastAPI(title="6G NEF Capability Exposure Platform", version="0.9.0-demo")
 
@@ -20,7 +22,6 @@ app = FastAPI(title="6G NEF Capability Exposure Platform", version="0.9.0-demo")
 API_KEYS = {}       # api_key -> {"account": str, "subscriptions": set, "packages": set, "created": ts}
 ACCOUNT_KEYS = {}   # account -> api_key
 PIPELINES = {}      # pipe_id -> pipeline def
-THIRD_PARTY = []    # 注册进来的外部 AF 能力
 
 
 # ===== 请求模型 =====
@@ -51,6 +52,7 @@ class RegisterAfReq(BaseModel):
     cap_type: str               # ai_model / tool / data_source
     description: str = ""
     endpoint: str
+    intent_keywords: list[str] = []
 
 
 # ===== 鉴权 =====
@@ -263,16 +265,19 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
 def register_af(req: RegisterAfReq, authorization: str = Header(None)):
     key, rec = _auth(authorization)
     cap_id = "tp_" + uuid.uuid4().hex[:8]
+    keywords = [k.strip() for k in req.intent_keywords if k.strip()] or [req.name]
     cap = Capability(
         id=cap_id, name=req.name, description=req.description or f"第三方能力（{req.cap_type}）",
         category="ecosystem", tier="basic",
         params=[CapParam("payload", "object", "透传给第三方端点的参数")],
-        intent_keywords=[req.name], unit_price="第三方计费", source="third_party",
+        intent_keywords=keywords, unit_price="第三方计费", source="third_party",
     )
     THIRD_PARTY.append(cap)
+    THIRD_PARTY_META[cap_id] = {"cap_type": req.cap_type, "endpoint": req.endpoint,
+                                "owner": rec["account"], "registered_ts": time.time()}
     return {"registration_id": cap_id, "name": req.name, "cap_type": req.cap_type,
             "endpoint": req.endpoint, "registered_by": rec["account"],
-            "state": "registered",
+            "intent_keywords": keywords, "state": "registered",
             "message": "能力已注册，已出现在能力超市（third_party 标记），可被网络 Agent 发现和调用"}
 
 
