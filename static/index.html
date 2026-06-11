@@ -40,7 +40,7 @@ label{font-size:12px;color:var(--muted);display:block;margin:8px 0 3px}
 main{padding:18px 20px;max-width:1280px;margin:0 auto}
 .tabpane{display:none}.tabpane.active{display:block}
 /* 通用 */
-.banner{background:linear-gradient(135deg,#161b22,#1c2333);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:18px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.banner{background:linear-gradient(135deg,#0a142e,#10224d);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:18px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
 .banner .stat b{font-size:20px;color:var(--accent)}
 .banner .stat span{font-size:12px;color:var(--muted);display:block}
 .hero-title{font-size:26px;font-weight:800;background:linear-gradient(90deg,#7cc7ff,#bc8cff);-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -52,7 +52,7 @@ main{padding:18px 20px;max-width:1280px;margin:0 auto}
 .cat-dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px;box-shadow:0 0 6px currentColor}
 .tier{font-size:11px;border-radius:10px;padding:1px 8px;border:1px solid}
 .tier.basic{color:var(--green);border-color:#3fb95055;background:#3fb95012}
-.tier.advanced{color:var(--accent);border-color:#58a6ff55;background:#58a6ff12}
+.tier.advanced{color:var(--accent);border-color:#39d2ff55;background:#39d2ff12}
 .tier.premium{color:var(--purple);border-color:#bc8cff55;background:#bc8cff12}
 .price{color:var(--orange);font-size:12px}
 .cat-title{margin:22px 0 10px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
@@ -83,7 +83,7 @@ th{background:var(--card);color:var(--muted)}
 @media(max-width:900px){#composer-wrap{grid-template-columns:1fr}}
 .pool,.pipe-zone{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px;min-height:90px}
 .pipe-zone{border-style:dashed;margin-top:10px}
-.pipe-zone.over{border-color:var(--accent);background:#58a6ff0d}
+.pipe-zone.over{border-color:var(--accent);background:#39d2ff0d}
 .pill{display:inline-flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:5px 12px;margin:4px;font-size:12px;cursor:grab;user-select:none}
 .pill.dragging{opacity:.4;transform:scale(.95)}
 .pill .x{color:var(--red);cursor:pointer;margin-left:4px}
@@ -449,7 +449,7 @@ async function renderSubs(){
       const viaPkg = !info.direct_subscriptions.includes(cid);
       return `<div class="card" style="cursor:default"><b>${esc(c.name)}</b> <span class="tier ${c.tier}">${c.tier}</span>
         <div class="muted" style="font-size:12px;margin:5px 0">${esc(c.description.slice(0,50))}…</div>
-        <span class="mono muted" style="font-size:11px">${c.id}</span> ${viaPkg?'<span class="tag-tp" style="color:#58a6ff;border-color:#58a6ff55">套餐内</span>':''}</div>`;
+        <span class="mono muted" style="font-size:11px">${c.id}</span> ${viaPkg?'<span class="tag-tp" style="color:#39d2ff;border-color:#39d2ff55">套餐内</span>':''}</div>`;
     }).join('');
     el.innerHTML = `
       <div class="banner">
