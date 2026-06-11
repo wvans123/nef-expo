@@ -14,13 +14,23 @@ def _id(prefix):
 
 
 def invoke_stub(cap_id: str, params: dict) -> dict:
-    fn = _STUBS.get(cap_id, _generic)
+    if cap_id.startswith("tp_"):
+        fn = _third_party
+    else:
+        fn = _STUBS.get(cap_id, _generic)
     result = fn(params or {})
     return {"status": "success", "capability": cap_id, "timestamp": _ts(), "result": result}
 
 
 def _generic(p):
     return {"task_id": _id("task"), "state": "completed", "echo_params": p}
+
+
+def _third_party(p):
+    return {"provided_by": "third_party_af",
+            "af_task_id": _id("af"),
+            "result": "AF 能力执行成功（由第三方端点返回，模拟）",
+            "echo_payload": p}
 
 
 def _target_detection(p):

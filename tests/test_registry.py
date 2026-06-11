@@ -29,3 +29,11 @@ def test_record_reverse_call():
     assert rec["fee"] == 0.05
     assert 20 <= rec["latency_ms"] <= 80
     assert registry.REVERSE_CALLS["tp_x"] == [rec]
+
+
+def test_third_party_stub():
+    from stubs import invoke_stub
+    out = invoke_stub("tp_abc12345", {"payload": {"image": "x.jpg"}})
+    assert out["status"] == "success"
+    assert out["result"]["provided_by"] == "third_party_af"
+    assert out["result"]["echo_payload"] == {"payload": {"image": "x.jpg"}}
