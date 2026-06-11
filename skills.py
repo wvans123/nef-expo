@@ -153,7 +153,7 @@ CAPABILITIES = [
             CapParam("cpu_cores", "integer", "所需 CPU 核数", default=4),
             CapParam("memory_gb", "integer", "所需内存（GB）", default=8),
         ],
-        intent_keywords=["卸载", "转码", "渲染", "部署", "边缘计算", "算力", "云端处理"],
+        intent_keywords=["卸载", "转码", "部署", "边缘计算", "算力", "云端处理"],
         unit_price="29.9/月",
     ),
     Capability(
