@@ -94,6 +94,19 @@ th{background:var(--card);color:var(--muted)}
 .copy{cursor:pointer;color:var(--accent);font-size:11px}
 .kv{font-size:12px;margin:3px 0}.kv b{color:var(--muted);font-weight:400;margin-right:6px}
 .ok{color:var(--green)}.err{color:var(--red)}
+/* AF 反向调用 */
+.afflow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px}
+.afflow .afnode{border:1px solid var(--border);border-radius:8px;padding:5px 12px;background:var(--card);transition:.3s}
+.afflow .afnode.af-end{border-color:#39ffb088;color:var(--green)}
+.afflow .afnode.nef{border-color:#ffc85788;color:var(--orange)}
+.afflow .afnode.lit{box-shadow:0 0 14px #39d2ff88;border-color:var(--accent);color:var(--accent)}
+.afflow .afarrow{color:var(--muted);font-size:11px;text-align:center}
+.afflow .afarrow small{display:block;font-size:9px}
+.tp-card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--green);border-radius:8px;padding:12px 14px;margin:10px 0}
+.tp-card .badge-found{font-size:10px;color:var(--green);border:1px solid #39ffb066;border-radius:8px;padding:0 6px;margin-left:6px}
+.tp-card .badge-wait{font-size:10px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:0 6px;margin-left:6px}
+.tp-log{font-size:11px;background:#081227;border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-top:8px;max-height:180px;overflow:auto}
+.tp-log .row{margin:3px 0}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;border-radius:8px;padding:9px 18px;z-index:200;display:none}
 </style>
 </head>
@@ -225,17 +238,36 @@ th{background:var(--card);color:var(--muted)}
 
   <!-- Tab 8 AF 注册 -->
   <div class="tabpane" id="pane-afreg">
-    <h3 class="sec">AF 能力注册（双向开放）</h3>
-    <p class="muted" style="max-width:680px;margin-bottom:14px">NEF 不仅将网络能力对外开放，外部 AF 也可以把自己的能力（AI 模型 / 工具 / 数据源）注册进网络，供网络内部 Agent 发现和调用。注册成功后将出现在能力超市中（third_party 标记）。</p>
-    <div style="max-width:480px">
-      <label>能力名称</label><input id="af-name" placeholder="如：工业缺陷识别模型">
-      <label>类型</label>
-      <select id="af-type"><option value="ai_model">ai_model — AI 模型</option><option value="tool">tool — 工具</option><option value="data_source">data_source — 数据源</option></select>
-      <label>描述</label><textarea id="af-desc" rows="2" placeholder="能力说明"></textarea>
-      <label>端点 URL</label><input id="af-endpoint" placeholder="https://your-af.example.com/api/capability">
-      <button class="primary" id="af-submit" style="margin-top:14px">注册到 NEF</button>
+    <h3 class="sec">AF 能力注册 · 双向开放</h3>
+    <p class="muted" style="max-width:760px;margin-bottom:14px">NEF 不仅将网络能力对外开放，外部 AF 也可以把自己的能力（AI 模型 / 工具 / 数据源）注册进网络。注册后能力上架能力超市，被网络内部 Agent <b>发现并反向调用</b> —— 调用经过 NEF 出向网关完成鉴权、计费与审计。</p>
+    <div class="afflow" id="af-flow">
+      <span class="afnode af-end" data-fn="0">AF 能力</span>
+      <span class="afarrow">─注册─▶</span>
+      <span class="afnode nef" data-fn="1">NEF 能力超市</span>
+      <span class="afarrow">─发现─▶</span>
+      <span class="afnode" data-fn="2">Planning Agent</span>
+      <span class="afarrow">─编排─▶</span>
+      <span class="afnode nef" data-fn="3">NEF 出向网关<small>鉴权·计费·审计</small></span>
+      <span class="afarrow" style="color:var(--green)">─反向调用─▶</span>
+      <span class="afnode af-end" data-fn="4">AF Endpoint</span>
     </div>
-    <div id="af-result" style="margin-top:14px"></div>
+    <div style="display:grid;grid-template-columns:380px 1fr;gap:16px">
+      <div>
+        <h3 class="sec" style="margin-top:0">① 注册我的能力</h3>
+        <label>能力名称</label><input id="af-name" placeholder="如：工业缺陷识别模型">
+        <label>类型</label>
+        <select id="af-type"><option value="ai_model">ai_model — AI 模型</option><option value="tool">tool — 工具</option><option value="data_source">data_source — 数据源</option></select>
+        <label>描述</label><textarea id="af-desc" rows="2" placeholder="能力说明"></textarea>
+        <label>Intent 关键词（逗号分隔，供网络语义调度命中）</label><input id="af-keywords" placeholder="如：质检, 缺陷">
+        <label>端点 URL</label><input id="af-endpoint" placeholder="https://your-af.example.com/api/capability">
+        <button class="primary" id="af-submit" style="margin-top:14px;width:100%">注册到 NEF</button>
+        <div id="af-result" style="margin-top:14px"></div>
+      </div>
+      <div>
+        <h3 class="sec" style="margin-top:0">② 我注册的能力 · 被网络调用看板</h3>
+        <div id="af-board"><p class="muted">--</p></div>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -291,11 +323,13 @@ $$('#tabs button').forEach(b => b.onclick = () => {
   $$('.tabpane').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
   $('#pane-'+b.dataset.tab).classList.add('active');
+  if(afPollTimer){ clearInterval(afPollTimer); afPollTimer = null; }
   if(b.dataset.tab==='subs') renderSubs();
   if(b.dataset.tab==='api') renderApiTab();
   if(b.dataset.tab==='mcp') renderMcpTab();
   if(b.dataset.tab==='composer') renderComposer();
   if(b.dataset.tab==='skill') loadSkill();
+  if(b.dataset.tab==='afreg'){ loadAfBoard(); afPollTimer = setInterval(loadAfBoard, 3000); }
 });
 
 /* ============ 弹窗 ============ */
@@ -674,18 +708,72 @@ window.runPipe = async id=>{
   }catch(e){ $('#pipe-run-result').textContent = jfmt(e.data||{}); }
 };
 
-/* ============ AF 注册 ============ */
+/* ============ AF 注册 · 反向调用 ============ */
+let afPollTimer = null, afTotalCalls = -1;
+
+function lightFlow(){
+  const nodes = $$('#af-flow .afnode');
+  nodes.forEach((n,i)=>{
+    setTimeout(()=>n.classList.add('lit'), i*220);
+    setTimeout(()=>n.classList.remove('lit'), i*220+1400);
+  });
+}
+
+function fmtTs(ts){ const d=new Date(ts*1000); return d.toTimeString().slice(0,8); }
+
+async function loadAfBoard(){
+  const el = $('#af-board');
+  if(!apiKey()){ el.innerHTML = '<p class="muted">请先注册账号并订阅任意能力获得 API Key。</p>'; return; }
+  try{
+    const res = await api('/api/v1/third-party/my-calls');
+    const total = res.capabilities.reduce((s,c)=>s+c.call_count,0);
+    if(afTotalCalls >= 0 && total > afTotalCalls) lightFlow();   // 轮询发现新调用 → 点亮链路
+    afTotalCalls = total;
+    if(!res.capabilities.length){
+      el.innerHTML = '<p class="muted">尚未注册任何能力。注册你的第一个能力，让网络发现并调用它 →</p>';
+      return;
+    }
+    el.innerHTML = res.capabilities.map(c=>`
+      <div class="tp-card">
+        <b>${esc(c.name)}</b>
+        ${c.discovered?'<span class="badge-found">✓ 已被网络发现</span>':'<span class="badge-wait">registered · 等待网络调用</span>'}
+        <span class="mono muted" style="font-size:11px;margin-left:6px">${c.id}</span>
+        <div class="kv" style="margin-top:6px">
+          <b>被调用</b>${c.call_count} 次
+          <b style="margin-left:12px">最近</b>${c.last_call_ts?fmtTs(c.last_call_ts):'--'}
+          <b style="margin-left:12px">累计收益</b><span class="price">¥${c.total_fee.toFixed(2)}</span>
+        </div>
+        <button class="primary" style="margin-top:8px" onclick="simCall('${c.id}')">⚡ 模拟网络调用</button>
+        ${c.recent_calls.length?`<div class="tp-log">${c.recent_calls.map(r=>`
+          <div class="row">${fmtTs(r.ts)} <b style="color:${r.agent_color}">${esc(r.caller_agent)}</b>
+          → 你的能力 <span class="ok">✓ ${r.latency_ms}ms</span>
+          · ${r.trigger==='intent'?'Intent「'+esc(r.trigger_detail)+'」':'手动模拟'} · 计费 +${r.fee}</div>`).join('')}</div>`:''}
+      </div>`).join('');
+  }catch(e){ /* 轮询失败静默，保留上次内容，不打断演示 */ }
+}
+
+window.simCall = async id=>{
+  try{
+    await api(`/api/v1/third-party/${id}/simulate-call`,{method:'POST'});
+    lightFlow();
+    await loadAfBoard();
+    toast('网络已调用你的能力');
+  }catch(e){ toast(e.data?.detail||'调用失败', false); }
+};
+
 $('#af-submit').onclick = async ()=>{
   if(!apiKey()) return toast('注册 AF 能力需要 API Key，请先订阅任意能力', false);
+  const kw = $('#af-keywords').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
   const body = {name:$('#af-name').value.trim(), cap_type:$('#af-type').value,
-                description:$('#af-desc').value.trim(), endpoint:$('#af-endpoint').value.trim()};
+                description:$('#af-desc').value.trim(), endpoint:$('#af-endpoint').value.trim(),
+                intent_keywords: kw};
   if(!body.name || !body.endpoint) return toast('名称和端点必填', false);
   try{
     const res = await api('/api/v1/register-af',{method:'POST',body:JSON.stringify(body)});
     $('#af-result').innerHTML = `<div class="agent-block" style="border-left-color:var(--green)">
-      <b class="ok">✓ 注册成功</b><pre style="margin-top:8px">${esc(jfmt(res))}</pre>
-      <p class="muted" style="font-size:12px">该能力已出现在能力超市（生态服务分类，third_party 标记）</p></div>`;
-    loadMarket();
+      <b class="ok">✓ 注册成功</b> <span class="mono muted" style="font-size:11px">${res.registration_id}</span>
+      <p class="muted" style="font-size:12px;margin-top:4px">已上架能力超市 · Intent 关键词：${res.intent_keywords.map(esc).join('、')}</p></div>`;
+    loadMarket(); loadAfBoard();
   }catch(e){ $('#af-result').innerHTML = `<p class="err">${esc(jfmt(e.data||{}))}</p>`; }
 };
 
