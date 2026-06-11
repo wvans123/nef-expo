@@ -107,6 +107,7 @@ th{background:var(--card);color:var(--muted)}
 .tp-card .badge-wait{font-size:10px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:0 6px;margin-left:6px}
 .tp-log{font-size:11px;background:#081227;border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-top:8px;max-height:180px;overflow:auto}
 .tp-log .row{margin:3px 0}
+.rev-badge{font-size:10px;color:var(--green);border:1px solid #39ffb066;border-radius:8px;padding:0 6px;margin-left:6px}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;border-radius:8px;padding:9px 18px;z-index:200;display:none}
 </style>
 </head>
@@ -572,7 +573,8 @@ function renderIntentResult(res){
       ${g.list.map(ex=>`
         <div style="margin:8px 0">
           <b>Step ${ex.step} · ${esc(ex.capability_name)}</b> <span class="mono muted" style="font-size:11px">${ex.capability}</span>
-          <span class="muted" style="font-size:11px"> · NF Tools: ${ex.nf_tools.join(', ')}</span>
+          ${ex.source==='third_party'?'<span class="rev-badge">↩ 反向调用 AF 能力</span>':''}
+          <span class="muted" style="font-size:11px"> · ${ex.source==='third_party'?'经 NEF 出向网关':'NF Tools: '+ex.nf_tools.join(', ')}</span>
           <pre style="margin-top:5px;max-height:200px">${esc(jfmt(ex.result))}</pre>
         </div>`).join('')}
     </div>`;
