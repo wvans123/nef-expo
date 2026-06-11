@@ -232,6 +232,61 @@ def _identity_service(p):
             "issued_at": _ts(), "state": "active"}
 
 
+def _sensing_fusion(p):
+    srcs = p.get("sources") or ["3gpp_radio", "camera", "lidar"]
+    return {"fusion_id": _id("fus"), "area": p.get("area", "area_default"),
+            "sources_fused": srcs, "fusion_mode": p.get("fusion_mode", "realtime"),
+            "objects": [{"object_id": _id("obj"), "type": random.choice(["person", "vehicle", "robot_dog"]),
+                         "confidence_single_source": round(random.uniform(0.55, 0.75), 2),
+                         "confidence_fused": round(random.uniform(0.93, 0.99), 2)}
+                        for _ in range(random.randint(1, 3))],
+            "visibility_condition": random.choice(["fog", "night", "rain", "clear"]),
+            "all_weather_capable": True}
+
+
+def _traffic_flow_sensing(p):
+    return {"sensing_id": _id("tfs"), "road_id": p.get("road_id", "road_001"),
+            "direction": p.get("direction", "both"),
+            "vehicle_count_per_min": random.randint(20, 180),
+            "avg_speed_kmh": random.randint(15, 80),
+            "congestion_level": random.choice(["free", "moderate", "congested"]),
+            "interval_min": p.get("interval_min", 5)}
+
+
+def _render_offload(p):
+    return {"render_session": _id("rnd"), "scene_ref": p.get("scene_ref", "scene_demo"),
+            "assigned_gpu_node": f"edge-gpu-{random.randint(1, 6):02d}",
+            "resolution": p.get("resolution", "4k"),
+            "actual_fps": random.randint(int(p.get("target_fps", 90) or 90) - 5, int(p.get("target_fps", 90) or 90) + 3),
+            "motion_to_photon_ms": random.randint(8, 18), "state": "streaming"}
+
+
+def _compute_qos(p):
+    return {"compute_policy_id": _id("cqos"), "task_id": p.get("task_id", "job_demo"),
+            "applied": {"cpu_priority": p.get("cpu_priority", "high"),
+                        "gpu_share_pct": p.get("gpu_share_pct", 50),
+                        "max_jitter_ms": p.get("max_jitter_ms", 10)},
+            "linked_network_qos": "可与通信 QoS 策略联动（joint_assurance=true）",
+            "state": "active"}
+
+
+def _geofencing(p):
+    return {"fence_id": _id("gf"), "device_id": p.get("device_id", "imsi-460001234567890"),
+            "fence_area": p.get("fence_area", "campus_zone_a"),
+            "trigger": p.get("trigger", "both"), "state": "armed",
+            "notify_via": "event_subscription"}
+
+
+def _traffic_forecast(p):
+    base = random.randint(60, 150)
+    return {"forecast_id": _id("tfc"), "road_id": p.get("road_id", "road_001"),
+            "horizon_min": p.get("horizon_min", 30),
+            "predicted_flow": [{"t_offset_min": i * 10, "vehicles_per_min": base + random.randint(-20, 40)}
+                               for i in range(1, (int(p.get("horizon_min", 30) or 30) // 10) + 1)],
+            "congestion_probability": round(random.uniform(0.1, 0.9), 2),
+            "model": "nwdaf-traffic-lstm-v3"}
+
+
 _STUBS = {
     "target_detection": _target_detection,
     "target_tracking": _target_tracking,
@@ -250,4 +305,10 @@ _STUBS = {
     "security_check": _security_check,
     "capability_register": _capability_register,
     "identity_service": _identity_service,
+    "sensing_fusion": _sensing_fusion,
+    "traffic_flow_sensing": _traffic_flow_sensing,
+    "render_offload": _render_offload,
+    "compute_qos": _compute_qos,
+    "geofencing": _geofencing,
+    "traffic_forecast": _traffic_forecast,
 }
