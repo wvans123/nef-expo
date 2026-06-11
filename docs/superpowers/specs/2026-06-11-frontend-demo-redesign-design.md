@@ -96,3 +96,35 @@ AF 能力 ─注册─▶ NEF 能力超市 ─发现─▶ Planning Agent ─编
 
 - 新增后端接口写最小 pytest 冒烟测试（subscribe → register-af → simulate-call → my-calls → intent 命中第三方能力）。
 - 前端启动后按演示动线人工过一遍：超市 hero → 订阅 → API/MCP/Intent → Skill → 编排 → AF 注册+反向调用（手动 + Intent 联动两条路径）。
+
+---
+
+# v2 增量（2026-06-11 用户反馈后）
+
+设计总原则：一切从"运营商伙伴看演示 / AF 开发者第一视角"出发；review 子代理只用于最重要改动。
+
+## v2-1. 能力超市 → 缩略磁贴墙
+
+- 能力卡片压缩为小磁贴（~150px：emoji 图标 + 名称 + tier 色点 + 小字价格），一屏 30+，分类标题保留，点击磁贴弹详情弹窗（复用现有弹窗）。
+- 能力新增 `status` 字段（available / planned）与 `icon` 字段。planned 磁贴标灰（降透明度 + 「规划中」角标），详情显示"即将上线"，不可订阅/调用/参与 Intent 匹配/出现在 MCP 列表。
+
+## v2-2. 能力清单 17 → 32
+
+新增可用（6）：sensing_fusion 多源感知融合、traffic_flow_sensing 车流量感知、render_offload 云渲染卸载、compute_qos 算力 QoS 保障、geofencing 电子围栏、traffic_forecast 车流量预测分析。
+新增规划中（9，标灰）：vital_sign_detection、gesture_recognition、edge_agent_hosting、federated_learning、multipath_boost、deterministic_latency、trajectory_predict、digital_twin_feed、revenue_share。
+
+## v2-3. 场景套餐 5 → 8（对齐测试团队场景）
+
+直播计算卸载（计算卸载+算力QoS+通信QoS+诊断，0卡顿换脸=双 QoS 联动）/ 机械臂×机器狗协同 / 多智能体具身交互（AR眼镜×机器狗）/ 机器狗巡检升级（含感知融合：3GPP+非3GPP 数据融合）/ 城市车流量预测 / XR 渲染卸载 / 无人机识别与追踪（弱算力终端借网络算力）/ 智能工厂（保留）。旧 uav_mgmt、livestream、xr_collab_pkg 被新套餐取代。
+
+## v2-4. MCP 只列已订阅
+
+`tools/list` 仅返回当前 API Key 已订阅的可用能力 + 第三方注册能力；前端 MCP 下拉同步。
+
+## v2-5. Intent baseline
+
+链路固定为：NEF 受理（鉴权）→ 意图转发至网络内部 Planning Agent → Planning Agent 语义解析、识别 N 个业务 → 业务编排分派各业务 Agent（一个意图可涉及多业务）→ 业务 Agent 调 NF Tool 执行 → NEF 聚合返回 AF。后端 pipeline 阶段文案与前端流程图按此改写，Planning Agent 节点紫色突出。
+
+## v2-6. 业务粒度原则
+
+每个能力 = AF 视角一次有意义的业务动作；跨能力"联动"（如双 QoS）在套餐叙事层表达，不做巨型能力。
