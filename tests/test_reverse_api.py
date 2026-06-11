@@ -138,3 +138,27 @@ def test_register_af_blank_name_422():
                     json={"name": "  ", "cap_type": "tool", "endpoint": "https://x.com"},
                     headers=_hdr(key))
     assert r.status_code == 422
+
+
+def test_planned_cap_blocked():
+    r = client.post("/api/v1/subscribe",
+                    json={"account": "p_tester", "capability_ids": ["vital_sign_detection"], "package_ids": []})
+    assert r.status_code == 403
+    key = _key("p_tester2")
+    r = client.post("/api/v1/capabilities/vital_sign_detection/invoke", json={"area": "a"}, headers=_hdr(key))
+    assert r.status_code == 403
+
+
+def test_mcp_list_only_subscribed():
+    key = _key("mcp_tester")   # 订阅了 network_diagnosis
+    r = client.post("/api/v1/mcp/tools/list", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+                    headers=_hdr(key))
+    names = [t["name"] for t in r.json()["result"]["tools"]]
+    assert names == ["network_diagnosis"]
+
+
+def test_intent_pipeline_baseline_stages():
+    key = _key()
+    r = client.post("/api/v1/intent", json={"text": "帮我诊断一下网络"}, headers=_hdr(key))
+    stages = [s["stage"] for s in r.json()["pipeline"]]
+    assert stages == ["nef_accept", "forward_planning", "semantic_parse", "skill_match", "agent_dispatch", "tool_exec", "aggregate"]

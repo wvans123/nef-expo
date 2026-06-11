@@ -101,6 +101,8 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
     cap = CAP_INDEX.get(cap_id) or next((c for c in THIRD_PARTY if c.id == cap_id), None)
     if not cap:
         raise HTTPException(404, f"能力 {cap_id} 不存在")
+    if cap.status == "planned":
+        raise HTTPException(403, f"能力 {cap_id} 规划中，暂未开放调用")
     if cap_id not in _subscribed_caps(rec) and cap.source != "third_party":
         raise HTTPException(403, f"账号 {rec['account']} 未订阅能力 {cap_id}")
     try:
@@ -143,6 +145,9 @@ def subscribe(req: SubscribeReq):
     bad += [p for p in req.package_ids if p not in PKG_INDEX]
     if bad:
         raise HTTPException(404, f"不存在: {', '.join(bad)}")
+    planned = [c for c in req.capability_ids if CAP_INDEX[c].status == "planned"]
+    if planned:
+        raise HTTPException(403, f"能力规划中，暂未开放订阅: {', '.join(planned)}")
     key = ACCOUNT_KEYS.get(req.account)
     if not key:
         key = "nef_" + secrets.token_hex(16)
@@ -239,8 +244,11 @@ def _demo_value(p: CapParam):
 # ===== MCP 模拟 =====
 @app.post("/api/v1/mcp/tools/list")
 def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
-    _auth(authorization)
-    tools = [c.mcp_tool() for c in CAPABILITIES] + [c.mcp_tool() for c in THIRD_PARTY]
+    key, rec = _auth(authorization)
+    subscribed = _subscribed_caps(rec)
+    tools = [c.mcp_tool() for c in CAPABILITIES
+             if c.id in subscribed and c.status == "available"]
+    tools += [c.mcp_tool() for c in THIRD_PARTY]
     return {"jsonrpc": "2.0", "id": (req.id if req else 1), "result": {"tools": tools}}
 
 
