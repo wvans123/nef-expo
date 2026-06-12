@@ -670,7 +670,10 @@ async function sendApi(confirmPay){
   $('#api-req').textContent = `POST /api/v1/capabilities/${id}/invoke\nAuthorization: Bearer ${apiKey().slice(0,20)}…\nContent-Type: application/json\n\n` + jfmt(params);
   try{
     const res = await api(`/api/v1/capabilities/${id}/invoke`, {method:'POST', body:JSON.stringify(params)});
-    $('#api-resp').innerHTML = `<span class="ok">200 OK</span>${res.nef_auth?`  <span class="ok">🔐 NEF 已鉴权 · 账号 ${esc(res.nef_auth.account)} · ${esc(res.nef_auth.scope)} · 审计 ${esc(res.nef_auth.request_id)}</span>`:''}${res.billing?`\n<span style="color:var(--orange)">💳 ${esc(res.billing.message)}</span>`:''}\n` + esc(jfmt(res));
+    const chips = res.metrics ? Object.entries(res.metrics).slice(0,5).map(([k,v])=>`<span class="pill" style="cursor:default">${esc(k)}: <b>${esc(String(v))}</b></span>`).join('') : '';
+    $('#api-resp').innerHTML = `<span class="ok">200 OK</span>${res.nef_auth?`  <span class="ok">🔐 NEF 已鉴权 · 账号 ${esc(res.nef_auth.account)} · ${esc(res.nef_auth.scope)} · 审计 ${esc(res.nef_auth.request_id)}</span>`:''}${res.billing?`\n<span style="color:var(--orange)">💳 ${esc(res.billing.message)}</span>`:''}\n` +
+      (res.summary?`<span style="font-size:14px;color:var(--green)">✓ ${esc(res.summary)}</span>\n${chips}\n`:'') +
+      `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:12px">原始响应 JSON（点击展开）</summary>${esc(jfmt(res))}</details>`;
     apiChain.push({id, name:c.name, ok:true}); renderApiChain();
   }catch(e){
     if(e.status===402 && e.data && e.data.detail && e.data.detail.options){
@@ -1147,7 +1150,7 @@ async function termRequest(text){
       }
       tNef(`鉴权通过 ✓ 账号 ${esc(body.nef_auth.account)} · ${esc(body.nef_auth.scope)} · 审计 ${esc(body.nef_auth.request_id)}`);
       if(body.billing) tprint('💳 '+esc(body.billing.message), 'tl-pay');
-      tprint(`<span class="tl-ok">✓ ${esc(cap.name)} 执行成功</span> <span class="muted" style="font-size:11px">${esc(JSON.stringify(body.result||{}).slice(0,140))}…</span>`);
+      tprint(`<span class="tl-ok">✓ ${esc(body.summary||cap.name+' 执行成功')}</span>`+(body.metrics&&Object.keys(body.metrics).length?` <span class="muted" style="font-size:11px">${esc(Object.entries(body.metrics).slice(0,3).map(([k,v])=>k+'='+v).join(' · '))}</span>`:''));
       results.push(cap.name);
     }catch(e){ tNef('<span class="tl-err">调用失败：'+esc((e.data&&e.data.detail&&(e.data.detail.message||e.data.detail))||'')+'</span>'); }
   }

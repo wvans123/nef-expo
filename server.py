@@ -157,6 +157,28 @@ def _bill_per_call(rec, cap, request_id):
     return price
 
 
+def _result_envelope(cap, payload: dict) -> dict:
+    """NEF 标准结果信封：在原始业务数据之上加一行业务结论(summary)与关键指标(metrics)。
+    真实对接时 summary/metrics 由业务侧按 schema 返回，NEF 透传；Demo 中由通用规则生成。"""
+    res = payload.get("result", {}) if isinstance(payload.get("result"), dict) else {}
+    metrics, parts = {}, []
+    for k, v in res.items():
+        if isinstance(v, list) and v:
+            parts.append(f"{k.replace('_', ' ')} {len(v)} 项")
+            metrics[k + "_count"] = len(v)
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            if k.endswith("_ms"):
+                metrics[k] = v
+                parts.append(f"{k} {v}ms")
+            elif k.endswith(("_score", "_rate", "_mbps", "_pct")):
+                metrics[k] = v
+        elif isinstance(v, str) and k in ("served_at", "node", "state", "qos_class", "slice_id"):
+            metrics[k] = v
+    payload["summary"] = f"「{cap.name}」执行成功" + ("：" + "、".join(parts[:3]) if parts else "")
+    payload["metrics"] = metrics
+    return payload
+
+
 def _subscribed_caps(rec) -> set:
     caps = set(rec["subscriptions"])
     for pid in rec["packages"]:
@@ -217,7 +239,7 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
     missing = [p.name for p in cap.params if p.required and p.name not in params]
     if missing:
         raise HTTPException(422, f"缺少必填参数: {', '.join(missing)}")
-    result = invoke_stub(cap_id, params)
+    result = _result_envelope(cap, invoke_stub(cap_id, params))
     result["nef_auth"] = _auth_stamp(key, rec, "capabilities:invoke")
     if per_call_fee is not None:
         result["billing"] = {"mode": "per_call", "charged": per_call_fee,
@@ -545,7 +567,7 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
                                "isError": False, "payment_required": True}}
         stamp = _auth_stamp(key, rec, "mcp:tools")
         per_call_fee = _bill_per_call(rec, cap, stamp["request_id"])
-    result = invoke_stub(name, args)
+    result = _result_envelope(cap, invoke_stub(name, args))
     result["nef_auth"] = _auth_stamp(key, rec, "mcp:tools")
     if per_call_fee is not None:
         result["billing"] = {"mode": "per_call", "charged": per_call_fee,
