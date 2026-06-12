@@ -172,7 +172,7 @@ th{background:var(--card);color:var(--muted)}
   <button data-tab="market" class="active">能力超市</button>
   <button data-tab="subs">订阅与鉴权</button>
   <button data-tab="api">API 直调</button>
-  <button data-tab="mcp">Agent 接入 · MCP</button>
+  <button data-tab="mcp">MCP 接口</button>
   <button data-tab="intent">意图受理</button>
   <button data-tab="skill">场景蓝图</button>
   <button data-tab="composer">自助编排</button>
@@ -213,7 +213,7 @@ th{background:var(--card);color:var(--muted)}
 
   <!-- Tab 4 MCP -->
   <div class="tabpane" id="pane-mcp">
-    <h3 class="sec">Agent 接入 · MCP <span class="muted" style="font-weight:400;font-size:12px">— AF 的 AI Agent 直接挂载 NEF 工具箱：tool 级精细调用 + scenario 级一键调用</span></h3>
+    <h3 class="sec">MCP 接口 <span class="muted" style="font-weight:400;font-size:12px">— 类 MCP（JSON-RPC）调用：tool / scenario / pipeline 三种粒度；NEF 同时提供标准 /mcp 端点，可被 Claude Code 等外部 AI Agent 直连</span></h3>
     <div style="display:grid;grid-template-columns:340px 1fr;gap:16px">
       <div>
         <button id="mcp-list-btn" style="width:100%">tools/list — 列出所有 Tool</button>
@@ -312,7 +312,7 @@ th{background:var(--card);color:var(--muted)}
         <label>类型</label>
         <select id="af-type"><option value="ai_model">ai_model — AI 模型</option><option value="tool">tool — 工具</option><option value="data_source">data_source — 数据源</option></select>
         <label>描述</label><textarea id="af-desc" rows="2" placeholder="能力说明"></textarea>
-        <label>能力发现标签（逗号分隔，供网络内部 Agent 建立能力目录）</label><input id="af-keywords" placeholder="如：质检, 缺陷">
+        <label>定价（其他 AF 订阅/网络调用按此计费分成）</label><input id="af-price" placeholder="如：0.5/次" value="0.5/次">
         <label>端点 URL</label><input id="af-endpoint" placeholder="https://your-af.example.com/api/capability">
         <button class="primary" id="af-submit" style="margin-top:14px;width:100%">注册到 NEF</button>
         <div id="af-result" style="margin-top:14px"></div>
@@ -535,6 +535,14 @@ async function renderSubs(){
         <div class="stat"><span>估算月费用</span><b>¥${info.estimated_monthly_cost}</b></div>
         <div class="stat"><span>按次消费（${info.per_call_charges?info.per_call_charges.count:0} 次）</span><b style="color:var(--orange)">¥${info.per_call_charges?info.per_call_charges.total:0}</b></div>
       </div>
+      <div class="agent-block" style="border-left-color:var(--purple)">
+        <b style="color:var(--purple)">账号等级：${esc((info.plan||'free').toUpperCase())}</b>
+        <span class="muted" style="font-size:12px;margin-left:8px">${info.plan==='max'?'basic + advanced 层级免订阅直用':info.plan==='pro'?'basic 层级免订阅直用':'所有能力需订阅或按次付费'}</span>
+        <div style="margin-top:6px">
+          ${['free','pro','max'].map(pl=>`<button style="font-size:11px;padding:2px 10px;margin-right:6px${info.plan===pl?';border-color:var(--purple);color:var(--purple)':''}" onclick="changePlan('${pl}')">${pl.toUpperCase()}${pl==='pro'?' ¥199/月':pl==='max'?' ¥499/月':''}</button>`).join('')}
+          <span class="muted" style="font-size:11px">当前免订阅可用能力 ${ (info.entitled_capabilities||[]).length } 项</span>
+        </div>
+      </div>
       <div class="agent-block" style="border-left-color:var(--green)">
         <b class="ok">🔐 NEF 鉴权流程（每次调用都会执行）</b>
         <div class="auth-grid">${(info.authentication.checks||[]).map(c=>`
@@ -559,6 +567,11 @@ async function renderSubs(){
   }
 }
 window.toast = toast;
+async function changePlan(pl){
+  try{ const r = await api('/api/v1/account/plan',{method:'POST',body:JSON.stringify({plan:pl})}); toast(r.message); renderSubs(); }
+  catch(e){ toast('切换失败', false); }
+}
+window.changePlan = changePlan;
 
 /* ============ 参数表单生成 ============ */
 function paramForm(cap, prefix){
@@ -583,22 +596,28 @@ function collectParams(cap, prefix){
   });
   return out;
 }
-async function mySubscribedCaps(){
-  if(!apiKey()) return [];
-  try{ const info = await api('/api/v1/auth/info'); return info.subscribed_capabilities; }
-  catch(e){ return []; }
+async function myAuthInfo(){
+  if(!apiKey()) return null;
+  try{ return await api('/api/v1/auth/info'); }catch(e){ return null; }
 }
+async function mySubscribedCaps(){ const i=await myAuthInfo(); return i?i.subscribed_capabilities:[]; }
+async function myEntitledCaps(){ const i=await myAuthInfo(); return i?(i.entitled_capabilities||i.subscribed_capabilities):[]; }
 
 /* ============ API 调试 ============ */
 async function renderApiTab(){
-  const subs = await mySubscribedCaps();
+  const entitled = await myEntitledCaps();
   const sel = $('#api-cap-select');
   if(!apiKey()){ sel.innerHTML = '<option value="">（请先在顶栏注册账号签发 API Key）</option>'; $('#api-params').innerHTML=''; $('#api-endpoint').textContent=''; return; }
+  let myPipes = [];
+  try{ myPipes = (await api('/api/v1/pipelines')).pipelines; }catch(e){}
   const avail = CAPS.filter(c=>c.status==='available'&&c.source!=='third_party');
-  const subbed = avail.filter(c=>subs.includes(c.id)), unsub = avail.filter(c=>!subs.includes(c.id));
-  sel.innerHTML = subbed.map(c=>`<option value="${c.id}">✓ ${esc(c.name)} (${c.id})</option>`).join('') +
-    unsub.map(c=>`<option value="${c.id}">💳 ${esc(c.name)} (${c.id}) — 未订阅</option>`).join('');
-  sel.onchange = ()=>{ const c=CAPS.find(x=>x.id===sel.value); $('#api-endpoint').textContent = 'POST /api/v1/capabilities/'+c.id+'/invoke'; $('#api-params').innerHTML = paramForm(c,'apip'); };
+  const ent = avail.filter(c=>entitled.includes(c.id)), unsub = avail.filter(c=>!entitled.includes(c.id));
+  sel.innerHTML = myPipes.map(pp=>`<option value="pipe:${pp.id}">⛓️ Pipeline「${esc(pp.name)}」(${pp.steps.length} 步)</option>`).join('') +
+    ent.map(c=>`<option value="${c.id}">✓ ${esc(c.name)} (${c.id})</option>`).join('') +
+    unsub.map(c=>`<option value="${c.id}">💳 ${esc(c.name)} (${c.id}) — 未授权·可按次</option>`).join('');
+  sel.onchange = ()=>{
+    if(sel.value.startsWith('pipe:')){ $('#api-endpoint').textContent = 'POST /api/v1/pipelines/'+sel.value.slice(5)+'/run'; $('#api-params').innerHTML = '<p class="muted" style="font-size:12px">自助编排的 Pipeline：一次请求按序执行全部步骤，无需参数。</p>'; return; }
+    const c=CAPS.find(x=>x.id===sel.value); $('#api-endpoint').textContent = 'POST /api/v1/capabilities/'+c.id+'/invoke'; $('#api-params').innerHTML = paramForm(c,'apip'); };
   sel.onchange();
 }
 let apiChain = [];
@@ -615,6 +634,16 @@ function renderApiChain(){
 }
 async function sendApi(confirmPay){
   const id = $('#api-cap-select').value; if(!id) return toast('请先在顶栏注册账号', false);
+  if(id.startsWith('pipe:')){
+    const pid = id.slice(5);
+    $('#api-req').textContent = `POST /api/v1/pipelines/${pid}/run\nAuthorization: Bearer ${apiKey().slice(0,20)}…`;
+    try{
+      const res = await api(`/api/v1/pipelines/${pid}/run`, {method:'POST'});
+      $('#api-resp').innerHTML = `<span class="ok">200 OK · Pipeline ${res.steps_executed} 步全部执行成功</span>\n` + esc(jfmt(res));
+      apiChain.push({id:pid, name:'Pipeline:'+res.name, ok:true}); renderApiChain();
+    }catch(e){ $('#api-resp').innerHTML = `<span class="err">${e.status||'ERR'}</span>\n` + esc(jfmt(e.data||{})); }
+    return;
+  }
   const c = CAPS.find(x=>x.id===id);
   const params = collectParams(c,'apip');
   if(confirmPay) params._confirm_pay = true;
@@ -641,17 +670,20 @@ window.sendApi = sendApi;
 /* ============ MCP ============ */
 async function renderMcpTab(){
   const sel = $('#mcp-tool-select');
-  const subs = await mySubscribedCaps();
-  let myPkgs = [];
-  if(apiKey()){ try{ myPkgs = (await api('/api/v1/auth/info')).packages; }catch(e){} }
   if(!apiKey()){ sel.innerHTML = '<option value="">（请先在顶栏注册账号）</option>'; $('#mcp-params').innerHTML=''; return; }
+  const info = await myAuthInfo();
+  const entitled = info?(info.entitled_capabilities||[]):[], myPkgs = info?info.packages:[];
+  let myPipes = [];
+  try{ myPipes = (await api('/api/v1/pipelines')).pipelines; }catch(e){}
   const avail = CAPS.filter(c=>c.status==='available');
-  const ids = [...avail.filter(c=>subs.includes(c.id)||c.source==='third_party').map(c=>c.id),
-               ...avail.filter(c=>!subs.includes(c.id)&&c.source!=='third_party').map(c=>c.id)];
+  const ids = [...avail.filter(c=>entitled.includes(c.id)||c.source==='third_party').map(c=>c.id),
+               ...avail.filter(c=>!entitled.includes(c.id)&&c.source!=='third_party').map(c=>c.id)];
   sel.innerHTML = myPkgs.map(pid=>{ const p=PKGS.find(x=>x.id===pid); return p?`<option value="scenario_${pid}">scenario_${pid} — ▶ 场景：${esc(p.name)}</option>`:''; }).join('')
-    + ids.map(id=>{ const c=CAPS.find(x=>x.id===id); const sub=subs.includes(id)||c.source==='third_party'; return c?`<option value="${id}">${sub?'✓':'💳'} ${c.id} — ${esc(c.name)}${sub?'':'（未订阅·可按次）'}</option>`:''; }).join('');
+    + myPipes.map(pp=>`<option value="pipeline_${pp.id}">pipeline_${pp.id} — ⛓️ ${esc(pp.name)}</option>`).join('')
+    + ids.map(id=>{ const c=CAPS.find(x=>x.id===id); const sub=entitled.includes(id)||c.source==='third_party'; return c?`<option value="${id}">${sub?'✓':'💳'} ${c.id} — ${esc(c.name)}${sub?'':'（未授权·可按次）'}</option>`:''; }).join('');
   sel.onchange = ()=>{
     if(sel.value.startsWith('scenario_')){ $('#mcp-params').innerHTML = '<p class="muted" style="font-size:12px">场景级 Tool 无需参数：一次调用即由网络内部 Agent 编排执行整个场景并回传执行轨迹。</p>'; return; }
+    if(sel.value.startsWith('pipeline_')){ $('#mcp-params').innerHTML = '<p class="muted" style="font-size:12px">Pipeline Tool 无需参数：按你编排的顺序一次执行全部步骤。</p>'; return; }
     const c=CAPS.find(x=>x.id===sel.value); if(c) $('#mcp-params').innerHTML = paramForm(c,'mcpp');
   };
   sel.onchange();
@@ -667,7 +699,7 @@ $('#mcp-list-btn').onclick = async ()=>{
 $('#mcp-call').onclick = async ()=>{
   const id = $('#mcp-tool-select').value; if(!id) return toast('请先在顶栏注册账号', false);
   const c = CAPS.find(x=>x.id===id);
-  const req = {jsonrpc:'2.0', id:2, method:'tools/call', params:{name:id, arguments:(id.startsWith('scenario_')||!c)?{}:collectParams(c,'mcpp')}};
+  const req = {jsonrpc:'2.0', id:2, method:'tools/call', params:{name:id, arguments:(id.startsWith('scenario_')||id.startsWith('pipeline_')||!c)?{}:collectParams(c,'mcpp')}};
   $('#mcp-req').textContent = jfmt(req);
   try{
     const res = await api('/api/v1/mcp/tools/call',{method:'POST',body:JSON.stringify(req)});
@@ -745,7 +777,7 @@ function renderIntentTrack(st){
     for(const [agent, g] of Object.entries(byAgent)){
       html += `<div class="agent-block" style="border-left-color:${g.color}">
         <b style="color:${g.color}">${esc(agent)}</b>
-        ${g.list.map(s=>`<div style="margin:4px 0;font-size:13px"><b>Step ${s.step} · ${esc(s.name)}</b> <span class="mono muted" style="font-size:11px">${s.capability}</span> <span class="ok" style="font-size:11px">✓ ${s.latency_ms}ms</span></div>`).join('')}
+        ${g.list.map(s=>`<div style="margin:4px 0;font-size:13px"><b>Step ${s.step} · ${esc(s.name)}</b> <span class="mono muted" style="font-size:11px">${s.capability}</span> ${s.status==='denied'?'<span class="err" style="font-size:11px">🚫 未授权（未订阅/等级不足）</span>':`<span class="ok" style="font-size:11px">✓ ${s.latency_ms}ms</span>`}</div>`).join('')}
       </div>`;
     }
   }
@@ -971,7 +1003,12 @@ async function loadAfBoard(){
       return;
     }
     const bill = res.billing||{};
-    el.innerHTML = (bill.total_calls?`<div class="agent-block" style="border-left-color:var(--orange);display:flex;gap:24px;flex-wrap:wrap">
+    const agentView = `<div class="agent-block" style="border-left-color:var(--purple)">
+      <b style="color:var(--purple)">🛰️ 网络内部 Agent 视角</b>
+      <span class="muted" style="font-size:12px;margin-left:6px">Network Agent 已通过 MCP tools/list 发现以下第三方工具，可在编排中调用：</span>
+      <div style="margin-top:5px">${res.capabilities.map(c=>`<span class="pill" style="cursor:default">🔧 ${esc(c.id)} · ${esc(c.name)}</span>`).join('')}</div>
+    </div>`;
+    el.innerHTML = agentView + (bill.total_calls?`<div class="agent-block" style="border-left-color:var(--orange);display:flex;gap:24px;flex-wrap:wrap">
       <span>被网络调用 <b style="color:var(--accent)">${bill.total_calls}</b> 次</span>
       <span>累计计费 <b style="color:var(--orange)">¥${bill.gross_revenue}</b></span>
       <span>分成 <b class="muted" style="font-size:12px">${esc(bill.revenue_share)}</b></span>
@@ -1005,16 +1042,15 @@ window.simCall = async id=>{
 
 $('#af-submit').onclick = async ()=>{
   if(!apiKey()) return toast('注册 AF 能力需要 API Key，请先注册账号', false);
-  const kw = $('#af-keywords').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
   const body = {name:$('#af-name').value.trim(), cap_type:$('#af-type').value,
                 description:$('#af-desc').value.trim(), endpoint:$('#af-endpoint').value.trim(),
-                intent_keywords: kw};
+                price: $('#af-price').value.trim()||'0.5/次'};
   if(!body.name || !body.endpoint) return toast('名称和端点必填', false);
   try{
     const res = await api('/api/v1/register-af',{method:'POST',body:JSON.stringify(body)});
     $('#af-result').innerHTML = `<div class="agent-block" style="border-left-color:var(--green)">
       <b class="ok">✓ 注册成功</b> <span class="mono muted" style="font-size:11px">${res.registration_id}</span>
-      <p class="muted" style="font-size:12px;margin-top:4px">已上架能力超市 · 能力发现标签：${res.intent_keywords.map(esc).join('、')}</p></div>`;
+      <p class="muted" style="font-size:12px;margin-top:4px">已上架能力超市（其他 AF 可订阅）· 已纳入网络内部 Agent 工具目录</p></div>`;
     loadMarket(); loadAfBoard();
   }catch(e){ $('#af-result').innerHTML = `<p class="err">${esc(jfmt(e.data||{}))}</p>`; }
 };
@@ -1077,7 +1113,7 @@ async function termRequest(text){
     try{
       let body = await termMcpCall(cap, false);
       if(body.status==='payment_required'){
-        tNef(`鉴权通过 ✓，但「${esc(cap.name)}」未订阅 —— 返回计费提醒`);
+        tNef(`身份认证通过 ✓，但「${esc(cap.name)}」未授权（未订阅 / 等级不足）—— 返回计费提醒`);
         const box = tprint(`💳 <b>${esc(body.name)}</b>：包月 <b>${esc(body.options[0].price)}</b> ｜ 按次 <b>${esc(body.options[1].price)}</b><br>
           <button class="primary" style="font-size:12px;margin-top:6px" id="term-pay-y">✓ 确认支付（按次）</button>
           <button style="font-size:12px;margin-top:6px" id="term-pay-n">取消</button>`, 'tl-pay');

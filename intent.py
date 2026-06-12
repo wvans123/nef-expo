@@ -64,12 +64,18 @@ def _plan_trace(text: str):
     return scenario, steps
 
 
-def process_intent(text: str, auth: dict) -> dict:
+def process_intent(text: str, auth: dict, entitled_ids=None) -> dict:
     """受理 + 转交，并登记任务供后续按 intent_id 查询状态。"""
     intent_id = "intent_" + uuid.uuid4().hex[:12]
     partner_task_id = "partner_task_" + uuid.uuid4().hex[:12]
     submitted_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     scenario, trace = _plan_trace(text)
+    if entitled_ids is not None:
+        for step in trace:
+            step["authorized"] = step["capability"] in entitled_ids
+    else:
+        for step in trace:
+            step["authorized"] = True
     INTENTS[intent_id] = {
         "intent_id": intent_id, "text": text, "account": auth["account"],
         "task_id": partner_task_id, "submitted_ts": time.time(),
@@ -128,15 +134,21 @@ def intent_status(intent_id: str):
         "stages": stages, "partner_agent": PARTNER_AGENT_NAME,
     }
     if rec["trace"]:
+        allowed = [s for s in rec["trace"] if s.get("authorized", True)]
+        denied = [s for s in rec["trace"] if not s.get("authorized", True)]
+        for d in denied:
+            d["status"] = "denied"
         if status == "completed":
             out["scenario"] = rec["scenario"]
             out["execution_trace"] = rec["trace"]
             out["summary"] = (f"识别为场景「{rec['scenario']}」，" if rec["scenario"] else "") + \
-                f"共执行 {len(rec['trace'])} 个业务步骤，全部成功"
+                f"{len(allowed)} 个业务步骤执行成功" + \
+                (f"；{len(denied)} 个步骤未授权被拒绝（未订阅/等级不足，订阅或升级后重试）" if denied else "，全部成功")
         elif status == "executing":
-            done = max(1, len(rec["trace"]) // 2)
-            out["execution_trace"] = rec["trace"][:done]
-            out["summary"] = f"已完成 {done}/{len(rec['trace'])} 个业务步骤"
+            done = max(1, len(allowed) // 2) if allowed else 0
+            out["execution_trace"] = allowed[:done] + denied
+            out["summary"] = f"已完成 {done}/{len(allowed)} 个已授权业务步骤" + \
+                (f"；{len(denied)} 个步骤未授权" if denied else "")
     elif status == "completed":
         out["summary"] = "网络内部 Agent 未能从意图中识别出可执行业务，已返回澄清请求"
         out["status"] = "needs_clarification"

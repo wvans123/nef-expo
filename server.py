@@ -5,7 +5,7 @@ import secrets
 import time
 import uuid
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -24,6 +24,11 @@ API_KEYS = {}       # api_key -> {"account": str, "subscriptions": set, "package
 ACCOUNT_KEYS = {}   # account -> api_key
 PIPELINES = {}      # pipe_id -> pipeline def
 PER_CALL_BILLS = {}  # account -> [ {capability, price, ts, request_id} ] 按次计费账单
+PLAN_TIERS = {  # 账号等级 → 免订阅可直接使用的能力层级
+    "free": set(),
+    "pro": {"basic"},
+    "max": {"basic", "advanced"},
+}
 DEFAULT_SCOPES = {
     "capabilities:invoke",
     "mcp:tools",
@@ -38,6 +43,11 @@ class SubscribeReq(BaseModel):
     account: str
     capability_ids: list[str] = []
     package_ids: list[str] = []
+    plan: str = "free"
+
+
+class PlanReq(BaseModel):
+    plan: str
 
 
 class IntentReq(BaseModel):
@@ -62,6 +72,7 @@ class RegisterAfReq(BaseModel):
     description: str = ""
     endpoint: str
     intent_keywords: list[str] = []
+    price: str = "0.5/次"
 
 
 # ===== 鉴权 =====
@@ -126,7 +137,7 @@ def _payment_required_payload(cap, channel: str) -> dict:
     return {
         "status": "payment_required",
         "capability": cap.id, "name": cap.name,
-        "message": f"NEF 鉴权通过，但账号未订阅「{cap.name}」。请选择计费方式后重试。",
+        "message": f"身份认证通过，但未授权：账号未订阅「{cap.name}」且当前等级不含 {cap.tier} 层级。可订阅 / 升级账号 / 按次支付。",
         "options": [
             {"type": "monthly", "price": cap.unit_price,
              "how": "POST /api/v1/subscribe 订阅后调用"},
@@ -151,6 +162,15 @@ def _subscribed_caps(rec) -> set:
     for pid in rec["packages"]:
         caps |= set(PKG_INDEX[pid]["capabilities"])
     return caps
+
+
+def _entitled(rec, cap) -> bool:
+    """授权判定：已订阅，或账号等级（pro/max）覆盖该能力层级，或第三方能力"""
+    if cap.source == "third_party":
+        return True
+    if cap.id in _subscribed_caps(rec):
+        return True
+    return cap.tier in PLAN_TIERS.get(rec.get("plan", "free"), set())
 
 
 # ===== 能力目录 =====
@@ -189,7 +209,7 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
         params = {}
     confirm_pay = bool(params.pop("_confirm_pay", False))
     per_call_fee = None
-    if cap_id not in _subscribed_caps(rec) and cap.source != "third_party":
+    if not _entitled(rec, cap):
         if not confirm_pay:
             raise HTTPException(402, _payment_required_payload(cap, "REST"))
         stamp = _auth_stamp(key, rec, "capabilities:invoke")
@@ -280,13 +300,14 @@ def get_skill(pkg_id: str):
 
 
 # ===== 账号注册 / 订阅 / 鉴权 =====
-def _ensure_account(account: str) -> str:
+def _ensure_account(account: str, plan: str = "free") -> str:
     """注册即发凭证：账号不存在则创建并签发 API Key（订阅只记录权益）"""
     key = ACCOUNT_KEYS.get(account)
     if not key:
         key = "nef_" + secrets.token_hex(16)
         API_KEYS[key] = {"account": account, "subscriptions": set(),
                          "packages": set(), "scopes": set(DEFAULT_SCOPES),
+                         "plan": plan if plan in PLAN_TIERS else "free",
                          "created": time.time()}
         ACCOUNT_KEYS[account] = key
     return key
@@ -298,21 +319,35 @@ def register_account(req: SubscribeReq):
     if not req.account.strip():
         raise HTTPException(422, "账号名称不能为空")
     existed = req.account in ACCOUNT_KEYS
-    key = _ensure_account(req.account)
+    key = _ensure_account(req.account, req.plan)
     rec = API_KEYS[key]
-    return {"account": req.account, "api_key": key,
+    return {"account": req.account, "api_key": key, "plan": rec.get("plan", "free"),
             "scopes": sorted(rec["scopes"]),
             "message": ("账号已存在，返回现有 API Key" if existed else
                         "注册成功，已签发 API Key。订阅能力/套餐可包月计费，未订阅能力可按次付费调用")}
 
 
+@app.post("/api/v1/account/plan")
+def change_plan(req: PlanReq, authorization: str = Header(None)):
+    """账号等级变更：free / pro（含 basic 层级）/ max（含 basic+advanced 层级）"""
+    key, rec = _auth(authorization)
+    if req.plan not in PLAN_TIERS:
+        raise HTTPException(422, f"未知等级: {req.plan}（可选 free/pro/max）")
+    rec["plan"] = req.plan
+    tiers = sorted(PLAN_TIERS[req.plan])
+    return {"account": rec["account"], "plan": req.plan,
+            "included_tiers": tiers,
+            "message": f"已切换至 {req.plan}，" + (("免订阅可用层级：" + "、".join(tiers)) if tiers else "所有能力均需订阅或按次付费")}
+
+
 @app.post("/api/v1/subscribe")
 def subscribe(req: SubscribeReq):
-    bad = [c for c in req.capability_ids if c not in CAP_INDEX]
+    tp_ids = {c.id for c in THIRD_PARTY}
+    bad = [c for c in req.capability_ids if c not in CAP_INDEX and c not in tp_ids]
     bad += [p for p in req.package_ids if p not in PKG_INDEX]
     if bad:
         raise HTTPException(404, f"不存在: {', '.join(bad)}")
-    planned = [c for c in req.capability_ids if CAP_INDEX[c].status == "planned"]
+    planned = [c for c in req.capability_ids if c in CAP_INDEX and CAP_INDEX[c].status == "planned"]
     if planned:
         raise HTTPException(403, f"能力规划中，暂未开放订阅: {', '.join(planned)}")
     key = _ensure_account(req.account)
@@ -344,6 +379,10 @@ def auth_info(authorization: str = Header(None)):
             "direct_subscriptions": sorted(rec["subscriptions"]),
             "packages": sorted(rec["packages"]),
             "estimated_monthly_cost": round(est, 1),
+            "plan": rec.get("plan", "free"),
+            "plan_included_tiers": sorted(PLAN_TIERS.get(rec.get("plan", "free"), set())),
+            "entitled_capabilities": sorted([c.id for c in CAPABILITIES
+                                             if c.status == "available" and _entitled(rec, c)]),
             "per_call_charges": {
                 "count": len(PER_CALL_BILLS.get(rec["account"], [])),
                 "total": round(sum(b["price"] for b in PER_CALL_BILLS.get(rec["account"], [])), 2),
@@ -361,7 +400,9 @@ def intent(req: IntentReq, authorization: str = Header(None)):
     request_id = "req_" + uuid.uuid4().hex[:12]
     key, rec = _auth(authorization, required_scope="intent:submit")
     auth = _auth_evidence(key, rec, "intent:submit", request_id)
-    return process_intent(req.text, auth)
+    entitled = {c.id for c in CAPABILITIES if c.status == "available" and _entitled(rec, c)}
+    entitled |= {c.id for c in THIRD_PARTY}
+    return process_intent(req.text, auth, entitled)
 
 
 @app.get("/api/v1/intent/{intent_id}")
@@ -383,9 +424,9 @@ def compose(req: ComposeReq, authorization: str = Header(None)):
     bad = [s for s in req.steps if s not in CAP_INDEX]
     if bad:
         raise HTTPException(404, f"能力不存在: {', '.join(bad)}")
-    unsub = [s for s in req.steps if s not in _subscribed_caps(rec)]
-    if unsub:
-        raise HTTPException(403, f"未订阅能力: {', '.join(unsub)}")
+    unauth = [c for c in req.steps if not _entitled(rec, CAP_INDEX[c])]
+    if unauth:
+        raise HTTPException(403, f"未授权能力（未订阅且等级不足）: {', '.join(unauth)}")
     pid = "pipe_" + uuid.uuid4().hex[:8]
     PIPELINES[pid] = {"id": pid, "name": req.name, "steps": req.steps,
                       "owner": rec["account"], "created": time.time(),
@@ -400,12 +441,7 @@ def list_pipelines(authorization: str = Header(None)):
     return {"count": len(mine), "pipelines": mine}
 
 
-@app.post("/api/v1/pipelines/{pipe_id}/run")
-def run_pipeline(pipe_id: str, authorization: str = Header(None)):
-    key, rec = _auth(authorization, required_scope="pipeline:manage")
-    pipe = PIPELINES.get(pipe_id)
-    if not pipe:
-        raise HTTPException(404, f"Pipeline {pipe_id} 不存在")
+def _exec_pipeline(pipe):
     results = []
     for i, cid in enumerate(pipe["steps"], 1):
         cap = CAP_INDEX[cid]
@@ -415,8 +451,17 @@ def run_pipeline(pipe_id: str, authorization: str = Header(None)):
         results.append({"step": i, "capability": cid, "capability_name": cap.name,
                         "agent": agent["name"], "params": params,
                         "result": invoke_stub(cid, params)})
-    return {"pipeline_id": pipe_id, "name": pipe["name"],
+    return {"pipeline_id": pipe["id"], "name": pipe["name"],
             "status": "success", "steps_executed": len(results), "results": results}
+
+
+@app.post("/api/v1/pipelines/{pipe_id}/run")
+def run_pipeline(pipe_id: str, authorization: str = Header(None)):
+    key, rec = _auth(authorization, required_scope="pipeline:manage")
+    pipe = PIPELINES.get(pipe_id)
+    if not pipe:
+        raise HTTPException(404, f"Pipeline {pipe_id} 不存在")
+    return _exec_pipeline(pipe)
 
 
 def _demo_value(p: CapParam):
@@ -430,13 +475,12 @@ def _demo_value(p: CapParam):
 @app.post("/api/v1/mcp/tools/list")
 def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
     key, rec = _auth(authorization, required_scope="mcp:tools")
-    subscribed = _subscribed_caps(rec)
     tools = []
     for c in CAPABILITIES:
         if c.status != "available":
             continue
         t = c.mcp_tool()
-        if c.id not in subscribed:
+        if not _entitled(rec, c):
             t["description"] = f"[未订阅 · {c.unit_price} 或 ¥{_per_call_price(c)}/次] " + t["description"]
             t["subscribed"] = False
         else:
@@ -447,7 +491,14 @@ def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
         pkg = PKG_INDEX[pid]
         tools.append({"name": f"scenario_{pid}",
                       "description": f"一键运行场景「{pkg['name']}」：{pkg['description']}（网络内部 Agent 编排执行并回传执行轨迹）",
-                      "inputSchema": {"type": "object", "properties": {}, "required": []}})
+                      "inputSchema": {"type": "object", "properties": {}, "required": []},
+                      "subscribed": True})
+    for pipe in PIPELINES.values():
+        if pipe["owner"] == rec["account"]:
+            tools.append({"name": f"pipeline_{pipe['id']}",
+                          "description": f"运行自助编排 Pipeline「{pipe['name']}」：按序执行 {' → '.join(pipe['steps'])}",
+                          "inputSchema": {"type": "object", "properties": {}, "required": []},
+                          "subscribed": True})
     return {"jsonrpc": "2.0", "id": (req.id if req else 1), "result": {"tools": tools}}
 
 
@@ -457,6 +508,17 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
     name = req.params.get("name")
     args = req.params.get("arguments", {})
     import json as _json
+    if name and name.startswith("pipeline_"):
+        pipe = PIPELINES.get(name[len("pipeline_"):])
+        if not pipe or pipe["owner"] != rec["account"]:
+            return {"jsonrpc": "2.0", "id": req.id,
+                    "error": {"code": -32001, "message": f"Pipeline 不存在或不属于当前账号: {name}"}}
+        result = _exec_pipeline(pipe)
+        result["nef_auth"] = _auth_stamp(key, rec, "mcp:tools")
+        return {"jsonrpc": "2.0", "id": req.id,
+                "result": {"content": [{"type": "text",
+                                        "text": _json.dumps(result, ensure_ascii=False, indent=2)}],
+                           "isError": False}}
     if name and name.startswith("scenario_"):
         pid = name[len("scenario_"):]
         pkg = PKG_INDEX.get(pid)
@@ -474,7 +536,7 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
                 "error": {"code": -32602, "message": f"Unknown tool: {name}"}}
     confirm_pay = bool(args.pop("_confirm_pay", False))
     per_call_fee = None
-    if name not in _subscribed_caps(rec) and cap.source != "third_party":
+    if not _entitled(rec, cap):
         if not confirm_pay:
             payload = _payment_required_payload(cap, "MCP")
             return {"jsonrpc": "2.0", "id": req.id,
@@ -506,7 +568,7 @@ def register_af(req: RegisterAfReq, authorization: str = Header(None)):
         id=cap_id, name=req.name, description=req.description or f"第三方能力（{req.cap_type}）",
         category="ecosystem", tier="basic",
         params=[CapParam("payload", "object", "透传给第三方端点的参数")],
-        intent_keywords=keywords, unit_price="第三方计费", source="third_party",
+        intent_keywords=keywords, unit_price=(req.price.strip() or "0.5/次"), source="third_party",
     )
     THIRD_PARTY.append(cap)
     THIRD_PARTY_META[cap_id] = {"cap_type": req.cap_type, "endpoint": req.endpoint,
@@ -560,6 +622,37 @@ def my_reverse_calls(authorization: str = Header(None)):
                         "gross_revenue": gross,
                         "revenue_share": "70% 归 AF / 30% 归运营商",
                         "af_income": round(gross * 0.7, 2)}}
+
+
+# ===== 标准 MCP 端点（streamable HTTP，可被 Claude Code / Codex 等直连） =====
+@app.post("/mcp")
+async def mcp_endpoint(request: Request, authorization: str = Header(None)):
+    """最小 MCP Server：initialize / tools/list / tools/call（JSON-RPC over HTTP）。
+    外部 AI Agent 配置示例：
+      claude mcp add --transport http nef http://localhost:8000/mcp \
+        --header "Authorization: Bearer <api_key>"
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "需要 JSON-RPC 请求体")
+    method, rid = body.get("method"), body.get("id")
+    if method == "initialize":
+        return {"jsonrpc": "2.0", "id": rid,
+                "result": {"protocolVersion": body.get("params", {}).get("protocolVersion", "2025-03-26"),
+                           "capabilities": {"tools": {"listChanged": False}},
+                           "serverInfo": {"name": "6g-nef-exposure", "version": "0.9.0-demo"},
+                           "instructions": "6G NEF 能力开放平台：tools 即网络能力（通感/通算/连接等）。未订阅工具调用会返回计费提醒，携 _confirm_pay=true 按次付费执行。"}}
+    if method in ("notifications/initialized", "ping"):
+        if method == "ping":
+            return {"jsonrpc": "2.0", "id": rid, "result": {}}
+        return Response(status_code=202)
+    if method == "tools/list":
+        return mcp_tools_list(McpCallReq(id=rid or 1), authorization)
+    if method == "tools/call":
+        return mcp_tools_call(McpCallReq(id=rid or 1, params=body.get("params", {})), authorization)
+    return {"jsonrpc": "2.0", "id": rid,
+            "error": {"code": -32601, "message": f"method not supported: {method}"}}
 
 
 # ===== Skill 双文档生成 =====
