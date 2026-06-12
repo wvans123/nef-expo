@@ -131,9 +131,9 @@ def _payment_required_payload(cap, channel: str) -> dict:
             {"type": "monthly", "price": cap.unit_price,
              "how": "POST /api/v1/subscribe 订阅后调用"},
             {"type": "per_call", "price": f"¥{price}/次",
-             "how": ("再次调用并在参数中携带 \"_confirm_pay\": true（需主人确认授权）"
+             "how": ("再次调用并在参数中携带 \"_confirm_pay\": true（确认支付后调用）"
                      if channel == "REST" else
-                     "在 arguments 中携带 \"_confirm_pay\": true 重新调用（需主人确认授权）")},
+                     "在 arguments 中携带 \"_confirm_pay\": true 重新调用（确认支付后调用）")},
         ],
     }
 
