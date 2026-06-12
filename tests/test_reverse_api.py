@@ -116,7 +116,7 @@ def test_intent_is_authenticated_and_handed_to_partner_agent():
     assert body["handoff"]["partner_agent"] == "网络内部 Network Agent"
     assert body["handoff"]["task_id"].startswith("partner_task_")
     assert body["handoff"]["status_owner"] == "internal_network_agent"
-    assert body["handoff"]["status_endpoint"].endswith(body["handoff"]["task_id"])
+    assert body["handoff"]["status_endpoint"].endswith(body["intent_id"])
     assert "matched" not in body
     assert "executions" not in body
 
@@ -148,12 +148,16 @@ def test_planned_cap_blocked():
     assert r.status_code == 403
 
 
-def test_mcp_list_only_subscribed():
+def test_mcp_list_marks_subscription():
     key = _key("mcp_tester")   # 订阅了 network_diagnosis
     r = client.post("/api/v1/mcp/tools/list", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
                     headers=_hdr(key))
-    names = [t["name"] for t in r.json()["result"]["tools"]]
-    assert names == ["network_diagnosis"]
+    tools = r.json()["result"]["tools"]
+    by_name = {t["name"]: t for t in tools}
+    # 全量可用能力都可见（用于"调用时再提醒订阅"的故事），订阅状态用 subscribed 标记
+    assert by_name["network_diagnosis"]["subscribed"] is True
+    unsub = [t for t in tools if t.get("subscribed") is False]
+    assert unsub and all(t["description"].startswith("[未订阅") for t in unsub)
 
 
 def test_intent_pipeline_baseline_stages():

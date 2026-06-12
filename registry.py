@@ -11,6 +11,7 @@ from skills import AGENTS
 THIRD_PARTY = []        # list[Capability]，AF 注册进来的能力
 THIRD_PARTY_META = {}   # cap_id -> {"cap_type", "endpoint", "owner", "registered_ts"}
 REVERSE_CALLS = {}      # cap_id -> [record]
+INTENTS = {}            # intent_id -> 受理登记（供状态查询，演示用内存态）
 
 # 反向调用时由哪个域 Agent 出面调用（按能力类型映射）
 _CAP_TYPE_AGENT = {"ai_model": "computing", "tool": "data", "data_source": "data"}

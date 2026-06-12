@@ -384,7 +384,7 @@ CAP_INDEX = {c.id: c for c in CAPABILITIES}
 # ===== 场景套餐 =====
 PACKAGES = [
     {
-        "id": "live_offload", "name": "直播计算卸载套餐", "price": "69/月", "featured": True,
+        "id": "live_offload", "name": "直播计算卸载套餐", "price": "69/月",
         "description": "特效计算卸载先行；体验吃紧时通信 QoS 与算力 QoS 联动调整，保障 0 卡顿 AI 换脸",
         "capabilities": ["compute_offload", "compute_qos", "qos_guarantee", "network_diagnosis"],
         "scenario": "电商/户外直播 · 0卡顿 AI 特效",
@@ -393,7 +393,7 @@ PACKAGES = [
         ],
     },
     {
-        "id": "arm_dog_collab", "name": "机械臂×机器狗协同套餐", "price": "99/月", "featured": True,
+        "id": "arm_dog_collab", "name": "机械臂×机器狗协同套餐", "price": "99/月",
         "description": "网络提供计算服务并结合环境感知，支撑机械臂与机器狗协同作业",
         "capabilities": ["compute_offload", "environment_recon", "precision_location", "event_subscription"],
         "scenario": "工业产线协同作业",
@@ -402,7 +402,7 @@ PACKAGES = [
         ],
     },
     {
-        "id": "embodied_agents", "name": "多智能体具身交互套餐", "price": "129/月", "featured": True,
+        "id": "embodied_agents", "name": "多智能体具身交互套餐", "price": "129/月",
         "description": "AR 眼镜与机器狗多智能体协同，渲染与算力卸载到网络边缘",
         "capabilities": ["render_offload", "compute_offload", "precision_location", "qos_guarantee"],
         "scenario": "AR 眼镜 × 机器狗具身智能",
@@ -420,13 +420,13 @@ PACKAGES = [
         ],
     },
     {
-        "id": "robot_patrol", "name": "机器狗巡检套餐", "price": "89/月",
+        "id": "robot_patrol", "name": "机器狗巡检套餐", "price": "89/月", "featured": True,
         "description": "3GPP 无线感知与摄像头/激光雷达数据融合，让机器狗在雾天黑夜也看得清",
         "capabilities": ["sensing_fusion", "target_detection", "ai_inference", "precision_location", "event_subscription"],
         "scenario": "园区/变电站全天候巡检",
     },
     {
-        "id": "traffic_forecast_pkg", "name": "城市车流量预测套餐", "price": "59/月",
+        "id": "traffic_forecast_pkg", "name": "城市车流量预测套餐", "price": "59/月", "featured": True,
         "description": "道路车流量检测触发，感知数据驱动的车流预测",
         "capabilities": ["traffic_flow_sensing", "traffic_forecast", "data_query"],
         "scenario": "智慧交通 · 城市道路",
@@ -438,7 +438,7 @@ PACKAGES = [
         "scenario": "XR/元宇宙 · 通算一体",
     },
     {
-        "id": "uav_track", "name": "无人机识别追踪套餐", "price": "79/月",
+        "id": "uav_track", "name": "无人机识别追踪套餐", "price": "79/月", "featured": True,
         "description": "弱算力无人机将识别计算卸载到网络，结合通感实现持续追踪",
         "capabilities": ["target_detection", "target_tracking", "ai_inference", "compute_offload", "precision_location"],
         "scenario": "低空经济 · 无人机监管",

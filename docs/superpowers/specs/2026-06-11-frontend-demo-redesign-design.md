@@ -27,6 +27,17 @@
 
 **页签改名**（按开放方式命名，去掉"调试/文档"等工程词）：能力超市 / 订阅与鉴权 / API 直调 / Agent 接入 · MCP / 意图受理 / 场景蓝图 / 自助编排 / 双向开放 · AF。场景蓝图页内新增「▶ 一键运行本场景」按钮渲染执行回执。
 
+## v5 增量（2026-06-12：Intent 跟踪、按次计费、AF 智能终端）
+
+- **主推三场景**：robot_patrol / traffic_forecast_pkg / uav_track（featured 置顶 + 徽章）。
+- **Intent 状态跟踪**：提交即登记（registry.INTENTS），`GET /api/v1/intent/{id}`（仅本账号）状态按时间线推进：accepted→semantic_parsing→orchestrating→executing→completed（约 12s）；completed 回传网络内部执行轨迹（提交时用关键词→能力→套餐匹配预生成，语义上属"网络内部 Agent 的编排"，NEF 仍只受理+转交+代理查询）。前端提交后自动轮询渲染阶段流+进度条+轨迹。
+- **一键运行 ≠ Intent**：场景蓝图的一键运行是场景级 REST 同步调用（页面已注明）；Intent 是异步任务按 ID 跟踪。
+- **按次计费（402 流）**：调用未订阅能力时 REST 返回 402 Payment Required（含包月价/按次价/确认方式），携 `_confirm_pay: true` 重试则执行并记入 PER_CALL_BILLS（按次价≈月价/20，下限 0.5）；MCP 同语义（result.payment_required=true 的提醒内容）。auth/info 返回 per_call_charges；订阅页显示按次消费。
+- **MCP tools/list 改为全量可用工具**，未订阅的带 `[未订阅 · 价格]` 前缀与 `subscribed:false` 标记——支撑"先发现、调用时再提醒订阅"的故事。
+- **AF 智能终端**（第 9 个 Tab）：模拟 AF 侧 AI Agent 将 NEF 当 MCP Server——tools 发现 → call 被 402 拦截 → 请求主人确认（y/n）→ 按次支付执行；含自动演示按钮。
+- **双向开放计费汇总**：my-calls 返回 billing（总调用/累计计费/70-30 分成/AF 收益），看板顶部展示。
+- **API 直调**：下拉含未订阅能力（💳 标记），402 时渲染支付卡可一键确认重试；新增"我组装的调用链"轨迹条，并对照场景套餐提示覆盖度（场景与 tool 的桥梁）。
+
 ## 背景与目标
 
 nef-expo 是面向运营商伙伴的现场讲解演示（讲解人操作，界面扮演 AF 开发者视角）。

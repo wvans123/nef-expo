@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from skills import (CAPABILITIES, CAP_INDEX, PACKAGES, PKG_INDEX, CATEGORIES,
                     AGENTS, Capability, CapParam, agent_for_capability)
 from stubs import invoke_stub
-from intent import process_intent
+from intent import process_intent, intent_status
 from registry import (THIRD_PARTY, THIRD_PARTY_META, REVERSE_CALLS,
                       record_reverse_call, caller_agent_for)
 
@@ -23,6 +23,7 @@ app = FastAPI(title="6G NEF Capability Exposure Platform", version="0.9.0-demo")
 API_KEYS = {}       # api_key -> {"account": str, "subscriptions": set, "packages": set, "created": ts}
 ACCOUNT_KEYS = {}   # account -> api_key
 PIPELINES = {}      # pipe_id -> pipeline def
+PER_CALL_BILLS = {}  # account -> [ {capability, price, ts, request_id} ] 按次计费账单
 DEFAULT_SCOPES = {
     "capabilities:invoke",
     "mcp:tools",
@@ -111,6 +112,40 @@ def _auth_stamp(key: str, rec: dict, scope: str) -> dict:
     }
 
 
+def _per_call_price(cap) -> float:
+    """按次价格：从月价推一个演示用单次价"""
+    try:
+        monthly = float(str(cap.unit_price).split("/")[0])
+        return max(0.5, round(monthly / 20, 1))
+    except ValueError:
+        return 0.5
+
+
+def _payment_required_payload(cap, channel: str) -> dict:
+    price = _per_call_price(cap)
+    return {
+        "status": "payment_required",
+        "capability": cap.id, "name": cap.name,
+        "message": f"NEF 鉴权通过，但账号未订阅「{cap.name}」。请选择计费方式后重试。",
+        "options": [
+            {"type": "monthly", "price": cap.unit_price,
+             "how": "POST /api/v1/subscribe 订阅后调用"},
+            {"type": "per_call", "price": f"¥{price}/次",
+             "how": ("再次调用并在参数中携带 \"_confirm_pay\": true（需主人确认授权）"
+                     if channel == "REST" else
+                     "在 arguments 中携带 \"_confirm_pay\": true 重新调用（需主人确认授权）")},
+        ],
+    }
+
+
+def _bill_per_call(rec, cap, request_id):
+    price = _per_call_price(cap)
+    PER_CALL_BILLS.setdefault(rec["account"], []).append(
+        {"capability": cap.id, "name": cap.name, "price": price,
+         "ts": time.time(), "request_id": request_id})
+    return price
+
+
 def _subscribed_caps(rec) -> set:
     caps = set(rec["subscriptions"])
     for pid in rec["packages"]:
@@ -148,17 +183,25 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
         raise HTTPException(404, f"能力 {cap_id} 不存在")
     if cap.status == "planned":
         raise HTTPException(403, f"能力 {cap_id} 规划中，暂未开放调用")
-    if cap_id not in _subscribed_caps(rec) and cap.source != "third_party":
-        raise HTTPException(403, f"账号 {rec['account']} 未订阅能力 {cap_id}")
     try:
         params = await request.json()
     except Exception:
         params = {}
+    confirm_pay = bool(params.pop("_confirm_pay", False))
+    per_call_fee = None
+    if cap_id not in _subscribed_caps(rec) and cap.source != "third_party":
+        if not confirm_pay:
+            raise HTTPException(402, _payment_required_payload(cap, "REST"))
+        stamp = _auth_stamp(key, rec, "capabilities:invoke")
+        per_call_fee = _bill_per_call(rec, cap, stamp["request_id"])
     missing = [p.name for p in cap.params if p.required and p.name not in params]
     if missing:
         raise HTTPException(422, f"缺少必填参数: {', '.join(missing)}")
     result = invoke_stub(cap_id, params)
     result["nef_auth"] = _auth_stamp(key, rec, "capabilities:invoke")
+    if per_call_fee is not None:
+        result["billing"] = {"mode": "per_call", "charged": per_call_fee,
+                             "message": f"按次计费 ¥{per_call_fee}，已记入账号 {rec['account']} 账单"}
     return result
 
 
@@ -281,6 +324,11 @@ def auth_info(authorization: str = Header(None)):
             "direct_subscriptions": sorted(rec["subscriptions"]),
             "packages": sorted(rec["packages"]),
             "estimated_monthly_cost": round(est, 1),
+            "per_call_charges": {
+                "count": len(PER_CALL_BILLS.get(rec["account"], [])),
+                "total": round(sum(b["price"] for b in PER_CALL_BILLS.get(rec["account"], [])), 2),
+                "recent": PER_CALL_BILLS.get(rec["account"], [])[-5:][::-1],
+            },
             "authentication": {
                 **_auth_evidence(key, rec, "auth:info", "req_" + uuid.uuid4().hex[:12]),
                 "scopes": sorted(rec.get("scopes", DEFAULT_SCOPES)),
@@ -294,6 +342,18 @@ def intent(req: IntentReq, authorization: str = Header(None)):
     key, rec = _auth(authorization, required_scope="intent:submit")
     auth = _auth_evidence(key, rec, "intent:submit", request_id)
     return process_intent(req.text, auth)
+
+
+@app.get("/api/v1/intent/{intent_id}")
+def get_intent_status(intent_id: str, authorization: str = Header(None)):
+    """按 Intent ID 查询执行状态（NEF 代理查询网络内部任务）"""
+    key, rec = _auth(authorization, required_scope="intent:submit")
+    st = intent_status(intent_id)
+    if not st:
+        raise HTTPException(404, f"Intent {intent_id} 不存在（服务重启后任务记录会清空）")
+    if st["account"] != rec["account"]:
+        raise HTTPException(403, "只能查询本账号提交的 Intent")
+    return st
 
 
 # ===== Pipeline 编排 =====
@@ -351,8 +411,17 @@ def _demo_value(p: CapParam):
 def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
     key, rec = _auth(authorization, required_scope="mcp:tools")
     subscribed = _subscribed_caps(rec)
-    tools = [c.mcp_tool() for c in CAPABILITIES
-             if c.id in subscribed and c.status == "available"]
+    tools = []
+    for c in CAPABILITIES:
+        if c.status != "available":
+            continue
+        t = c.mcp_tool()
+        if c.id not in subscribed:
+            t["description"] = f"[未订阅 · {c.unit_price} 或 ¥{_per_call_price(c)}/次] " + t["description"]
+            t["subscribed"] = False
+        else:
+            t["subscribed"] = True
+        tools.append(t)
     tools += [c.mcp_tool() for c in THIRD_PARTY]
     for pid in sorted(rec["packages"]):
         pkg = PKG_INDEX[pid]
@@ -383,11 +452,22 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
     if not cap:
         return {"jsonrpc": "2.0", "id": req.id,
                 "error": {"code": -32602, "message": f"Unknown tool: {name}"}}
+    confirm_pay = bool(args.pop("_confirm_pay", False))
+    per_call_fee = None
     if name not in _subscribed_caps(rec) and cap.source != "third_party":
-        return {"jsonrpc": "2.0", "id": req.id,
-                "error": {"code": -32001, "message": f"未订阅 Tool: {name}"}}
+        if not confirm_pay:
+            payload = _payment_required_payload(cap, "MCP")
+            return {"jsonrpc": "2.0", "id": req.id,
+                    "result": {"content": [{"type": "text",
+                                            "text": _json.dumps(payload, ensure_ascii=False, indent=2)}],
+                               "isError": False, "payment_required": True}}
+        stamp = _auth_stamp(key, rec, "mcp:tools")
+        per_call_fee = _bill_per_call(rec, cap, stamp["request_id"])
     result = invoke_stub(name, args)
     result["nef_auth"] = _auth_stamp(key, rec, "mcp:tools")
+    if per_call_fee is not None:
+        result["billing"] = {"mode": "per_call", "charged": per_call_fee,
+                             "message": f"按次计费 ¥{per_call_fee}，已记入账号 {rec['account']} 账单"}
     return {"jsonrpc": "2.0", "id": req.id,
             "result": {"content": [{"type": "text",
                                     "text": _json.dumps(result, ensure_ascii=False, indent=2)}],
@@ -454,7 +534,12 @@ def my_reverse_calls(authorization: str = Header(None)):
             "discovered": bool(calls),
             "recent_calls": list(reversed(calls[-10:])),
         })
-    return {"count": len(out), "capabilities": out}
+    gross = round(sum(c["total_fee"] for c in out), 2)
+    return {"count": len(out), "capabilities": out,
+            "billing": {"total_calls": sum(c["call_count"] for c in out),
+                        "gross_revenue": gross,
+                        "revenue_share": "70% 归 AF / 30% 归运营商",
+                        "af_income": round(gross * 0.7, 2)}}
 
 
 # ===== Skill 双文档生成 =====

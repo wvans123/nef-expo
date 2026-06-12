@@ -80,6 +80,22 @@ h3.sec{margin:18px 0 10px;font-size:15px}
 .feat-badge{background:linear-gradient(90deg,#39d2ff33,#bc8cff33);border:1px solid var(--accent);color:var(--accent);font-size:10px;border-radius:10px;padding:1px 7px;margin-left:6px;vertical-align:1px}
 .story-badge{background:#bc8cff22;border:1px solid var(--purple);color:var(--purple);font-size:10px;border-radius:10px;padding:1px 7px;margin-left:6px}
 .auth-ribbon{display:inline-block;background:#39ffb014;border:1px solid #39ffb055;color:var(--green);font-size:12px;border-radius:8px;padding:4px 10px;margin-bottom:8px}
+/* Intent 状态跟踪 */
+.stage-flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0}
+.stage-flow .st{border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:5px 11px;font-size:12px;background:var(--card)}
+.stage-flow .st.done{border-color:#39ffb055;color:var(--green)}
+.stage-flow .st.active{border-color:var(--accent);color:var(--accent);box-shadow:0 0 10px #39d2ff33;animation:pulse 1.2s infinite}
+@keyframes pulse{50%{box-shadow:0 0 16px #39d2ff66}}
+.pbar{height:6px;background:var(--card);border-radius:3px;overflow:hidden;margin:6px 0 10px}
+.pbar i{display:block;height:100%;background:var(--grad);transition:width .8s}
+/* AF 智能终端 */
+#term-screen{background:#04081a;border:1px solid var(--border);border-radius:10px;padding:14px;height:480px;overflow-y:auto;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.7}
+#term-screen .tl-agent{color:#9fd8ff}
+#term-screen .tl-nef{color:var(--orange)}
+#term-screen .tl-ok{color:var(--green)}
+#term-screen .tl-err{color:var(--red)}
+#term-screen .tl-pay{color:#ffd76b;background:#ffc85714;border:1px solid #ffc85744;border-radius:8px;display:block;padding:6px 10px;margin:4px 0}
+#term-screen .tl-user{color:var(--text)}
 /* Skill markdown 渲染 */
 .md{background:#081227;border:1px solid var(--border);border-radius:8px;padding:14px 16px;font-size:13px;max-height:640px;overflow:auto}
 .md h1{font-size:16px;margin:4px 0 10px;background:linear-gradient(90deg,#7cc7ff,#bc8cff);-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -161,6 +177,7 @@ th{background:var(--card);color:var(--muted)}
   <button data-tab="skill">场景蓝图</button>
   <button data-tab="composer">自助编排</button>
   <button data-tab="afreg">双向开放 · AF</button>
+  <button data-tab="term">AF 智能终端</button>
 </div>
 
 <main>
@@ -178,6 +195,7 @@ th{background:var(--card);color:var(--muted)}
   <!-- Tab 3 API 调试 -->
   <div class="tabpane" id="pane-api">
     <h3 class="sec">API 直调 <span class="muted" style="font-weight:400;font-size:12px">— tool 级 REST 接口，AF 自行编排调用顺序</span></h3>
+    <div id="api-chain" style="margin-bottom:10px"></div>
     <div style="display:grid;grid-template-columns:340px 1fr;gap:16px">
       <div>
         <label>选择已订阅的能力</label>
@@ -234,6 +252,7 @@ th{background:var(--card);color:var(--muted)}
         <button id="skill-view-int">网络内部 Agent 视图</button>
         <button id="skill-run" style="border-color:var(--green);color:var(--green)">▶ 一键运行本场景</button>
       </div>
+      <span class="muted" style="font-size:11px;align-self:center">一键运行 = 场景级 REST 调用（POST /api/v1/scenarios/{id}/run，同步回执），区别于 Intent（自然语言、异步、按 ID 跟踪状态）</span>
     </div>
     <div id="skill-run-result"></div>
     <div id="skill-wrap">
@@ -304,6 +323,17 @@ th{background:var(--card);color:var(--muted)}
       </div>
     </div>
   </div>
+
+  <!-- Tab 9 AF 智能终端 -->
+  <div class="tabpane" id="pane-term">
+    <h3 class="sec">AF 智能终端 <span class="muted" style="font-weight:400;font-size:12px">— 模拟 AF 侧 AI Agent（如 Claude Code）把 NEF 当作 MCP Server 调用：发现工具 → 被鉴权拦截 → 请求主人确认支付 → 按次计费执行</span></h3>
+    <div id="term-screen"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input id="term-input" placeholder="输入指令，如：tools / call target_detection / y 确认支付 / help" style="font-family:ui-monospace,Consolas,monospace">
+      <button class="primary" id="term-send">执行</button>
+      <button id="term-demo">▶ 自动演示</button>
+    </div>
+  </div>
 </main>
 
 <div id="modal-bg"><div id="modal"></div></div>
@@ -365,6 +395,7 @@ $$('#tabs button').forEach(b => b.onclick = () => {
   if(b.dataset.tab==='composer') renderComposer();
   if(b.dataset.tab==='skill') loadSkill();
   if(b.dataset.tab==='afreg'){ loadAfBoard(); afPollTimer = setInterval(loadAfBoard, 3000); }
+  if(b.dataset.tab==='term') initTerm();
 });
 
 /* ============ 弹窗 ============ */
@@ -496,6 +527,7 @@ async function renderSubs(){
         <div class="stat"><span>API Key（点击复制）</span><b class="mono copy" style="font-size:13px" onclick="navigator.clipboard.writeText('${info.api_key}');toast('已复制 API Key')">${info.api_key}</b></div>
         <div class="stat"><span>鉴权方式</span><b style="font-size:13px" class="ok">${esc(info.authentication.scheme)} · ${esc(info.authentication.status)}</b></div>
         <div class="stat"><span>估算月费用</span><b>¥${info.estimated_monthly_cost}</b></div>
+        <div class="stat"><span>按次消费（${info.per_call_charges?info.per_call_charges.count:0} 次）</span><b style="color:var(--orange)">¥${info.per_call_charges?info.per_call_charges.total:0}</b></div>
       </div>
       <div class="agent-block" style="border-left-color:var(--green)">
         <b class="ok">🔐 NEF 鉴权流程（每次调用都会执行）</b>
@@ -554,21 +586,50 @@ async function mySubscribedCaps(){
 async function renderApiTab(){
   const subs = await mySubscribedCaps();
   const sel = $('#api-cap-select');
-  if(!subs.length){ sel.innerHTML = '<option value="">（请先订阅能力）</option>'; $('#api-params').innerHTML=''; $('#api-endpoint').textContent=''; return; }
-  sel.innerHTML = subs.map(id=>{ const c=CAPS.find(x=>x.id===id); return c?`<option value="${id}">${esc(c.name)} (${id})</option>`:''; }).join('');
+  if(!apiKey()){ sel.innerHTML = '<option value="">（请先订阅任意能力以生成 API Key）</option>'; $('#api-params').innerHTML=''; $('#api-endpoint').textContent=''; return; }
+  const avail = CAPS.filter(c=>c.status==='available'&&c.source!=='third_party');
+  const subbed = avail.filter(c=>subs.includes(c.id)), unsub = avail.filter(c=>!subs.includes(c.id));
+  sel.innerHTML = subbed.map(c=>`<option value="${c.id}">✓ ${esc(c.name)} (${c.id})</option>`).join('') +
+    unsub.map(c=>`<option value="${c.id}">💳 ${esc(c.name)} (${c.id}) — 未订阅</option>`).join('');
   sel.onchange = ()=>{ const c=CAPS.find(x=>x.id===sel.value); $('#api-endpoint').textContent = 'POST /api/v1/capabilities/'+c.id+'/invoke'; $('#api-params').innerHTML = paramForm(c,'apip'); };
   sel.onchange();
 }
-$('#api-send').onclick = async ()=>{
+let apiChain = [];
+function renderApiChain(){
+  if(!apiChain.length){ $('#api-chain').innerHTML=''; return; }
+  // 对照场景套餐：当前调用链覆盖了哪个套餐的能力组合
+  const ids = [...new Set(apiChain.filter(x=>x.ok).map(x=>x.id))];
+  let best=null, bestN=1;
+  PKGS.forEach(p=>{ const n=p.capabilities.filter(c=>ids.includes(c)).length; if(n>bestN){best=p;bestN=n;} });
+  $('#api-chain').innerHTML = `<label>我组装的调用链（本会话）</label><div class="flow" style="margin:4px 0">` +
+    apiChain.map((x,i)=>`<span class="node" style="border-color:${x.ok?'var(--green)':'var(--red)'};font-size:11px">${i+1}. ${esc(x.name)} ${x.ok?'✓':'✗'}</span>`).join('<span class="arrow">→</span>') + `</div>` +
+    (best?`<div class="muted" style="font-size:12px">💡 调用链已覆盖「${esc(best.name)}」${bestN}/${best.capabilities.length} 项能力 —— 也可以在「场景蓝图」一键运行该场景，或包月订阅套餐更划算</div>`:'') +
+    `<button style="font-size:11px;padding:2px 8px;margin-top:4px" onclick="apiChain=[];renderApiChain()">清空</button>`;
+}
+async function sendApi(confirmPay){
   const id = $('#api-cap-select').value; if(!id) return toast('请先订阅能力', false);
   const c = CAPS.find(x=>x.id===id);
   const params = collectParams(c,'apip');
+  if(confirmPay) params._confirm_pay = true;
   $('#api-req').textContent = `POST /api/v1/capabilities/${id}/invoke\nAuthorization: Bearer ${apiKey().slice(0,20)}…\nContent-Type: application/json\n\n` + jfmt(params);
   try{
     const res = await api(`/api/v1/capabilities/${id}/invoke`, {method:'POST', body:JSON.stringify(params)});
-    $('#api-resp').innerHTML = `<span class="ok">200 OK</span>${res.nef_auth?`  <span class="ok">🔐 NEF 已鉴权 · 账号 ${esc(res.nef_auth.account)} · ${esc(res.nef_auth.scope)} · 审计 ${esc(res.nef_auth.request_id)}</span>`:''}\n` + esc(jfmt(res));
-  }catch(e){ $('#api-resp').innerHTML = `<span class="err">${e.status||'ERR'}</span>\n` + esc(jfmt(e.data||{})); }
-};
+    $('#api-resp').innerHTML = `<span class="ok">200 OK</span>${res.nef_auth?`  <span class="ok">🔐 NEF 已鉴权 · 账号 ${esc(res.nef_auth.account)} · ${esc(res.nef_auth.scope)} · 审计 ${esc(res.nef_auth.request_id)}</span>`:''}${res.billing?`\n<span style="color:var(--orange)">💳 ${esc(res.billing.message)}</span>`:''}\n` + esc(jfmt(res));
+    apiChain.push({id, name:c.name, ok:true}); renderApiChain();
+  }catch(e){
+    if(e.status===402 && e.data && e.data.detail && e.data.detail.options){
+      const d = e.data.detail;
+      $('#api-resp').innerHTML = `<span class="err">402 Payment Required</span>  <span style="color:var(--orange)">💳 ${esc(d.message)}</span>\n` +
+        d.options.map(o=>`  · ${o.type==='monthly'?'包月':'按次'}：${esc(o.price)} — ${esc(o.how)}`).join('\n') +
+        `\n\n<button class="primary" style="font-size:12px" onclick="sendApi(true)">✓ 主人已确认 · 按次支付并重试</button>`;
+    }else{
+      $('#api-resp').innerHTML = `<span class="err">${e.status||'ERR'}</span>\n` + esc(jfmt(e.data||{}));
+      apiChain.push({id, name:c.name, ok:false}); renderApiChain();
+    }
+  }
+}
+$('#api-send').onclick = ()=>sendApi(false);
+window.sendApi = sendApi;
 
 /* ============ MCP ============ */
 async function renderMcpTab(){
@@ -644,8 +705,42 @@ function renderIntentResult(res){
     <div class="kv"><b>状态归属</b>${esc(res.handoff.status_owner)}</div>
     <div class="kv"><b>网络任务状态地址</b><code>${esc(res.handoff.status_endpoint)}</code></div>
     <p class="muted" style="margin-top:8px">${esc(res.handoff.message)}</p>
-  </div>`;
+  </div>
+  <h3 class="sec">执行状态跟踪 <span class="muted" style="font-weight:400;font-size:12px">GET /api/v1/intent/${esc(res.intent_id)} · 自动轮询中</span></h3>
+  <div id="intent-track"><p class="muted">查询中…</p></div>`;
   $('#intent-result').innerHTML = html;
+  pollIntentStatus(res.intent_id);
+}
+let intentPollTimer = null;
+async function pollIntentStatus(iid){
+  clearInterval(intentPollTimer);
+  const tick = async ()=>{
+    try{
+      const st = await api('/api/v1/intent/'+iid);
+      renderIntentTrack(st);
+      if(st.status==='completed'||st.status==='needs_clarification') clearInterval(intentPollTimer);
+    }catch(e){ clearInterval(intentPollTimer); const el=$('#intent-track'); if(el) el.innerHTML = `<p class="err">${esc((e.data&&e.data.detail)||'状态查询失败')}</p>`; }
+  };
+  await tick();
+  intentPollTimer = setInterval(tick, 1500);
+}
+function renderIntentTrack(st){
+  const el = $('#intent-track'); if(!el) return;
+  let html = `<div class="stage-flow">` + st.stages.map(s=>`<span class="st ${s.state}">${s.state==='done'?'✓ ':''}${esc(s.label.split(' ·')[0])}</span>`).join('<span class="arrow muted">→</span>') + `</div>`;
+  html += `<div class="pbar"><i style="width:${st.progress}%"></i></div>`;
+  html += `<div class="muted" style="font-size:12px;margin-bottom:8px">状态：<b class="${st.status==='completed'?'ok':''}">${esc(st.status)}</b> · ${esc(st.status_label)}${st.summary?` · ${esc(st.summary)}`:''}</div>`;
+  if(st.execution_trace && st.execution_trace.length){
+    const byAgent = {};
+    st.execution_trace.forEach(s => (byAgent[s.agent] = byAgent[s.agent]||{color:s.agent_color, list:[]}).list.push(s));
+    html += `<div class="muted" style="font-size:12px;margin-bottom:4px">网络内部 Network Agent 回传的执行轨迹：</div>`;
+    for(const [agent, g] of Object.entries(byAgent)){
+      html += `<div class="agent-block" style="border-left-color:${g.color}">
+        <b style="color:${g.color}">${esc(agent)}</b>
+        ${g.list.map(s=>`<div style="margin:4px 0;font-size:13px"><b>Step ${s.step} · ${esc(s.name)}</b> <span class="mono muted" style="font-size:11px">${s.capability}</span> <span class="ok" style="font-size:11px">✓ ${s.latency_ms}ms</span></div>`).join('')}
+      </div>`;
+    }
+  }
+  el.innerHTML = html;
 }
 
 /* ============ Skill 文档 ============ */
@@ -866,7 +961,13 @@ async function loadAfBoard(){
       el.innerHTML = '<p class="muted">尚未注册任何能力。注册你的第一个能力，让网络发现并调用它 →</p>';
       return;
     }
-    el.innerHTML = res.capabilities.map(c=>`
+    const bill = res.billing||{};
+    el.innerHTML = (bill.total_calls?`<div class="agent-block" style="border-left-color:var(--orange);display:flex;gap:24px;flex-wrap:wrap">
+      <span>被网络调用 <b style="color:var(--accent)">${bill.total_calls}</b> 次</span>
+      <span>累计计费 <b style="color:var(--orange)">¥${bill.gross_revenue}</b></span>
+      <span>分成 <b class="muted" style="font-size:12px">${esc(bill.revenue_share)}</b></span>
+      <span>我的收益 <b class="ok">¥${bill.af_income}</b></span>
+    </div>`:'') + res.capabilities.map(c=>`
       <div class="tp-card">
         <b>${esc(c.name)}</b>
         ${c.discovered?'<span class="badge-found">✓ 已被网络发现</span>':'<span class="badge-wait">registered · 等待网络调用</span>'}
@@ -913,6 +1014,79 @@ $('#af-submit').onclick = async ()=>{
 function refreshAll(){ afTotalCalls = -1; afBoardCache = ''; renderAccounts(); loadMarket(); }
 renderAccounts();
 loadMarket();
+
+/* ============ AF 智能终端 ============ */
+let termInit = false, termPending = null;
+function tprint(html, cls){ const s=$('#term-screen'); const d=document.createElement('div'); if(cls)d.className=cls; d.innerHTML=html; s.appendChild(d); s.scrollTop=s.scrollHeight; }
+function tagent(t){ tprint('🤖 <b>[AF Agent]</b> '+t, 'tl-agent'); }
+function tnef(t){ tprint('🛡️ <b>[NEF]</b> '+t, 'tl-nef'); }
+function initTerm(){
+  if(termInit) return; termInit = true;
+  tprint('<b>AF 智能终端</b> — 你的 AI Agent（类似 Claude Code）已将 NEF 配置为 MCP Server','tl-ok');
+  tprint('<span class="muted">mcp server: nef-exposure · endpoint: /api/v1/mcp · auth: Bearer '+(apiKey()?apiKey().slice(0,14)+'…':'（无 Key，请先订阅任意能力）')+'</span>');
+  tagent('输入 <code>tools</code> 查看可用工具；<code>call &lt;tool_id&gt;</code> 让我尝试调用；<code>help</code> 查看全部指令。或点「▶ 自动演示」。');
+}
+async function termCall(toolId, confirmPay){
+  const c = CAPS.find(x=>x.id===toolId);
+  if(!c){ tagent(`我在 NEF 工具箱里没找到 <code>${esc(toolId)}</code>，先用 <code>tools</code> 看看有什么。`); return; }
+  const args = {};
+  c.params.forEach(p=>{ if(p.default!==undefined&&p.default!==null) args[p.name]=p.default; else if(p.required) args[p.name]= p.enum?p.enum[0]:'demo_'+p.name; });
+  if(confirmPay) args._confirm_pay = true;
+  tagent(`正在通过 MCP 调用 <code>tools/call</code> → <code>${toolId}</code>${confirmPay?'（已附 _confirm_pay，主人已授权 ✓）':''} …`);
+  try{
+    const res = await api('/api/v1/mcp/tools/call',{method:'POST',body:JSON.stringify({jsonrpc:'2.0',id:9,method:'tools/call',params:{name:toolId,arguments:args}})});
+    const body = JSON.parse(res.result.content[0].text);
+    if(res.result.payment_required){
+      tnef('鉴权通过，但该工具未订阅 —— 返回订阅提醒：');
+      tprint(`💳 <b>${esc(body.name)}</b>：${body.options.map(o=>`${o.type==='monthly'?'包月':'按次'} <b>${esc(o.price)}</b>`).join(' ｜ ')}`, 'tl-pay');
+      tagent(`⚠️ 这个操作需要付费。<b>主人，是否按次支付调用一次「${esc(body.name)}」？</b> 输入 <code>y</code> 确认 / <code>n</code> 取消`);
+      termPending = toolId;
+      return;
+    }
+    tnef(`鉴权通过 ✓ 账号 ${esc(body.nef_auth.account)} · scope ${esc(body.nef_auth.scope)} · 审计 ${esc(body.nef_auth.request_id)}`);
+    if(body.billing) tprint('💳 '+esc(body.billing.message), 'tl-pay');
+    tagent(`调用成功！结果摘要：<span class="tl-ok">${esc(JSON.stringify(body.result||body).slice(0,160))}…</span>`);
+  }catch(e){
+    tnef(`<span class="tl-err">拒绝：${esc((e.data&&e.data.detail&&(e.data.detail.message||e.data.detail))||'调用失败（是否还没有 API Key？请先在能力超市订阅任意能力）')}</span>`);
+  }
+}
+async function termExec(cmd){
+  tprint('<b>af-agent&gt;</b> '+esc(cmd), 'tl-user');
+  const [op, ...rest] = cmd.trim().split(/\s+/);
+  if(!op) return;
+  if(termPending && ['y','yes','n','no'].includes(op.toLowerCase())){
+    const id = termPending; termPending = null;
+    if(op.toLowerCase().startsWith('y')){ tprint('👤 <b>[主人]</b> 已确认支付 ✓','tl-ok'); await termCall(id, true); }
+    else { tprint('👤 <b>[主人]</b> 取消支付','tl-err'); tagent('好的，已取消。也可以包月订阅更划算。'); }
+    return;
+  }
+  switch(op.toLowerCase()){
+    case 'help': tagent('指令：<code>tools</code> 列出 MCP 工具 ｜ <code>call &lt;tool_id&gt;</code> 调用工具 ｜ <code>y/n</code> 确认/取消支付 ｜ <code>clear</code> 清屏'); break;
+    case 'clear': $('#term-screen').innerHTML=''; break;
+    case 'tools': {
+      tagent('正在请求 <code>tools/list</code> …');
+      try{
+        const res = await api('/api/v1/mcp/tools/list',{method:'POST',body:JSON.stringify({jsonrpc:'2.0',id:8,method:'tools/list',params:{}})});
+        const ts = res.result.tools;
+        tnef(`返回 ${ts.length} 个工具（✓=已订阅，💳=未订阅可按次）：`);
+        tprint(ts.slice(0,40).map(t=>`${t.subscribed===false?'💳':'✓'} <code>${t.name}</code>`).join('　'), 'muted');
+      }catch(e){ tnef('<span class="tl-err">401 — 请先在能力超市订阅任意能力生成 API Key</span>'); }
+      break;
+    }
+    case 'call': await termCall(rest[0]||'', false); break;
+    default: tagent(`我不认识 <code>${esc(op)}</code>，试试 <code>help</code>。`);
+  }
+}
+$('#term-send').onclick = ()=>{ const v=$('#term-input').value.trim(); if(v){ $('#term-input').value=''; termExec(v); } };
+$('#term-input').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#term-send').click(); });
+$('#term-demo').onclick = async ()=>{
+  const wait = ms=>new Promise(r=>setTimeout(r,ms));
+  await termExec('tools'); await wait(1600);
+  const subs = await mySubscribedCaps();
+  const unsub = CAPS.find(c=>c.status==='available'&&c.source!=='third_party'&&!subs.includes(c.id));
+  await termExec('call '+(unsub?unsub.id:'target_detection')); await wait(1800);
+  if(termPending) await termExec('y');
+};
 </script>
 </body>
 </html>
