@@ -279,7 +279,33 @@ def get_skill(pkg_id: str):
     }
 
 
-# ===== 订阅 / 鉴权 =====
+# ===== 账号注册 / 订阅 / 鉴权 =====
+def _ensure_account(account: str) -> str:
+    """注册即发凭证：账号不存在则创建并签发 API Key（订阅只记录权益）"""
+    key = ACCOUNT_KEYS.get(account)
+    if not key:
+        key = "nef_" + secrets.token_hex(16)
+        API_KEYS[key] = {"account": account, "subscriptions": set(),
+                         "packages": set(), "scopes": set(DEFAULT_SCOPES),
+                         "created": time.time()}
+        ACCOUNT_KEYS[account] = key
+    return key
+
+
+@app.post("/api/v1/register")
+def register_account(req: SubscribeReq):
+    """开发者注册：立即签发 API Key（无需任何订阅，可按次调用或后续订阅）"""
+    if not req.account.strip():
+        raise HTTPException(422, "账号名称不能为空")
+    existed = req.account in ACCOUNT_KEYS
+    key = _ensure_account(req.account)
+    rec = API_KEYS[key]
+    return {"account": req.account, "api_key": key,
+            "scopes": sorted(rec["scopes"]),
+            "message": ("账号已存在，返回现有 API Key" if existed else
+                        "注册成功，已签发 API Key。订阅能力/套餐可包月计费，未订阅能力可按次付费调用")}
+
+
 @app.post("/api/v1/subscribe")
 def subscribe(req: SubscribeReq):
     bad = [c for c in req.capability_ids if c not in CAP_INDEX]
@@ -289,20 +315,14 @@ def subscribe(req: SubscribeReq):
     planned = [c for c in req.capability_ids if CAP_INDEX[c].status == "planned"]
     if planned:
         raise HTTPException(403, f"能力规划中，暂未开放订阅: {', '.join(planned)}")
-    key = ACCOUNT_KEYS.get(req.account)
-    if not key:
-        key = "nef_" + secrets.token_hex(16)
-        API_KEYS[key] = {"account": req.account, "subscriptions": set(),
-                         "packages": set(), "scopes": set(DEFAULT_SCOPES),
-                         "created": time.time()}
-        ACCOUNT_KEYS[req.account] = key
+    key = _ensure_account(req.account)
     rec = API_KEYS[key]
     rec["subscriptions"] |= set(req.capability_ids)
     rec["packages"] |= set(req.package_ids)
     return {"account": req.account, "api_key": key,
             "subscriptions": sorted(rec["subscriptions"]),
             "packages": sorted(rec["packages"]),
-            "message": "订阅成功，已生成 API Key" }
+            "message": "订阅成功，权益已记录到账号（API Key 不变）"}
 
 
 @app.get("/api/v1/auth/info")

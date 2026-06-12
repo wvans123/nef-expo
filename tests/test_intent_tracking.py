@@ -61,3 +61,18 @@ def test_mcp_payment_reminder_flow():
     assert "payment_required" in r["result"]["content"][0]["text"]
     r2 = call({"area": "A", "_confirm_pay": True})
     assert "billing" in r2["result"]["content"][0]["text"]
+
+
+def test_register_issues_key_without_subscription():
+    r = client.post("/api/v1/register", json={"account": "fresh_af"})
+    assert r.status_code == 200
+    key = r.json()["api_key"]
+    h = {"Authorization": "Bearer " + key}
+    info = client.get("/api/v1/auth/info", headers=h).json()
+    assert info["subscribed_capabilities"] == []
+    # 未订阅也能走按次付费
+    r2 = client.post("/api/v1/capabilities/target_detection/invoke",
+                     json={"area": "A", "_confirm_pay": True}, headers=h)
+    assert r2.status_code == 200 and r2.json()["billing"]["mode"] == "per_call"
+    # 再注册同名账号返回同一个 Key
+    assert client.post("/api/v1/register", json={"account": "fresh_af"}).json()["api_key"] == key

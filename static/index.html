@@ -370,16 +370,21 @@ function renderAccounts(){
     Object.keys(accounts).map(a=>`<option ${a===current?'selected':''}>${esc(a)}</option>`).join('');
   const st = $('#acct-status');
   if(current && apiKey()) st.innerHTML = `<b>${esc(current)}</b> · <span class="key mono">${apiKey().slice(0,14)}…</span>`;
-  else if(current) st.innerHTML = `<b>${esc(current)}</b> · <span class="muted">未订阅（无 Key）</span>`;
+  else if(current) st.innerHTML = `<b>${esc(current)}</b> · <span class="muted">无 Key（点击注册账号重新签发）</span>`;
   else st.textContent = '未登录';
 }
 $('#acct-select').onchange = e => { current = e.target.value; saveAccounts(); refreshAll(); };
-$('#btn-register-acct').onclick = () => {
+$('#btn-register-acct').onclick = async () => {
   const name = prompt('输入账号名称（如 developer_zhang）：');
   if(!name) return;
+  current = name;
   if(!accounts[name]) accounts[name] = {api_key:''};
-  current = name; saveAccounts(); renderAccounts(); refreshAll();
-  toast('账号 ' + name + ' 已创建/切换');
+  try{
+    const res = await api('/api/v1/register',{method:'POST',body:JSON.stringify({account:name})});
+    accounts[name] = {api_key: res.api_key};
+    toast('✓ 注册成功，已签发 API Key');
+  }catch(e){ toast('注册失败：'+((e.data&&e.data.detail)||''), false); }
+  saveAccounts(); renderAccounts(); refreshAll();
 };
 
 /* ============ Tab 切换 ============ */
@@ -511,7 +516,7 @@ window.doSubscribe = async (kind, id) => {
 /* ============ 我的订阅 ============ */
 async function renderSubs(){
   const el = $('#subs-content');
-  if(!apiKey()){ el.innerHTML = '<p class="muted">当前账号尚未订阅任何能力。前往「能力超市」订阅后将自动生成 API Key。</p>'; return; }
+  if(!apiKey()){ el.innerHTML = '<p class="muted">请先在顶栏「注册账号」——注册即签发 API Key，订阅只是记录权益。</p>'; return; }
   try{
     const info = await api('/api/v1/auth/info');
     const capCards = info.subscribed_capabilities.map(cid=>{
@@ -538,13 +543,14 @@ async function renderSubs(){
       </div>
       ${info.packages.length?`<h3 class="sec">已订阅套餐</h3><div>${info.packages.map(p=>{const pk=PKGS.find(x=>x.id===p);return `<span class="pkg-chip" style="display:inline-block;margin:4px"><b>${esc(pk.name)}</b><span class="pprice">${esc(pk.price)}</span></span>`}).join('')}</div>`:''}
       <h3 class="sec">已订阅能力（${info.subscribed_capabilities.length}）</h3>
+      ${info.subscribed_capabilities.length?'':'<p class="muted" style="font-size:12px">还没有订阅——你已持有 API Key，可直接按次付费调用任何可用能力（API/MCP 调用时会收到价格提醒），高频使用建议包月订阅。</p>'}
       <div class="grid">${capCards}</div>`;
   }catch(e){
     if(e && e.status === 401){
       el.innerHTML = `<div class="agent-block" style="border-left-color:var(--red)">
         <b class="err">API Key 已失效</b>
-        <p class="muted" style="font-size:12px;margin:6px 0">服务重启后内存中的 Key 会清空（Demo 无持久化）。重新订阅任意能力/套餐即可为本账号生成新 Key。</p>
-        <button class="primary" onclick="accounts[current]={api_key:''};saveAccounts();renderAccounts();document.querySelector('#tabs button[data-tab=market]').click();toast('请重新订阅以生成新 API Key')">前往能力超市重新订阅</button>
+        <p class="muted" style="font-size:12px;margin:6px 0">服务重启后内存中的 Key 会清空（Demo 无持久化）。点击下方按钮重新签发即可（订阅权益需重新订阅）。</p>
+        <button class="primary" onclick="(async()=>{accounts[current]={api_key:''};const r=await api('/api/v1/register',{method:'POST',body:JSON.stringify({account:current})});accounts[current]={api_key:r.api_key};saveAccounts();renderAccounts();renderSubs();toast('✓ 已重新签发 API Key')})()">重新签发 API Key</button>
       </div>`;
     }else{
       el.innerHTML = `<p class="err">订阅信息加载失败：${esc((e&&e.data&&e.data.detail)||e.message||'未知错误')}</p>`;
@@ -586,7 +592,7 @@ async function mySubscribedCaps(){
 async function renderApiTab(){
   const subs = await mySubscribedCaps();
   const sel = $('#api-cap-select');
-  if(!apiKey()){ sel.innerHTML = '<option value="">（请先订阅任意能力以生成 API Key）</option>'; $('#api-params').innerHTML=''; $('#api-endpoint').textContent=''; return; }
+  if(!apiKey()){ sel.innerHTML = '<option value="">（请先在顶栏注册账号签发 API Key）</option>'; $('#api-params').innerHTML=''; $('#api-endpoint').textContent=''; return; }
   const avail = CAPS.filter(c=>c.status==='available'&&c.source!=='third_party');
   const subbed = avail.filter(c=>subs.includes(c.id)), unsub = avail.filter(c=>!subs.includes(c.id));
   sel.innerHTML = subbed.map(c=>`<option value="${c.id}">✓ ${esc(c.name)} (${c.id})</option>`).join('') +
@@ -607,7 +613,7 @@ function renderApiChain(){
     `<button style="font-size:11px;padding:2px 8px;margin-top:4px" onclick="apiChain=[];renderApiChain()">清空</button>`;
 }
 async function sendApi(confirmPay){
-  const id = $('#api-cap-select').value; if(!id) return toast('请先订阅能力', false);
+  const id = $('#api-cap-select').value; if(!id) return toast('请先在顶栏注册账号', false);
   const c = CAPS.find(x=>x.id===id);
   const params = collectParams(c,'apip');
   if(confirmPay) params._confirm_pay = true;
@@ -637,10 +643,12 @@ async function renderMcpTab(){
   const subs = await mySubscribedCaps();
   let myPkgs = [];
   if(apiKey()){ try{ myPkgs = (await api('/api/v1/auth/info')).packages; }catch(e){} }
-  const ids = [...subs, ...CAPS.filter(c=>c.source==='third_party').map(c=>c.id)];
-  if(!ids.length && !myPkgs.length){ sel.innerHTML = '<option value="">（请先订阅能力，工具箱为空）</option>'; $('#mcp-params').innerHTML=''; return; }
+  if(!apiKey()){ sel.innerHTML = '<option value="">（请先在顶栏注册账号）</option>'; $('#mcp-params').innerHTML=''; return; }
+  const avail = CAPS.filter(c=>c.status==='available');
+  const ids = [...avail.filter(c=>subs.includes(c.id)||c.source==='third_party').map(c=>c.id),
+               ...avail.filter(c=>!subs.includes(c.id)&&c.source!=='third_party').map(c=>c.id)];
   sel.innerHTML = myPkgs.map(pid=>{ const p=PKGS.find(x=>x.id===pid); return p?`<option value="scenario_${pid}">scenario_${pid} — ▶ 场景：${esc(p.name)}</option>`:''; }).join('')
-    + ids.map(id=>{ const c=CAPS.find(x=>x.id===id); return c?`<option value="${id}">${c.id} — ${esc(c.name)}</option>`:''; }).join('');
+    + ids.map(id=>{ const c=CAPS.find(x=>x.id===id); const sub=subs.includes(id)||c.source==='third_party'; return c?`<option value="${id}">${sub?'✓':'💳'} ${c.id} — ${esc(c.name)}${sub?'':'（未订阅·可按次）'}</option>`:''; }).join('');
   sel.onchange = ()=>{
     if(sel.value.startsWith('scenario_')){ $('#mcp-params').innerHTML = '<p class="muted" style="font-size:12px">场景级 Tool 无需参数：一次调用即由网络内部 Agent 编排执行整个场景并回传执行轨迹。</p>'; return; }
     const c=CAPS.find(x=>x.id===sel.value); if(c) $('#mcp-params').innerHTML = paramForm(c,'mcpp');
@@ -653,17 +661,17 @@ $('#mcp-list-btn').onclick = async ()=>{
   try{
     const res = await api('/api/v1/mcp/tools/list',{method:'POST',body:JSON.stringify(req)});
     $('#mcp-resp').textContent = jfmt(res);
-  }catch(e){ $('#mcp-resp').textContent = jfmt(e.data||{detail:'需要 API Key（请先订阅）'}); }
+  }catch(e){ $('#mcp-resp').textContent = jfmt(e.data||{detail:'需要 API Key（请先在顶栏注册账号）'}); }
 };
 $('#mcp-call').onclick = async ()=>{
-  const id = $('#mcp-tool-select').value; if(!id) return toast('请先订阅能力', false);
+  const id = $('#mcp-tool-select').value; if(!id) return toast('请先在顶栏注册账号', false);
   const c = CAPS.find(x=>x.id===id);
   const req = {jsonrpc:'2.0', id:2, method:'tools/call', params:{name:id, arguments:(id.startsWith('scenario_')||!c)?{}:collectParams(c,'mcpp')}};
   $('#mcp-req').textContent = jfmt(req);
   try{
     const res = await api('/api/v1/mcp/tools/call',{method:'POST',body:JSON.stringify(req)});
     $('#mcp-resp').textContent = jfmt(res);
-  }catch(e){ $('#mcp-resp').textContent = jfmt(e.data||{detail:'需要 API Key（请先订阅）'}); }
+  }catch(e){ $('#mcp-resp').textContent = jfmt(e.data||{detail:'需要 API Key（请先在顶栏注册账号）'}); }
 };
 
 /* ============ Intent ============ */
@@ -680,7 +688,7 @@ $('#intent-examples').innerHTML = INTENT_EXAMPLES.map(t=>`<span class="pill" sty
 $('#intent-send').onclick = async ()=>{
   const text = $('#intent-input').value.trim();
   if(!text) return;
-  if(!apiKey()) return toast('Intent 调用需要 API Key，请先订阅', false);
+  if(!apiKey()) return toast('Intent 调用需要 API Key，请先注册账号', false);
   $('#intent-result').innerHTML = '<p class="muted">NEF 正在校验 API Key 并转发 Intent…</p>';
   try{
     const res = await api('/api/v1/intent',{method:'POST',body:JSON.stringify({text})});
@@ -758,7 +766,7 @@ async function fetchSkill(){
 }
 $('#skill-run').onclick = async ()=>{
   const id = $('#skill-pkg-select').value || PKGS[0].id;
-  if(!apiKey()) return toast('一键运行需要 API Key，请先订阅', false);
+  if(!apiKey()) return toast('一键运行需要 API Key，请先注册账号', false);
   $('#skill-run-result').innerHTML = '<p class="muted">NEF 鉴权中，正在转交网络内部 Agent 执行场景…</p>';
   try{
     const res = await api(`/api/v1/scenarios/${id}/run`, {method:'POST'});
@@ -903,7 +911,7 @@ window.renderPipe = renderPipe; window.pipeSteps = pipeSteps;
 $('#pipe-name').oninput = renderPipe;
 $('#pipe-create').onclick = async ()=>{
   if(!pipeSteps.length) return toast('Pipeline 为空', false);
-  if(!apiKey()) return toast('请先订阅获得 API Key', false);
+  if(!apiKey()) return toast('请先注册账号获得 API Key', false);
   try{
     const res = await api('/api/v1/compose',{method:'POST',body:JSON.stringify({name:$('#pipe-name').value||'my_pipeline', steps:pipeSteps})});
     toast('Pipeline 已创建: ' + res.id);
@@ -948,7 +956,7 @@ function fmtTs(ts){ const d=new Date(ts*1000); return d.toTimeString().slice(0,8
 
 async function loadAfBoard(){
   const el = $('#af-board');
-  if(!apiKey()){ el.innerHTML = '<p class="muted">请先注册账号并订阅任意能力获得 API Key。</p>'; return; }
+  if(!apiKey()){ el.innerHTML = '<p class="muted">请先在顶栏注册账号获得 API Key。</p>'; return; }
   try{
     const res = await api('/api/v1/third-party/my-calls');
     const total = res.capabilities.reduce((s,c)=>s+c.call_count,0);
@@ -995,7 +1003,7 @@ window.simCall = async id=>{
 };
 
 $('#af-submit').onclick = async ()=>{
-  if(!apiKey()) return toast('注册 AF 能力需要 API Key，请先订阅任意能力', false);
+  if(!apiKey()) return toast('注册 AF 能力需要 API Key，请先注册账号', false);
   const kw = $('#af-keywords').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
   const body = {name:$('#af-name').value.trim(), cap_type:$('#af-type').value,
                 description:$('#af-desc').value.trim(), endpoint:$('#af-endpoint').value.trim(),
@@ -1023,7 +1031,7 @@ function tnef(t){ tprint('🛡️ <b>[NEF]</b> '+t, 'tl-nef'); }
 function initTerm(){
   if(termInit) return; termInit = true;
   tprint('<b>AF 智能终端</b> — 你的 AI Agent（类似 Claude Code）已将 NEF 配置为 MCP Server','tl-ok');
-  tprint('<span class="muted">mcp server: nef-exposure · endpoint: /api/v1/mcp · auth: Bearer '+(apiKey()?apiKey().slice(0,14)+'…':'（无 Key，请先订阅任意能力）')+'</span>');
+  tprint('<span class="muted">mcp server: nef-exposure · endpoint: /api/v1/mcp · auth: Bearer '+(apiKey()?apiKey().slice(0,14)+'…':'（无 Key，请先在顶栏注册账号）')+'</span>');
   tagent('输入 <code>tools</code> 查看可用工具；<code>call &lt;tool_id&gt;</code> 让我尝试调用；<code>help</code> 查看全部指令。或点「▶ 自动演示」。');
 }
 async function termCall(toolId, confirmPay){
@@ -1047,7 +1055,7 @@ async function termCall(toolId, confirmPay){
     if(body.billing) tprint('💳 '+esc(body.billing.message), 'tl-pay');
     tagent(`调用成功！结果摘要：<span class="tl-ok">${esc(JSON.stringify(body.result||body).slice(0,160))}…</span>`);
   }catch(e){
-    tnef(`<span class="tl-err">拒绝：${esc((e.data&&e.data.detail&&(e.data.detail.message||e.data.detail))||'调用失败（是否还没有 API Key？请先在能力超市订阅任意能力）')}</span>`);
+    tnef(`<span class="tl-err">拒绝：${esc((e.data&&e.data.detail&&(e.data.detail.message||e.data.detail))||'调用失败（是否还没有 API Key？请先在顶栏注册账号）')}</span>`);
   }
 }
 async function termExec(cmd){
@@ -1070,7 +1078,7 @@ async function termExec(cmd){
         const ts = res.result.tools;
         tnef(`返回 ${ts.length} 个工具（✓=已订阅，💳=未订阅可按次）：`);
         tprint(ts.slice(0,40).map(t=>`${t.subscribed===false?'💳':'✓'} <code>${t.name}</code>`).join('　'), 'muted');
-      }catch(e){ tnef('<span class="tl-err">401 — 请先在能力超市订阅任意能力生成 API Key</span>'); }
+      }catch(e){ tnef('<span class="tl-err">401 — 请先在顶栏注册账号签发 API Key</span>'); }
       break;
     }
     case 'call': await termCall(rest[0]||'', false); break;
