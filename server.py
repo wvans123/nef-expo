@@ -171,7 +171,7 @@ def list_packages():
     return {"count": len(out), "packages": out}
 
 
-# ===== 场景级一键调用（一个请求跑完整场景，伙伴侧编排并回传执行轨迹） =====
+# ===== 场景级一键调用（一个请求跑完整场景，网络内部 Agent 编排并回传执行轨迹） =====
 def _scenario_run(pkg, key, rec, channel: str):
     auth = _auth_stamp(key, rec, "capabilities:invoke")
     task_id = "partner_task_" + uuid.uuid4().hex[:12]
@@ -185,7 +185,7 @@ def _scenario_run(pkg, key, rec, channel: str):
                           "narrative": False})
     for s in pkg.get("story_steps", []):
         n += 1
-        steps.append({"step": n, "agent": "Partner Network Agent", "agent_color": "#bc8cff",
+        steps.append({"step": n, "agent": "网络内部 Network Agent", "agent_color": "#bc8cff",
                       "capability": None, "name": s["name"], "detail": s["detail"],
                       "latency_ms": None, "status": "ok", "narrative": True})
     pipeline = [
@@ -194,20 +194,20 @@ def _scenario_run(pkg, key, rec, channel: str):
         {"stage": "nef_accept", "label": "NEF 受理",
          "detail": f"场景调用（{channel}）已受理，审计请求 ID {auth['request_id']}"},
         {"stage": "partner_route", "label": "转交网络 Agent",
-         "detail": f"场景请求转交 Partner Network Agent，伙伴侧任务 {task_id}"},
-        {"stage": "partner_execute", "label": "伙伴侧编排执行",
-         "detail": f"Partner Network Agent 按场景 Skill 编排 {len(steps)} 个步骤并执行"},
+         "detail": f"场景请求转交 网络内部 Network Agent，网络内部任务 {task_id}"},
+        {"stage": "partner_execute", "label": "网络内部编排执行",
+         "detail": f"网络内部 Network Agent 按场景 Skill 编排 {len(steps)} 个步骤并执行"},
         {"stage": "aggregate", "label": "回执返回",
-         "detail": "NEF 将伙伴侧执行回执（含执行轨迹）返回 AF"},
+         "detail": "NEF 将网络内部执行回执（含执行轨迹）返回 AF"},
     ]
     return {
         "scenario_id": pkg["id"], "scenario": pkg["name"],
         "status": "completed", "task_id": task_id,
-        "partner_agent": "Partner Network Agent",
+        "partner_agent": "网络内部 Network Agent",
         "auth": auth, "pipeline": pipeline,
         "execution_trace": steps,
         "total_latency_ms": sum(s["latency_ms"] or 0 for s in steps),
-        "message": "场景由伙伴网络 Agent 编排执行，NEF 负责鉴权、受理、审计与回执转发。",
+        "message": "场景由网络内部 Agent 编排执行，NEF 负责鉴权、受理、审计与回执转发。",
     }
 
 
@@ -282,9 +282,7 @@ def auth_info(authorization: str = Header(None)):
             "packages": sorted(rec["packages"]),
             "estimated_monthly_cost": round(est, 1),
             "authentication": {
-                "scheme": "Bearer API Key",
-                "status": "verified",
-                "credential": f"{key[:8]}...{key[-4:]}",
+                **_auth_evidence(key, rec, "auth:info", "req_" + uuid.uuid4().hex[:12]),
                 "scopes": sorted(rec.get("scopes", DEFAULT_SCOPES)),
             }}
 
@@ -359,7 +357,7 @@ def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
     for pid in sorted(rec["packages"]):
         pkg = PKG_INDEX[pid]
         tools.append({"name": f"scenario_{pid}",
-                      "description": f"一键运行场景「{pkg['name']}」：{pkg['description']}（伙伴侧编排执行并回传执行轨迹）",
+                      "description": f"一键运行场景「{pkg['name']}」：{pkg['description']}（网络内部 Agent 编排执行并回传执行轨迹）",
                       "inputSchema": {"type": "object", "properties": {}, "required": []}})
     return {"jsonrpc": "2.0", "id": (req.id if req else 1), "result": {"tools": tools}}
 
@@ -478,7 +476,7 @@ def skill_steps(pkg):
 
 
 def agent_flow(pkg):
-    """伙伴侧参考视图的 Agent 调度结构"""
+    """网络内部视图的 Agent 调度结构"""
     groups = {}
     for i, cid in enumerate(pkg["capabilities"], 1):
         akey, agent = agent_for_capability(cid)
@@ -559,18 +557,18 @@ def build_external_skill(pkg):
     md += ["## 编排建议",
            "",
            f"按上述顺序依次调用。前一步的输出（如 target_id、task_id）可作为后一步的输入参数。",
-           "如使用 `POST /api/v1/intent`，NEF 仅完成鉴权、受理和转发；具体场景编排由合作伙伴网络 Agent 负责。",
+           "如使用 `POST /api/v1/intent`，NEF 仅完成鉴权、受理和转发；具体场景编排由网络内部 Network Agent 负责。",
            ""]
     return "\n".join(md)
 
 
 def build_internal_skill(pkg):
-    """伙伴侧 Skill：面向网络 Agent 的编排蓝图"""
+    """网络内部 Skill：面向网络内部 Agent 的编排蓝图"""
     flow = agent_flow(pkg)
-    md = [f"# Skill: {pkg['name']}（伙伴侧 / Agent 编排蓝图）",
+    md = [f"# Skill: {pkg['name']}（网络内部 / Agent 编排蓝图）",
           "",
-          f"> 触发条件：合作伙伴网络 Agent 接收 NEF 转发的 Intent，或 AF 显式调用套餐能力组合  ",
-          f"> 编排者：合作伙伴网络 Agent（不属于 NEF）",
+          f"> 触发条件：网络内部 Network Agent 接收 NEF 转发的 Intent，或 AF 显式调用套餐能力组合  ",
+          f"> 编排者：网络内部 Network Agent（NEF 信任域内的网络 Agent 体系）",
           "",
           "## 执行流程图",
           "",
@@ -617,7 +615,7 @@ def build_internal_skill(pkg):
     md += ["",
            "## 异常处理",
            "",
-           "- 任一步骤失败：伙伴网络 Agent 重试 1 次，仍失败则向 AF 返回部分结果 + 失败原因",
+           "- 任一步骤失败：网络内部 Agent 重试 1 次，仍失败则向 AF 返回部分结果 + 失败原因",
            "- QoS 类步骤失败不阻断感知/计算类步骤（弱依赖）",
            ""]
     return "\n".join(md)

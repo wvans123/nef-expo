@@ -4,8 +4,8 @@ import time
 import uuid
 
 
-PARTNER_AGENT_NAME = "Partner Network Agent"
-PARTNER_INTENT_ENDPOINT = "https://partner-agent.example.com/v1/intents"
+PARTNER_AGENT_NAME = "网络内部 Network Agent"
+PARTNER_INTENT_ENDPOINT = "https://network-agent.nef.internal/v1/intents"
 
 
 def process_intent(text: str, auth: dict) -> dict:
@@ -29,12 +29,12 @@ def process_intent(text: str, auth: dict) -> dict:
         {
             "stage": "partner_route",
             "label": "转发网络 Agent",
-            "detail": f"Intent 原文透传至合作伙伴 {PARTNER_AGENT_NAME}，NEF 不做语义解析和业务执行",
+            "detail": f"Intent 原文透传至{PARTNER_AGENT_NAME}，NEF 不做语义解析和业务执行",
         },
         {
             "stage": "partner_accept",
-            "label": "伙伴侧接收",
-            "detail": f"伙伴侧任务 {partner_task_id} 已接收，后续状态与结果由伙伴系统维护",
+            "label": "网络内部接收",
+            "detail": f"网络内部任务 {partner_task_id} 已接收，后续状态与结果由网络内部 Agent 体系维护",
         },
     ]
 
@@ -50,8 +50,8 @@ def process_intent(text: str, auth: dict) -> dict:
             "partner_agent": PARTNER_AGENT_NAME,
             "endpoint": PARTNER_INTENT_ENDPOINT,
             "task_id": partner_task_id,
-            "status_owner": "partner_network_agent",
+            "status_owner": "internal_network_agent",
             "status_endpoint": status_endpoint,
-            "message": "Intent 已转交。业务理解、执行状态和最终结果由合作伙伴网络 Agent 负责。",
+            "message": "Intent 已转交。业务理解、执行状态和最终结果由网络内部 Network Agent 负责。",
         },
     }

@@ -411,6 +411,15 @@ PACKAGES = [
         ],
     },
     {
+        "id": "deterministic_conn", "name": "确定性连接保障套餐", "price": "49/月",
+        "description": "面向远程控制与实时交互的连接 SLA：QoS 保障、专属切片、链路诊断、移动性预测与连接事件订阅",
+        "capabilities": ["qos_guarantee", "slice_management", "network_diagnosis", "mobility_insight", "event_subscription"],
+        "scenario": "远程控制/实时交互 · 连接 SLA",
+        "story_steps": [
+            {"name": "连接 SLA 违约自动补偿", "detail": "连接质量未达承诺 SLA 时，网络自动触发计费补偿与告警工单"},
+        ],
+    },
+    {
         "id": "robot_patrol", "name": "机器狗巡检套餐", "price": "89/月",
         "description": "3GPP 无线感知与摄像头/激光雷达数据融合，让机器狗在雾天黑夜也看得清",
         "capabilities": ["sensing_fusion", "target_detection", "ai_inference", "precision_location", "event_subscription"],

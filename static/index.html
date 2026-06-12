@@ -80,6 +80,17 @@ h3.sec{margin:18px 0 10px;font-size:15px}
 .feat-badge{background:linear-gradient(90deg,#39d2ff33,#bc8cff33);border:1px solid var(--accent);color:var(--accent);font-size:10px;border-radius:10px;padding:1px 7px;margin-left:6px;vertical-align:1px}
 .story-badge{background:#bc8cff22;border:1px solid var(--purple);color:var(--purple);font-size:10px;border-radius:10px;padding:1px 7px;margin-left:6px}
 .auth-ribbon{display:inline-block;background:#39ffb014;border:1px solid #39ffb055;color:var(--green);font-size:12px;border-radius:8px;padding:4px 10px;margin-bottom:8px}
+/* Skill markdown 渲染 */
+.md{background:#081227;border:1px solid var(--border);border-radius:8px;padding:14px 16px;font-size:13px;max-height:640px;overflow:auto}
+.md h1{font-size:16px;margin:4px 0 10px;background:linear-gradient(90deg,#7cc7ff,#bc8cff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.md h2{font-size:14px;margin:14px 0 6px;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:4px}
+.md h3{font-size:13px;margin:10px 0 4px}
+.md p{margin:6px 0}
+.md ul{margin:6px 0 6px 20px}
+.md blockquote{border-left:3px solid var(--purple);color:var(--muted);padding:4px 10px;margin:8px 0;background:#bc8cff0d;border-radius:0 6px 6px 0;font-size:12px}
+.md code{background:#13265c;border-radius:4px;padding:0 5px;font-size:12px;color:#9fd8ff}
+.md pre{margin:8px 0}
+.md pre code{background:none;padding:0;color:var(--text)}
 /* 弹窗 */
 #modal-bg{display:none;position:fixed;inset:0;background:#000a;z-index:100;align-items:center;justify-content:center}
 #modal-bg.show{display:flex}
@@ -203,7 +214,7 @@ th{background:var(--card);color:var(--muted)}
   <!-- Tab 5 Intent -->
   <div class="tabpane" id="pane-intent">
     <h3 class="sec">Intent 安全受理与网络 Agent 转发</h3>
-    <p class="muted" style="max-width:900px;margin-bottom:10px">NEF 负责鉴权、受理、审计和路由，随后将 Intent 原文转交合作伙伴网络 Agent。语义理解、业务执行、任务状态和最终结果均由伙伴系统负责。</p>
+    <p class="muted" style="max-width:900px;margin-bottom:10px">NEF 负责鉴权、受理、审计和路由，随后将 Intent 原文转交网络内部 Network Agent。语义理解、业务执行、任务状态和最终结果均由网络内部 Agent 体系负责。</p>
     <div class="muted" style="margin-bottom:8px">示例意图（点击填入）：</div>
     <div id="intent-examples"></div>
     <div style="display:flex;gap:10px;margin:12px 0">
@@ -215,19 +226,19 @@ th{background:var(--card);color:var(--muted)}
 
   <!-- Tab 6 Skill -->
   <div class="tabpane" id="pane-skill">
-    <h3 class="sec">场景蓝图 <span class="muted" style="font-weight:400;font-size:12px">— 一份 Skill，双重角色：外部指导 AF 调用，伙伴侧驱动 Agent 编排；也可一键运行整个场景</span></h3>
+    <h3 class="sec">场景蓝图 <span class="muted" style="font-weight:400;font-size:12px">— 一份 Skill，双重角色：外部指导 AF 调用，网络内部驱动 Agent 编排；也可一键运行整个场景</span></h3>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
       <select id="skill-pkg-select" style="width:240px"></select>
       <div>
         <button id="skill-view-ext" class="primary">外部视图（AF）</button>
-        <button id="skill-view-int">伙伴侧视图（Agent）</button>
+        <button id="skill-view-int">网络内部 Agent 视图</button>
         <button id="skill-run" style="border-color:var(--green);color:var(--green)">▶ 一键运行本场景</button>
       </div>
     </div>
     <div id="skill-run-result"></div>
     <div id="skill-wrap">
       <div id="skill-left"></div>
-      <div><label>Skill Markdown 原文</label><pre id="skill-md" style="max-height:640px">--</pre></div>
+      <div><label>Skill 文档（Markdown 渲染）</label><div id="skill-md" class="md">--</div></div>
     </div>
   </div>
 
@@ -282,7 +293,7 @@ th{background:var(--card);color:var(--muted)}
         <label>类型</label>
         <select id="af-type"><option value="ai_model">ai_model — AI 模型</option><option value="tool">tool — 工具</option><option value="data_source">data_source — 数据源</option></select>
         <label>描述</label><textarea id="af-desc" rows="2" placeholder="能力说明"></textarea>
-        <label>能力发现标签（逗号分隔，供伙伴网络 Agent 建立能力目录）</label><input id="af-keywords" placeholder="如：质检, 缺陷">
+        <label>能力发现标签（逗号分隔，供网络内部 Agent 建立能力目录）</label><input id="af-keywords" placeholder="如：质检, 缺陷">
         <label>端点 URL</label><input id="af-endpoint" placeholder="https://your-af.example.com/api/capability">
         <button class="primary" id="af-submit" style="margin-top:14px;width:100%">注册到 NEF</button>
         <div id="af-result" style="margin-top:14px"></div>
@@ -487,13 +498,26 @@ async function renderSubs(){
         <div class="stat"><span>估算月费用</span><b>¥${info.estimated_monthly_cost}</b></div>
       </div>
       <div class="agent-block" style="border-left-color:var(--green)">
-        <b class="ok">API Key 权限范围</b>
+        <b class="ok">🔐 NEF 鉴权流程（每次调用都会执行）</b>
+        <div class="auth-grid">${(info.authentication.checks||[]).map(c=>`
+          <div class="auth-check"><b>✓ ${esc(c.label)}</b><span class="muted">${esc(c.detail)}</span></div>`).join('')}</div>
+        <b class="ok" style="font-size:12px">API Key 权限范围（scope）</b>
         <div style="margin-top:5px">${info.authentication.scopes.map(s=>`<span class="pill" style="cursor:default">${esc(s)}</span>`).join('')}</div>
       </div>
       ${info.packages.length?`<h3 class="sec">已订阅套餐</h3><div>${info.packages.map(p=>{const pk=PKGS.find(x=>x.id===p);return `<span class="pkg-chip" style="display:inline-block;margin:4px"><b>${esc(pk.name)}</b><span class="pprice">${esc(pk.price)}</span></span>`}).join('')}</div>`:''}
       <h3 class="sec">已订阅能力（${info.subscribed_capabilities.length}）</h3>
       <div class="grid">${capCards}</div>`;
-  }catch(e){ el.innerHTML = `<p class="err">API Key 校验失败（服务可能已重启，请重新订阅）</p>`; }
+  }catch(e){
+    if(e && e.status === 401){
+      el.innerHTML = `<div class="agent-block" style="border-left-color:var(--red)">
+        <b class="err">API Key 已失效</b>
+        <p class="muted" style="font-size:12px;margin:6px 0">服务重启后内存中的 Key 会清空（Demo 无持久化）。重新订阅任意能力/套餐即可为本账号生成新 Key。</p>
+        <button class="primary" onclick="accounts[current]={api_key:''};saveAccounts();renderAccounts();document.querySelector('#tabs button[data-tab=market]').click();toast('请重新订阅以生成新 API Key')">前往能力超市重新订阅</button>
+      </div>`;
+    }else{
+      el.innerHTML = `<p class="err">订阅信息加载失败：${esc((e&&e.data&&e.data.detail)||e.message||'未知错误')}</p>`;
+    }
+  }
 }
 window.toast = toast;
 
@@ -557,7 +581,7 @@ async function renderMcpTab(){
   sel.innerHTML = myPkgs.map(pid=>{ const p=PKGS.find(x=>x.id===pid); return p?`<option value="scenario_${pid}">scenario_${pid} — ▶ 场景：${esc(p.name)}</option>`:''; }).join('')
     + ids.map(id=>{ const c=CAPS.find(x=>x.id===id); return c?`<option value="${id}">${c.id} — ${esc(c.name)}</option>`:''; }).join('');
   sel.onchange = ()=>{
-    if(sel.value.startsWith('scenario_')){ $('#mcp-params').innerHTML = '<p class="muted" style="font-size:12px">场景级 Tool 无需参数：一次调用即由伙伴网络 Agent 编排执行整个场景并回传执行轨迹。</p>'; return; }
+    if(sel.value.startsWith('scenario_')){ $('#mcp-params').innerHTML = '<p class="muted" style="font-size:12px">场景级 Tool 无需参数：一次调用即由网络内部 Agent 编排执行整个场景并回传执行轨迹。</p>'; return; }
     const c=CAPS.find(x=>x.id===sel.value); if(c) $('#mcp-params').innerHTML = paramForm(c,'mcpp');
   };
   sel.onchange();
@@ -589,6 +613,7 @@ const INTENT_EXAMPLES = [
   '帮我预测早高峰的车流量',
   '机器狗巡检，雾天也要看得清',
   'XR 会议把渲染放到边缘 GPU，画面不能卡顿',
+  '给我的远程机械臂开一条专属切片，时延要稳定可靠',
 ];
 $('#intent-examples').innerHTML = INTENT_EXAMPLES.map(t=>`<span class="pill" style="cursor:pointer" onclick="document.querySelector('#intent-input').value='${t}'">${t}</span>`).join('');
 $('#intent-send').onclick = async ()=>{
@@ -602,6 +627,10 @@ $('#intent-send').onclick = async ()=>{
   }catch(e){ $('#intent-result').innerHTML = `<p class="err">${esc(jfmt(e.data||{}))}</p>`; }
 };
 function renderIntentResult(res){
+  if(!res || !res.pipeline || !res.auth || !res.handoff){
+    $('#intent-result').innerHTML = `<p class="err">响应格式异常（前后端版本可能不一致，请重启 server.py 后重试）</p><pre>${esc(jfmt(res||{}))}</pre>`;
+    return;
+  }
   let html = `<div class="flow">` + res.pipeline.map((s,i)=>
     `<span class="node${s.stage.startsWith('partner')?' planning':''}" title="${esc(s.detail)}">${esc(s.label)}</span>${i<res.pipeline.length-1?'<span class="arrow">→</span>':''}`).join('') + `</div>`;
   html += `<div class="muted" style="font-size:12px;margin-bottom:10px">` + res.pipeline.map(s=>`<div>▸ <b>${esc(s.label)}</b>：${esc(s.detail)}</div>`).join('') + `</div>`;
@@ -610,10 +639,10 @@ function renderIntentResult(res){
   html += `<div class="handoff-card">
     <b style="color:var(--purple)">✓ 已转交 ${esc(res.handoff.partner_agent)}</b>
     <div class="kv" style="margin-top:8px"><b>Intent ID</b><code>${esc(res.intent_id)}</code></div>
-    <div class="kv"><b>伙伴任务 ID</b><code>${esc(res.handoff.task_id)}</code></div>
+    <div class="kv"><b>网络任务 ID</b><code>${esc(res.handoff.task_id)}</code></div>
     <div class="kv"><b>当前状态</b><span class="ok">${esc(res.status)}</span></div>
     <div class="kv"><b>状态归属</b>${esc(res.handoff.status_owner)}</div>
-    <div class="kv"><b>伙伴状态地址</b><code>${esc(res.handoff.status_endpoint)}</code></div>
+    <div class="kv"><b>网络任务状态地址</b><code>${esc(res.handoff.status_endpoint)}</code></div>
     <p class="muted" style="margin-top:8px">${esc(res.handoff.message)}</p>
   </div>`;
   $('#intent-result').innerHTML = html;
@@ -635,7 +664,7 @@ async function fetchSkill(){
 $('#skill-run').onclick = async ()=>{
   const id = $('#skill-pkg-select').value || PKGS[0].id;
   if(!apiKey()) return toast('一键运行需要 API Key，请先订阅', false);
-  $('#skill-run-result').innerHTML = '<p class="muted">NEF 鉴权中，正在转交伙伴网络 Agent 执行场景…</p>';
+  $('#skill-run-result').innerHTML = '<p class="muted">NEF 鉴权中，正在转交网络内部 Agent 执行场景…</p>';
   try{
     const res = await api(`/api/v1/scenarios/${id}/run`, {method:'POST'});
     renderScenarioRun(res);
@@ -646,7 +675,7 @@ function renderScenarioRun(res){
   html += `<div class="flow">` + res.pipeline.map((s,i)=>
     `<span class="node${s.stage.startsWith('partner')?' planning':''}" title="${esc(s.detail)}">${esc(s.label)}</span>${i<res.pipeline.length-1?'<span class="arrow">→</span>':''}`).join('') + `</div>`;
   html += `<div class="auth-ribbon">🔐 NEF 已鉴权 · 账号 ${esc(res.auth.account)} · ${esc(res.auth.scope)} · 审计 ${esc(res.auth.request_id)}</div>`;
-  html += `<div class="muted" style="font-size:12px;margin-bottom:6px">伙伴任务 <code>${esc(res.task_id)}</code> · 共 ${res.execution_trace.length} 步 · 总耗时 ${res.total_latency_ms}ms · 状态 <span class="ok">${esc(res.status)}</span></div>`;
+  html += `<div class="muted" style="font-size:12px;margin-bottom:6px">网络任务 <code>${esc(res.task_id)}</code> · 共 ${res.execution_trace.length} 步 · 总耗时 ${res.total_latency_ms}ms · 状态 <span class="ok">${esc(res.status)}</span></div>`;
   const byAgent = {};
   res.execution_trace.forEach(s => (byAgent[s.agent] = byAgent[s.agent]||{color:s.agent_color, list:[]}).list.push(s));
   for(const [agent, g] of Object.entries(byAgent)){
@@ -664,9 +693,41 @@ function renderScenarioRun(res){
 }
 $('#skill-view-ext').onclick = ()=>{ skillView='ext'; $('#skill-view-ext').classList.add('primary'); $('#skill-view-int').classList.remove('primary'); renderSkill(); };
 $('#skill-view-int').onclick = ()=>{ skillView='int'; $('#skill-view-int').classList.add('primary'); $('#skill-view-ext').classList.remove('primary'); renderSkill(); };
+function mdToHtml(md){
+  const lines = md.split('\n');
+  let out = [], i = 0, inCode = false, codeBuf = [], listBuf = [], tableBuf = [], preBuf = [];
+  const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
+  const flushList = ()=>{ if(listBuf.length){ out.push('<ul>'+listBuf.map(l=>`<li>${inline(l)}</li>`).join('')+'</ul>'); listBuf=[]; } };
+  const flushTable = ()=>{
+    if(!tableBuf.length) return;
+    const rows = tableBuf.map(r=>r.split('|').slice(1,-1).map(c=>c.trim()));
+    let t = '<table><tr>'+rows[0].map(c=>`<th>${inline(c)}</th>`).join('')+'</tr>';
+    rows.slice(2).forEach(r=>{ t += '<tr>'+r.map(c=>`<td>${inline(c)}</td>`).join('')+'</tr>'; });
+    out.push(t+'</table>'); tableBuf=[];
+  };
+  const flushPre = ()=>{ if(preBuf.length){ out.push(`<pre><code>${esc(preBuf.join('\n'))}</code></pre>`); preBuf=[]; } };
+  const isDiagram = l => /[─│┌┐└┘├┤┬┴▶▼]/.test(l) || /^\s{4,}\S/.test(l);
+  for(; i<lines.length; i++){
+    const l = lines[i];
+    if(l.trim().startsWith('```')){ if(inCode){ out.push(`<pre><code>${esc(codeBuf.join('\n'))}</code></pre>`); codeBuf=[]; } inCode=!inCode; continue; }
+    if(inCode){ codeBuf.push(l); continue; }
+    if(l.trim().startsWith('|')){ flushList(); flushPre(); tableBuf.push(l.trim()); continue; } else flushTable();
+    if(isDiagram(l)){ flushList(); preBuf.push(l); continue; } else flushPre();
+    if(/^### /.test(l)) { flushList(); out.push(`<h3>${inline(l.slice(4))}</h3>`); }
+    else if(/^## /.test(l)) { flushList(); out.push(`<h2>${inline(l.slice(3))}</h2>`); }
+    else if(/^# /.test(l)) { flushList(); out.push(`<h1>${inline(l.slice(2))}</h1>`); }
+    else if(/^> /.test(l)) { flushList(); out.push(`<blockquote>${inline(l.slice(2))}</blockquote>`); }
+    else if(/^- /.test(l)) listBuf.push(l.slice(2));
+    else if(l.trim()==='') flushList();
+    else { flushList(); out.push(`<p>${inline(l)}</p>`); }
+  }
+  flushList(); flushTable(); flushPre();
+  if(inCode && codeBuf.length) out.push(`<pre><code>${esc(codeBuf.join('\n'))}</code></pre>`);
+  return out.join('');
+}
 function renderSkill(){
   if(!skillData) return;
-  $('#skill-md').textContent = skillView==='ext' ? skillData.external_markdown : skillData.internal_markdown;
+  $('#skill-md').innerHTML = mdToHtml(skillView==='ext' ? skillData.external_markdown : skillData.internal_markdown);
   const left = $('#skill-left');
   if(skillView==='ext'){
     left.innerHTML = `<label>AF 调用步骤（外部视图）</label>` + skillData.steps.map(s=>`
@@ -678,8 +739,8 @@ function renderSkill(){
       </div>`).join('');
   }else{
     const flow = skillData.agent_flow;
-    left.innerHTML = `<label>Agent 调度流程（伙伴侧参考视图）</label>
-      <div class="flow"><span class="node">AF</span><span class="arrow">→</span><span class="node" style="border-color:var(--orange)">NEF 鉴权与转发</span><span class="arrow">→</span><span class="node" style="border-color:var(--purple)">Partner Network Agent</span></div>
+    left.innerHTML = `<label>Agent 调度流程（网络内部视图）</label>
+      <div class="flow"><span class="node">AF</span><span class="arrow">→</span><span class="node" style="border-color:var(--orange)">NEF 鉴权与转发</span><span class="arrow">→</span><span class="node" style="border-color:var(--purple)">网络内部 Network Agent</span></div>
       <div style="margin-left:18px;border-left:2px dashed var(--border);padding-left:14px">` +
       flow.map(g=>`
         <div class="agent-block" style="border-left-color:${g.color}">

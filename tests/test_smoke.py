@@ -24,7 +24,7 @@ def test_v2_catalog_counts():
 def test_v2_packages():
     r = client.get("/api/v1/packages")
     pkgs = r.json()["packages"]
-    assert len(pkgs) == 8
+    assert len(pkgs) == 9
     ids = {p["id"] for p in pkgs}
     assert {"live_offload", "robot_patrol", "xr_render", "uav_track", "traffic_forecast_pkg"} <= ids
     # 套餐内能力必须全部为 available（planned 不可进套餐）
