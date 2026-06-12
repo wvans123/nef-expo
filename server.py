@@ -624,6 +624,57 @@ def my_reverse_calls(authorization: str = Header(None)):
                         "af_income": round(gross * 0.7, 2)}}
 
 
+# ===== 内部发现端点（面向网络内部 Agent / 网元，信任域内免 AF 鉴权） =====
+@app.post("/internal/mcp")
+async def internal_mcp(request: Request):
+    """网络内部 Agent 的能力发现与调用入口（第二个 MCP Server，对内）。
+    内部 Agent / 网元通过 tools/list 发现第三方 AF 注册的能力（含端点、定价、提供方），
+    通过 tools/call 经 NEF 出向网关反向调用，并自动登记台账与计费。
+    生产形态下此接口部署在信任域内（或由内部网元代理查询），Demo 中直接开放。"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "需要 JSON-RPC 请求体")
+    method, rid = body.get("method"), body.get("id")
+    import json as _json
+    if method == "initialize":
+        return {"jsonrpc": "2.0", "id": rid,
+                "result": {"protocolVersion": body.get("params", {}).get("protocolVersion", "2025-03-26"),
+                           "capabilities": {"tools": {"listChanged": True}},
+                           "serverInfo": {"name": "6g-nef-internal-discovery", "version": "0.9.0-demo"},
+                           "instructions": "面向网络内部 Agent 的第三方能力目录：tools 为外部 AF 注册的能力，调用经 NEF 出向网关（鉴权·计费·审计）。"}}
+    if method == "notifications/initialized":
+        return Response(status_code=202)
+    if method == "tools/list":
+        tools = []
+        for c in THIRD_PARTY:
+            meta = THIRD_PARTY_META.get(c.id, {})
+            t = c.mcp_tool()
+            t["description"] = (f"[第三方 AF 能力 · 提供方 {meta.get('owner','?')} · {c.unit_price} · "
+                                f"endpoint {meta.get('endpoint','?')}] ") + t["description"]
+            tools.append(t)
+        return {"jsonrpc": "2.0", "id": rid, "result": {"tools": tools}}
+    if method == "tools/call":
+        params = body.get("params", {})
+        name, args = params.get("name"), params.get("arguments", {})
+        caller = args.pop("_caller", "Network Agent")
+        meta = THIRD_PARTY_META.get(name)
+        if not meta:
+            return {"jsonrpc": "2.0", "id": rid,
+                    "error": {"code": -32602, "message": f"第三方能力不存在: {name}"}}
+        record = record_reverse_call(name, trigger="internal_mcp",
+                                     trigger_detail=f"内部发现调用 · {caller}")
+        result = invoke_stub(name, args)
+        result["reverse_call"] = {"via": "NEF 出向网关", "caller_agent": record["caller_agent"],
+                                  "latency_ms": record["latency_ms"], "fee": record["fee"]}
+        return {"jsonrpc": "2.0", "id": rid,
+                "result": {"content": [{"type": "text",
+                                        "text": _json.dumps(result, ensure_ascii=False, indent=2)}],
+                           "isError": False}}
+    return {"jsonrpc": "2.0", "id": rid,
+            "error": {"code": -32601, "message": f"method not supported: {method}"}}
+
+
 # ===== 标准 MCP 端点（streamable HTTP，可被 Claude Code / Codex 等直连） =====
 @app.post("/mcp")
 async def mcp_endpoint(request: Request, authorization: str = Header(None)):

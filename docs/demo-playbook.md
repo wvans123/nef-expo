@@ -31,8 +31,9 @@
 
 演示动作（「双向开放 · AF」页）：
 1. **第三方信息注册**：左侧表单注册能力（名称/类型 ai_model/tool/data_source、描述、**定价**、端点 URL）→ 上架能力超市（third_party 标记）——这就是"网络 Agent 获取第三方的 API/tool 信息"的来源；
-2. **网络发起调用**：右侧看板 ⚡模拟网络调用（顶部链路图逐节点点亮：AF 能力→NEF 超市→Network Agent→NEF 出向网关[鉴权·计费·审计]→AF Endpoint）；
-3. **结果反馈网络内部 Agent**：调用日志显示调用方 Agent、耗时、状态、计费；顶部计费汇总卡（总调用/累计计费/70-30 分成/AF 收益）。
+2. **内部发现端点**：`POST /internal/mcp`（第二个 MCP Server，面向网络内部 Agent/网元，信任域内免 AF 鉴权）——内部 Agent 经 tools/list 发现第三方工具（含提供方/定价/端点），tools/call 经 NEF 出向网关反向调用并自动入台账；看板「网络内部 Agent 视角」面板有 🔭 一键模拟按钮；
+3. **网络发起调用**：右侧看板 ⚡模拟网络调用（顶部链路图逐节点点亮：AF 能力→NEF 超市→Network Agent→NEF 出向网关[鉴权·计费·审计]→AF Endpoint）；
+4. **结果反馈网络内部 Agent**：调用日志显示调用方 Agent、耗时、状态、计费；顶部计费汇总卡（总调用/累计计费/70-30 分成/AF 收益）。
 
 ---
 
@@ -106,7 +107,7 @@ GET   /v1/tasks/{task_id}  查询：{"status": "running|completed|failed", "prog
 - **API 信息**：`GET /api/v1/capabilities/{tp_id}`（含端点 URL、参数 schema）
 - **Tool 信息**：`POST /api/v1/mcp/tools/list`（MCP inputSchema 格式）
 - **Skill 信息**：`GET /api/v1/packages/{id}/skill`（编排蓝图 markdown + agent_flow JSON）
-- 调用结果回写：`POST /api/v1/third-party/{tp_id}/simulate-call` 的真实版（我来加一个 `report-call` 接口，由网络侧在调用完成后回写台账即可）。
+- **内部发现/调用（已实现）**：`POST /internal/mcp`（tools/list 发现第三方能力，tools/call 反向调用并登记台账）——内部 Agent 团队可直接对接此接口。
 
 ### 3.4 联调资料模板（发给每个业务团队）
 

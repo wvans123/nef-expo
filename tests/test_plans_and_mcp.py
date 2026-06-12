@@ -87,3 +87,39 @@ def test_register_af_with_price_and_subscribable():
     r = client.post("/api/v1/subscribe", json={"account": "tp_buyer",
                                                "capability_ids": [tp], "package_ids": []})
     assert r.status_code == 200 and tp in r.json()["subscriptions"]
+
+
+def test_internal_mcp_discovery_and_reverse_call():
+    h = _hdr("tp_owner2")
+    tp = client.post("/api/v1/register-af",
+                     json={"name": "路况数据源", "cap_type": "data_source",
+                           "endpoint": "https://y.example.com/api", "price": "0.3/次"},
+                     headers=h).json()["registration_id"]
+    # 内部 Agent 免 AF 鉴权发现
+    lst = client.post("/internal/mcp", json={"jsonrpc": "2.0", "id": 1,
+                                             "method": "tools/list", "params": {}})
+    tools = lst.json()["result"]["tools"]
+    mine = [t for t in tools if t["name"] == tp]
+    assert mine and "提供方 tp_owner2" in mine[0]["description"]
+    # 内部调用 → 反向台账
+    call = client.post("/internal/mcp",
+                       json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                             "params": {"name": tp, "arguments": {"_caller": "Planning Agent"}}})
+    assert "reverse_call" in call.json()["result"]["content"][0]["text"]
+    board = client.get("/api/v1/third-party/my-calls", headers=h).json()
+    cap = next(c for c in board["capabilities"] if c["id"] == tp)
+    assert cap["call_count"] == 1
+    assert cap["recent_calls"][0]["trigger"] == "internal_mcp"
+
+
+def test_other_account_can_see_and_invoke_third_party():
+    h = _hdr("tp_owner3")
+    tp = client.post("/api/v1/register-af",
+                     json={"name": "包装检测模型", "cap_type": "ai_model",
+                           "endpoint": "https://z.example.com/api"},
+                     headers=h).json()["registration_id"]
+    other = _hdr("tp_consumer")
+    caps = client.get("/api/v1/capabilities").json()["capabilities"]
+    assert tp in [c["id"] for c in caps]
+    r = client.post(f"/api/v1/capabilities/{tp}/invoke", json={"payload": {}}, headers=other)
+    assert r.status_code == 200
