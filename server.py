@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """6G NEF 能力开放平台 — FastAPI 后端"""
+import random
 import secrets
 import time
 import uuid
@@ -98,6 +99,18 @@ def _auth_evidence(key: str, rec: dict, scope: str, request_id: str) -> dict:
     }
 
 
+def _auth_stamp(key: str, rec: dict, scope: str) -> dict:
+    """附在调用结果上的精简鉴权回执，证明 NEF 对本次请求完成了鉴权"""
+    return {
+        "status": "verified",
+        "scheme": "Bearer API Key",
+        "account": rec["account"],
+        "credential": f"{key[:8]}...{key[-4:]}",
+        "scope": scope,
+        "request_id": "req_" + uuid.uuid4().hex[:12],
+    }
+
+
 def _subscribed_caps(rec) -> set:
     caps = set(rec["subscriptions"])
     for pid in rec["packages"]:
@@ -144,16 +157,69 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
     missing = [p.name for p in cap.params if p.required and p.name not in params]
     if missing:
         raise HTTPException(422, f"缺少必填参数: {', '.join(missing)}")
-    return invoke_stub(cap_id, params)
+    result = invoke_stub(cap_id, params)
+    result["nef_auth"] = _auth_stamp(key, rec, "capabilities:invoke")
+    return result
 
 
 # ===== 套餐 =====
 @app.get("/api/v1/packages")
 def list_packages():
     out = []
-    for p in PACKAGES:
+    for p in sorted(PACKAGES, key=lambda x: not x.get("featured")):
         out.append({**p, "capability_details": [CAP_INDEX[c].to_dict() for c in p["capabilities"]]})
     return {"count": len(out), "packages": out}
+
+
+# ===== 场景级一键调用（一个请求跑完整场景，伙伴侧编排并回传执行轨迹） =====
+def _scenario_run(pkg, key, rec, channel: str):
+    auth = _auth_stamp(key, rec, "capabilities:invoke")
+    task_id = "partner_task_" + uuid.uuid4().hex[:12]
+    steps, n = [], 0
+    for grp in agent_flow(pkg):
+        for cap in grp["steps"]:
+            n += 1
+            steps.append({"step": n, "agent": grp["agent"], "agent_color": grp["color"],
+                          "capability": cap["capability"], "name": cap["name"],
+                          "latency_ms": random.randint(15, 60), "status": "ok",
+                          "narrative": False})
+    for s in pkg.get("story_steps", []):
+        n += 1
+        steps.append({"step": n, "agent": "Partner Network Agent", "agent_color": "#bc8cff",
+                      "capability": None, "name": s["name"], "detail": s["detail"],
+                      "latency_ms": None, "status": "ok", "narrative": True})
+    pipeline = [
+        {"stage": "auth_verify", "label": "NEF 鉴权",
+         "detail": f"Bearer API Key 已验证，账号 {rec['account']} 已订阅场景「{pkg['name']}」"},
+        {"stage": "nef_accept", "label": "NEF 受理",
+         "detail": f"场景调用（{channel}）已受理，审计请求 ID {auth['request_id']}"},
+        {"stage": "partner_route", "label": "转交网络 Agent",
+         "detail": f"场景请求转交 Partner Network Agent，伙伴侧任务 {task_id}"},
+        {"stage": "partner_execute", "label": "伙伴侧编排执行",
+         "detail": f"Partner Network Agent 按场景 Skill 编排 {len(steps)} 个步骤并执行"},
+        {"stage": "aggregate", "label": "回执返回",
+         "detail": "NEF 将伙伴侧执行回执（含执行轨迹）返回 AF"},
+    ]
+    return {
+        "scenario_id": pkg["id"], "scenario": pkg["name"],
+        "status": "completed", "task_id": task_id,
+        "partner_agent": "Partner Network Agent",
+        "auth": auth, "pipeline": pipeline,
+        "execution_trace": steps,
+        "total_latency_ms": sum(s["latency_ms"] or 0 for s in steps),
+        "message": "场景由伙伴网络 Agent 编排执行，NEF 负责鉴权、受理、审计与回执转发。",
+    }
+
+
+@app.post("/api/v1/scenarios/{pkg_id}/run")
+def run_scenario(pkg_id: str, authorization: str = Header(None)):
+    key, rec = _auth(authorization, required_scope="capabilities:invoke")
+    pkg = PKG_INDEX.get(pkg_id)
+    if not pkg:
+        raise HTTPException(404, f"场景 {pkg_id} 不存在")
+    if pkg_id not in rec["packages"]:
+        raise HTTPException(403, f"账号 {rec['account']} 未订阅场景套餐 {pkg_id}")
+    return _scenario_run(pkg, key, rec, channel="REST")
 
 
 @app.get("/api/v1/packages/{pkg_id}/skill")
@@ -290,6 +356,11 @@ def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
     tools = [c.mcp_tool() for c in CAPABILITIES
              if c.id in subscribed and c.status == "available"]
     tools += [c.mcp_tool() for c in THIRD_PARTY]
+    for pid in sorted(rec["packages"]):
+        pkg = PKG_INDEX[pid]
+        tools.append({"name": f"scenario_{pid}",
+                      "description": f"一键运行场景「{pkg['name']}」：{pkg['description']}（伙伴侧编排执行并回传执行轨迹）",
+                      "inputSchema": {"type": "object", "properties": {}, "required": []}})
     return {"jsonrpc": "2.0", "id": (req.id if req else 1), "result": {"tools": tools}}
 
 
@@ -298,6 +369,18 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
     key, rec = _auth(authorization, required_scope="mcp:tools")
     name = req.params.get("name")
     args = req.params.get("arguments", {})
+    import json as _json
+    if name and name.startswith("scenario_"):
+        pid = name[len("scenario_"):]
+        pkg = PKG_INDEX.get(pid)
+        if not pkg or pid not in rec["packages"]:
+            return {"jsonrpc": "2.0", "id": req.id,
+                    "error": {"code": -32001, "message": f"未订阅场景 Tool: {name}"}}
+        result = _scenario_run(pkg, key, rec, channel="MCP")
+        return {"jsonrpc": "2.0", "id": req.id,
+                "result": {"content": [{"type": "text",
+                                        "text": _json.dumps(result, ensure_ascii=False, indent=2)}],
+                           "isError": False}}
     cap = CAP_INDEX.get(name) or next((c for c in THIRD_PARTY if c.id == name), None)
     if not cap:
         return {"jsonrpc": "2.0", "id": req.id,
@@ -306,7 +389,7 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
         return {"jsonrpc": "2.0", "id": req.id,
                 "error": {"code": -32001, "message": f"未订阅 Tool: {name}"}}
     result = invoke_stub(name, args)
-    import json as _json
+    result["nef_auth"] = _auth_stamp(key, rec, "mcp:tools")
     return {"jsonrpc": "2.0", "id": req.id,
             "result": {"content": [{"type": "text",
                                     "text": _json.dumps(result, ensure_ascii=False, indent=2)}],

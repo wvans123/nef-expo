@@ -11,6 +11,22 @@
 - AF 反向调用保留手动模拟链路，不再由本 Demo 的 Intent 关键词匹配触发。
 - 下文涉及“NEF 内 Planning Agent 执行”或“Intent 联动反向调用”的内容均为历史设计，不再代表当前实现。
 
+## v4 增量（2026-06-12：场景 vs Tool、鉴权可视化、页签改名）
+
+**场景 vs Tool 的定位**：
+
+- 能力超市保持 **tool 粒度**（AF 视角一次有意义的业务动作），对应「API 直调」「MCP tool 级调用」「自助编排」——AF 自己掌控调用顺序。
+- **场景（套餐）升级为可一键调用的一等公民**，对齐兄弟团队"一个请求跑完整场景"的粒度：
+  - REST：`POST /api/v1/scenarios/{pkg_id}/run`（需订阅该套餐，scope `capabilities:invoke`）
+  - MCP：`tools/list` 为每个已订阅套餐额外暴露 `scenario_<pkg_id>` 工具（零参数）
+  - 语义与 v3 一致：NEF 鉴权→受理→转交 Partner Network Agent；伙伴侧按场景 Skill 编排执行后**回传执行轨迹**（哪些 tool、哪个 Agent、顺序、耗时），NEF 展示该轨迹。
+- 套餐可含 `story_steps`（叙事增强步骤，如"端到端安全传输通道"）：出现在执行轨迹中，标「📖 叙事增强」角标，后端无对应能力，仅讲故事用。
+- 主推场景：`featured: True`（当前 live_offload / arm_dog_collab / embodied_agents，可随时改），`/api/v1/packages` 置顶返回，前端「主推」徽章。
+
+**鉴权可视化**：复用 v3 `_auth_evidence`；另增精简 `_auth_stamp`（account/credential/scope/request_id）附在 invoke、MCP tools/call、场景 run 的响应上；前端 API/MCP/场景结果处显示「🔐 NEF 已鉴权」绿色回执条。
+
+**页签改名**（按开放方式命名，去掉"调试/文档"等工程词）：能力超市 / 订阅与鉴权 / API 直调 / Agent 接入 · MCP / 意图受理 / 场景蓝图 / 自助编排 / 双向开放 · AF。场景蓝图页内新增「▶ 一键运行本场景」按钮渲染执行回执。
+
 ## 背景与目标
 
 nef-expo 是面向运营商伙伴的现场讲解演示（讲解人操作，界面扮演 AF 开发者视角）。

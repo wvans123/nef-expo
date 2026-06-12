@@ -384,22 +384,31 @@ CAP_INDEX = {c.id: c for c in CAPABILITIES}
 # ===== 场景套餐 =====
 PACKAGES = [
     {
-        "id": "live_offload", "name": "直播计算卸载套餐", "price": "69/月",
+        "id": "live_offload", "name": "直播计算卸载套餐", "price": "69/月", "featured": True,
         "description": "特效计算卸载先行；体验吃紧时通信 QoS 与算力 QoS 联动调整，保障 0 卡顿 AI 换脸",
         "capabilities": ["compute_offload", "compute_qos", "qos_guarantee", "network_diagnosis"],
         "scenario": "电商/户外直播 · 0卡顿 AI 特效",
+        "story_steps": [
+            {"name": "端到端安全传输通道", "detail": "直播流经运营商加密通道传输，密钥由网络侧托管"},
+        ],
     },
     {
-        "id": "arm_dog_collab", "name": "机械臂×机器狗协同套餐", "price": "99/月",
+        "id": "arm_dog_collab", "name": "机械臂×机器狗协同套餐", "price": "99/月", "featured": True,
         "description": "网络提供计算服务并结合环境感知，支撑机械臂与机器狗协同作业",
         "capabilities": ["compute_offload", "environment_recon", "precision_location", "event_subscription"],
         "scenario": "工业产线协同作业",
+        "story_steps": [
+            {"name": "确定性时延保障", "detail": "协同控制指令走确定性低时延通道，抖动可控"},
+        ],
     },
     {
-        "id": "embodied_agents", "name": "多智能体具身交互套餐", "price": "129/月",
+        "id": "embodied_agents", "name": "多智能体具身交互套餐", "price": "129/月", "featured": True,
         "description": "AR 眼镜与机器狗多智能体协同，渲染与算力卸载到网络边缘",
         "capabilities": ["render_offload", "compute_offload", "precision_location", "qos_guarantee"],
         "scenario": "AR 眼镜 × 机器狗具身智能",
+        "story_steps": [
+            {"name": "多智能体身份互认", "detail": "AR 眼镜与机器狗经网络侧统一身份与高安全互认后建立协同会话"},
+        ],
     },
     {
         "id": "robot_patrol", "name": "机器狗巡检套餐", "price": "89/月",

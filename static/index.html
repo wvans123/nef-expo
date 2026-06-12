@@ -77,6 +77,9 @@ h3.sec{margin:18px 0 10px;font-size:15px}
 .pkg-chip:hover{border-color:var(--accent);box-shadow:0 0 12px #39d2ff2e}
 .pkg-chip b{font-size:13px;display:block}.pkg-chip .pprice{color:var(--orange);font-size:11px}
 .pkg-chip .pscen{font-size:10px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.feat-badge{background:linear-gradient(90deg,#39d2ff33,#bc8cff33);border:1px solid var(--accent);color:var(--accent);font-size:10px;border-radius:10px;padding:1px 7px;margin-left:6px;vertical-align:1px}
+.story-badge{background:#bc8cff22;border:1px solid var(--purple);color:var(--purple);font-size:10px;border-radius:10px;padding:1px 7px;margin-left:6px}
+.auth-ribbon{display:inline-block;background:#39ffb014;border:1px solid #39ffb055;color:var(--green);font-size:12px;border-radius:8px;padding:4px 10px;margin-bottom:8px}
 /* 弹窗 */
 #modal-bg{display:none;position:fixed;inset:0;background:#000a;z-index:100;align-items:center;justify-content:center}
 #modal-bg.show{display:flex}
@@ -140,13 +143,13 @@ th{background:var(--card);color:var(--muted)}
 
 <div id="tabs">
   <button data-tab="market" class="active">能力超市</button>
-  <button data-tab="subs">我的订阅</button>
-  <button data-tab="api">API 调试</button>
-  <button data-tab="mcp">MCP 工具</button>
-  <button data-tab="intent">Intent 意图</button>
-  <button data-tab="skill">Skill 文档</button>
-  <button data-tab="composer">能力编排器</button>
-  <button data-tab="afreg">AF 注册</button>
+  <button data-tab="subs">订阅与鉴权</button>
+  <button data-tab="api">API 直调</button>
+  <button data-tab="mcp">Agent 接入 · MCP</button>
+  <button data-tab="intent">意图受理</button>
+  <button data-tab="skill">场景蓝图</button>
+  <button data-tab="composer">自助编排</button>
+  <button data-tab="afreg">双向开放 · AF</button>
 </div>
 
 <main>
@@ -163,7 +166,7 @@ th{background:var(--card);color:var(--muted)}
 
   <!-- Tab 3 API 调试 -->
   <div class="tabpane" id="pane-api">
-    <h3 class="sec">API 调试</h3>
+    <h3 class="sec">API 直调 <span class="muted" style="font-weight:400;font-size:12px">— tool 级 REST 接口，AF 自行编排调用顺序</span></h3>
     <div style="display:grid;grid-template-columns:340px 1fr;gap:16px">
       <div>
         <label>选择已订阅的能力</label>
@@ -181,7 +184,7 @@ th{background:var(--card);color:var(--muted)}
 
   <!-- Tab 4 MCP -->
   <div class="tabpane" id="pane-mcp">
-    <h3 class="sec">MCP (Model Context Protocol) 模拟</h3>
+    <h3 class="sec">Agent 接入 · MCP <span class="muted" style="font-weight:400;font-size:12px">— AF 的 AI Agent 直接挂载 NEF 工具箱：tool 级精细调用 + scenario 级一键调用</span></h3>
     <div style="display:grid;grid-template-columns:340px 1fr;gap:16px">
       <div>
         <button id="mcp-list-btn" style="width:100%">tools/list — 列出所有 Tool</button>
@@ -212,14 +215,16 @@ th{background:var(--card);color:var(--muted)}
 
   <!-- Tab 6 Skill -->
   <div class="tabpane" id="pane-skill">
-    <h3 class="sec">Skill 编排文档 <span class="muted" style="font-weight:400;font-size:12px">— 一份 Skill，双重角色：外部指导 AF 调用，内部驱动 Agent 编排</span></h3>
+    <h3 class="sec">场景蓝图 <span class="muted" style="font-weight:400;font-size:12px">— 一份 Skill，双重角色：外部指导 AF 调用，伙伴侧驱动 Agent 编排；也可一键运行整个场景</span></h3>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
       <select id="skill-pkg-select" style="width:240px"></select>
       <div>
         <button id="skill-view-ext" class="primary">外部视图（AF）</button>
         <button id="skill-view-int">伙伴侧视图（Agent）</button>
+        <button id="skill-run" style="border-color:var(--green);color:var(--green)">▶ 一键运行本场景</button>
       </div>
     </div>
+    <div id="skill-run-result"></div>
     <div id="skill-wrap">
       <div id="skill-left"></div>
       <div><label>Skill Markdown 原文</label><pre id="skill-md" style="max-height:640px">--</pre></div>
@@ -381,7 +386,7 @@ async function loadMarket(){
     <div class="stat"><b>${PKGS.length}</b><span>个场景套餐</span></div>
     <div class="stat"><span>API Key 状态</span><b style="font-size:13px" class="${apiKey()?'ok':'muted'}">${apiKey()?'已激活':'未订阅'}</b></div>`;
   $('#pkg-row').innerHTML = PKGS.map(p =>
-    `<div class="pkg-chip" onclick="showPkg('${p.id}')"><b>${esc(p.name)}</b><span class="pprice">${esc(p.price)}</span><div class="pscen">${esc(p.scenario)}</div></div>`).join('');
+    `<div class="pkg-chip" onclick="showPkg('${p.id}')"><b>${esc(p.name)}${p.featured?'<span class="feat-badge">主推</span>':''}</b><span class="pprice">${esc(p.price)}</span><div class="pscen">${esc(p.scenario)}</div></div>`).join('');
   const byCat = {};
   CAPS.forEach(c => (byCat[c.category] = byCat[c.category]||[]).push(c));
   let html = '';
@@ -537,7 +542,7 @@ $('#api-send').onclick = async ()=>{
   $('#api-req').textContent = `POST /api/v1/capabilities/${id}/invoke\nAuthorization: Bearer ${apiKey().slice(0,20)}…\nContent-Type: application/json\n\n` + jfmt(params);
   try{
     const res = await api(`/api/v1/capabilities/${id}/invoke`, {method:'POST', body:JSON.stringify(params)});
-    $('#api-resp').innerHTML = `<span class="ok">200 OK</span>\n` + esc(jfmt(res));
+    $('#api-resp').innerHTML = `<span class="ok">200 OK</span>${res.nef_auth?`  <span class="ok">🔐 NEF 已鉴权 · 账号 ${esc(res.nef_auth.account)} · ${esc(res.nef_auth.scope)} · 审计 ${esc(res.nef_auth.request_id)}</span>`:''}\n` + esc(jfmt(res));
   }catch(e){ $('#api-resp').innerHTML = `<span class="err">${e.status||'ERR'}</span>\n` + esc(jfmt(e.data||{})); }
 };
 
@@ -545,10 +550,16 @@ $('#api-send').onclick = async ()=>{
 async function renderMcpTab(){
   const sel = $('#mcp-tool-select');
   const subs = await mySubscribedCaps();
+  let myPkgs = [];
+  if(apiKey()){ try{ myPkgs = (await api('/api/v1/auth/info')).packages; }catch(e){} }
   const ids = [...subs, ...CAPS.filter(c=>c.source==='third_party').map(c=>c.id)];
-  if(!ids.length){ sel.innerHTML = '<option value="">（请先订阅能力，工具箱为空）</option>'; $('#mcp-params').innerHTML=''; return; }
-  sel.innerHTML = ids.map(id=>{ const c=CAPS.find(x=>x.id===id); return c?`<option value="${id}">${c.id} — ${esc(c.name)}</option>`:''; }).join('');
-  sel.onchange = ()=>{ const c=CAPS.find(x=>x.id===sel.value); if(c) $('#mcp-params').innerHTML = paramForm(c,'mcpp'); };
+  if(!ids.length && !myPkgs.length){ sel.innerHTML = '<option value="">（请先订阅能力，工具箱为空）</option>'; $('#mcp-params').innerHTML=''; return; }
+  sel.innerHTML = myPkgs.map(pid=>{ const p=PKGS.find(x=>x.id===pid); return p?`<option value="scenario_${pid}">scenario_${pid} — ▶ 场景：${esc(p.name)}</option>`:''; }).join('')
+    + ids.map(id=>{ const c=CAPS.find(x=>x.id===id); return c?`<option value="${id}">${c.id} — ${esc(c.name)}</option>`:''; }).join('');
+  sel.onchange = ()=>{
+    if(sel.value.startsWith('scenario_')){ $('#mcp-params').innerHTML = '<p class="muted" style="font-size:12px">场景级 Tool 无需参数：一次调用即由伙伴网络 Agent 编排执行整个场景并回传执行轨迹。</p>'; return; }
+    const c=CAPS.find(x=>x.id===sel.value); if(c) $('#mcp-params').innerHTML = paramForm(c,'mcpp');
+  };
   sel.onchange();
 }
 $('#mcp-list-btn').onclick = async ()=>{
@@ -562,7 +573,7 @@ $('#mcp-list-btn').onclick = async ()=>{
 $('#mcp-call').onclick = async ()=>{
   const id = $('#mcp-tool-select').value; if(!id) return toast('请先订阅能力', false);
   const c = CAPS.find(x=>x.id===id);
-  const req = {jsonrpc:'2.0', id:2, method:'tools/call', params:{name:id, arguments:collectParams(c,'mcpp')}};
+  const req = {jsonrpc:'2.0', id:2, method:'tools/call', params:{name:id, arguments:(id.startsWith('scenario_')||!c)?{}:collectParams(c,'mcpp')}};
   $('#mcp-req').textContent = jfmt(req);
   try{
     const res = await api('/api/v1/mcp/tools/call',{method:'POST',body:JSON.stringify(req)});
@@ -620,6 +631,36 @@ async function fetchSkill(){
   const id = $('#skill-pkg-select').value || PKGS[0].id;
   skillData = await fetch(`/api/v1/packages/${id}/skill`).then(r=>r.json());
   renderSkill();
+}
+$('#skill-run').onclick = async ()=>{
+  const id = $('#skill-pkg-select').value || PKGS[0].id;
+  if(!apiKey()) return toast('一键运行需要 API Key，请先订阅', false);
+  $('#skill-run-result').innerHTML = '<p class="muted">NEF 鉴权中，正在转交伙伴网络 Agent 执行场景…</p>';
+  try{
+    const res = await api(`/api/v1/scenarios/${id}/run`, {method:'POST'});
+    renderScenarioRun(res);
+  }catch(e){ $('#skill-run-result').innerHTML = `<p class="err">${esc((e.data&&e.data.detail)||jfmt(e.data||{}))}</p>`; }
+};
+function renderScenarioRun(res){
+  let html = `<h3 class="sec">场景执行回执 · ${esc(res.scenario)}</h3>`;
+  html += `<div class="flow">` + res.pipeline.map((s,i)=>
+    `<span class="node${s.stage.startsWith('partner')?' planning':''}" title="${esc(s.detail)}">${esc(s.label)}</span>${i<res.pipeline.length-1?'<span class="arrow">→</span>':''}`).join('') + `</div>`;
+  html += `<div class="auth-ribbon">🔐 NEF 已鉴权 · 账号 ${esc(res.auth.account)} · ${esc(res.auth.scope)} · 审计 ${esc(res.auth.request_id)}</div>`;
+  html += `<div class="muted" style="font-size:12px;margin-bottom:6px">伙伴任务 <code>${esc(res.task_id)}</code> · 共 ${res.execution_trace.length} 步 · 总耗时 ${res.total_latency_ms}ms · 状态 <span class="ok">${esc(res.status)}</span></div>`;
+  const byAgent = {};
+  res.execution_trace.forEach(s => (byAgent[s.agent] = byAgent[s.agent]||{color:s.agent_color, list:[]}).list.push(s));
+  for(const [agent, g] of Object.entries(byAgent)){
+    html += `<div class="agent-block" style="border-left-color:${g.color}">
+      <b style="color:${g.color}">${esc(agent)}</b>
+      ${g.list.map(s=>`<div style="margin:6px 0;font-size:13px">
+        <b>Step ${s.step} · ${esc(s.name)}</b>
+        ${s.narrative?'<span class="story-badge">📖 叙事增强</span>':`<span class="mono muted" style="font-size:11px">${s.capability}</span> <span class="ok" style="font-size:11px">✓ ${s.latency_ms}ms</span>`}
+        ${s.detail?`<div class="muted" style="font-size:11px">${esc(s.detail)}</div>`:''}
+      </div>`).join('')}
+    </div>`;
+  }
+  html += `<p class="muted" style="font-size:12px">${esc(res.message)}</p>`;
+  $('#skill-run-result').innerHTML = html;
 }
 $('#skill-view-ext').onclick = ()=>{ skillView='ext'; $('#skill-view-ext').classList.add('primary'); $('#skill-view-int').classList.remove('primary'); renderSkill(); };
 $('#skill-view-int').onclick = ()=>{ skillView='int'; $('#skill-view-int').classList.add('primary'); $('#skill-view-ext').classList.remove('primary'); renderSkill(); };
