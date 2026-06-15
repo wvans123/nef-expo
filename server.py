@@ -149,7 +149,7 @@ def _payment_required_payload(cap, channel: str, pipeline: dict | None = None) -
     }
     if pipeline:
         payload["nef_auth"] = {"request_id": pipeline["request_id"], "decision": pipeline["decision"],
-                               "quota": pipeline["quota"], "pipeline": pipeline["stages"]}
+                               "pipeline": pipeline["stages"]}
     return payload
 
 
@@ -233,14 +233,13 @@ def _dispatch(kind: str, ident: str, params: dict | None = None, request_id: str
     }
 
 
-# ===== CAPIF 鉴权流水线（AEF 对 API Invoker 逐次鉴权，7 级动态判定） =====
+# ===== NEF 鉴权流水线（每次调用都逐级执行；用大白话讲得清） =====
+# 依据 3GPP CAPIF（网络对调用方逐次鉴权）的思路，但只保留能一句话讲明白的步骤。
 def _capif_pipeline(key, rec, *, scope, scope_ok=True, entitled=True, paid=False,
                     cap=None, request_id=None) -> dict:
     """逐级计算鉴权状态，供前端逐级点亮。decision: allow / deny_scope / deny_authz。"""
     request_id = request_id or ("req_" + uuid.uuid4().hex[:12])
     acct, plan = rec["account"], rec.get("plan", "free").upper()
-    used = rec.get("_calls", 0) + 1
-    rec["_calls"] = used
     masked = f"{key[:8]}…{key[-4:]}"
     stages = []
 
@@ -249,30 +248,28 @@ def _capif_pipeline(key, rec, *, scope, scope_ok=True, entitled=True, paid=False
                        "status": status, "latency_ms": random.randint(1, 5), "detail": detail})
 
     def done(decision):
-        return {"request_id": request_id, "decision": decision,
-                "quota": {"used": used, "limit": 120}, "stages": stages}
+        return {"request_id": request_id, "decision": decision, "stages": stages}
 
-    add("access", "接入·限流", "passed", f"TLS 接入点校验通过 · 速率配额 {used}/120")
-    add("credential", "凭证解析", "passed", f"已解析 Authorization: Bearer {masked}")
-    add("token", "令牌校验", "passed", "签名有效 · 未过期 · 不在吊销列表")
-    add("invoker", "身份识别", "passed", f"API Invoker → AF 账号「{acct}」· 等级 {plan}")
+    add("credential", "取出凭证", "passed", f"从请求头取出 API Key（Bearer {masked}）")
+    add("validate", "校验密钥", "passed", "确认这把 Key 真实有效、未过期、未被吊销")
+    add("identify", "识别身份", "passed", f"这把 Key 属于 AF 账号「{acct}」（等级 {plan}）")
     if not scope_ok:
-        add("scope", "权限范围", "denied", f"API Key 缺少所需 scope：{scope}")
-        add("audit", "审计落账", "passed", f"审计请求 {request_id}（结果：拒绝 · scope 不足）")
+        add("scope", "检查接口权限", "denied", f"该 Key 不允许调用这类接口（缺 scope：{scope}）")
+        add("audit", "记录审计", "passed", f"写审计日志 {request_id}（结果：拒绝 · 接口权限不足）")
         return done("deny_scope")
-    add("scope", "权限范围", "passed", f"API Key 含所需 scope：{scope}")
+    add("scope", "检查接口权限", "passed", f"该 Key 允许调用这类接口（scope：{scope}）")
     capname = cap.name if cap else "本次调用"
     if entitled:
-        add("authz", "授权判定", "passed", f"「{capname}」已授权（订阅 / 账号等级 / 第三方）")
+        add("authorize", "判定能力授权", "passed", f"账号已获「{capname}」授权（订阅 / 账号等级 / 第三方）")
     elif paid:
-        add("authz", "授权判定", "passed", f"「{capname}」未订阅，已确认按次支付 → 授权放行")
+        add("authorize", "判定能力授权", "passed", f"「{capname}」未订阅，已确认按次付费 → 准许本次调用")
     else:
         tier = getattr(cap, "tier", "?") if cap else "?"
-        add("authz", "授权判定", "denied",
-            f"「{capname}」未订阅且账号等级不含 {tier} 层级 → 402（可订阅 / 升级 / 按次）")
-        add("audit", "审计落账", "passed", f"审计请求 {request_id}（结果：拒绝 · 未授权）")
+        add("authorize", "判定能力授权", "denied",
+            f"账号没订阅「{capname}」、等级也不含 {tier} 层 → 拒绝（可订阅 / 升级 / 按次付费）")
+        add("audit", "记录审计", "passed", f"写审计日志 {request_id}（结果：拒绝 · 未授权）")
         return done("deny_authz")
-    add("audit", "审计落账", "passed", f"审计请求 {request_id}（结果：放行）已写入审计")
+    add("audit", "记录审计", "passed", f"写审计日志 {request_id}（记下谁/何时/调了什么/放行）")
     return done("allow")
 
 
@@ -280,7 +277,7 @@ def _nef_auth(key, rec, scope, pipeline, dispatch=None) -> dict:
     """挂在调用结果上的 NEF 鉴权回执：精简 stamp + 流水线 + 配额 + 路由（保留旧字段兼容）。"""
     out = {**_auth_stamp(key, rec, scope),
            "request_id": pipeline["request_id"], "decision": pipeline["decision"],
-           "quota": pipeline["quota"], "pipeline": pipeline["stages"]}
+           "pipeline": pipeline["stages"]}
     if dispatch:
         out["dispatch"] = {"target": dispatch["target"], "service_id": dispatch["service_id"],
                            "backend_name": dispatch.get("backend_name"), "note": dispatch["note"]}
@@ -346,6 +343,10 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
     except Exception:
         params = {}
     confirm_pay = bool(params.pop("_confirm_pay", False))
+    # 先做参数校验：调用失败（422）绝不计费
+    missing = [p.name for p in cap.params if p.required and p.name not in params]
+    if missing:
+        raise HTTPException(422, f"缺少必填参数: {', '.join(missing)}")
     entitled = _entitled(rec, cap)
     pipeline = _capif_pipeline(key, rec, scope="capabilities:invoke",
                                entitled=entitled, paid=confirm_pay, cap=cap)
@@ -354,12 +355,11 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
     if not entitled:
         if not confirm_pay:
             raise HTTPException(402, _payment_required_payload(cap, "REST", pipeline))
-        per_call_fee = _bill_per_call(rec, cap, request_id)
-    missing = [p.name for p in cap.params if p.required and p.name not in params]
-    if missing:
-        raise HTTPException(422, f"缺少必填参数: {', '.join(missing)}")
     dispatch = _dispatch("tool", cap_id, params, request_id)
     result = _result_envelope(cap, invoke_stub(cap_id, params))
+    # 调用成功后才计费（按次）
+    if not entitled and confirm_pay:
+        per_call_fee = _bill_per_call(rec, cap, request_id)
     result["nef_auth"] = _nef_auth(key, rec, "capabilities:invoke", pipeline, dispatch)
     result["routing"] = dispatch
     if per_call_fee is not None:
@@ -543,7 +543,7 @@ def auth_info(authorization: str = Header(None)):
             "authentication": {
                 **_auth_evidence(key, rec, "auth:info", _pl["request_id"]),
                 "scopes": sorted(rec.get("scopes", DEFAULT_SCOPES)),
-                "pipeline": _pl["stages"], "decision": _pl["decision"], "quota": _pl["quota"],
+                "pipeline": _pl["stages"], "decision": _pl["decision"],
             }}
 
 
@@ -556,7 +556,6 @@ def intent(req: IntentReq, authorization: str = Header(None)):
     auth = _auth_evidence(key, rec, "intent:submit", request_id)
     auth["pipeline"] = pipeline["stages"]
     auth["decision"] = pipeline["decision"]
-    auth["quota"] = pipeline["quota"]
     entitled = {c.id for c in CAPABILITIES if c.status == "available" and _entitled(rec, c)}
     entitled |= {c.id for c in THIRD_PARTY}
     return process_intent(req.text, auth, entitled)
@@ -697,16 +696,16 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
                                entitled=entitled, paid=confirm_pay, cap=cap)
     request_id = pipeline["request_id"]
     per_call_fee = None
-    if not entitled:
-        if not confirm_pay:
-            payload = _payment_required_payload(cap, "MCP", pipeline)
-            return {"jsonrpc": "2.0", "id": req.id,
-                    "result": {"content": [{"type": "text",
-                                            "text": _json.dumps(payload, ensure_ascii=False, indent=2)}],
-                               "isError": False, "payment_required": True}}
-        per_call_fee = _bill_per_call(rec, cap, request_id)
+    if not entitled and not confirm_pay:
+        payload = _payment_required_payload(cap, "MCP", pipeline)
+        return {"jsonrpc": "2.0", "id": req.id,
+                "result": {"content": [{"type": "text",
+                                        "text": _json.dumps(payload, ensure_ascii=False, indent=2)}],
+                           "isError": False, "payment_required": True}}
     dispatch = _dispatch("tool", name, args, request_id)
     result = _result_envelope(cap, invoke_stub(name, args))
+    if not entitled and confirm_pay:   # 调用成功后才计费
+        per_call_fee = _bill_per_call(rec, cap, request_id)
     result["nef_auth"] = _nef_auth(key, rec, "mcp:tools", pipeline, dispatch)
     result["routing"] = dispatch
     if per_call_fee is not None:

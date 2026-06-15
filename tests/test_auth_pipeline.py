@@ -12,6 +12,9 @@ def _hdr(account, plan="free"):
     return {"Authorization": "Bearer " + r.json()["api_key"]}
 
 
+PIPE_CODES = ["credential", "validate", "identify", "scope", "authorize", "audit"]
+
+
 def test_invoke_authorized_has_full_pipeline_allow():
     h = _hdr("pl_pro", plan="pro")  # basic 层免订阅
     r = client.post("/api/v1/capabilities/target_detection/invoke",
@@ -19,10 +22,9 @@ def test_invoke_authorized_has_full_pipeline_allow():
     assert r.status_code == 200
     na = r.json()["nef_auth"]
     codes = [s["code"] for s in na["pipeline"]]
-    assert codes == ["access", "credential", "token", "invoker", "scope", "authz", "audit"]
+    assert codes == PIPE_CODES
     assert na["decision"] == "allow"
     assert all(s["status"] == "passed" for s in na["pipeline"])
-    assert na["quota"]["limit"] == 120
 
 
 def test_402_payload_carries_pipeline_with_authz_denied():
@@ -32,9 +34,9 @@ def test_402_payload_carries_pipeline_with_authz_denied():
     assert r.status_code == 402
     na = r.json()["detail"]["nef_auth"]
     assert na["decision"] == "deny_authz"
-    authz = next(s for s in na["pipeline"] if s["code"] == "authz")
+    authz = next(s for s in na["pipeline"] if s["code"] == "authorize")
     assert authz["status"] == "denied"
-    # 审计仍然落账（结果：拒绝）
+    # 审计仍然记录（结果：拒绝）
     audit = next(s for s in na["pipeline"] if s["code"] == "audit")
     assert audit["status"] == "passed"
 
@@ -69,7 +71,7 @@ def test_scenario_run_dispatches_to_backend_service_id():
     assert sr["dispatch"]["envelope"]["service_id"] == "robot_patrol"
     # 鉴权回执含流水线
     assert sr["auth"]["decision"] == "allow"
-    assert len(sr["auth"]["pipeline"]) == 7
+    assert len(sr["auth"]["pipeline"]) == 6
 
 
 def test_intent_carries_pipeline():
@@ -77,4 +79,15 @@ def test_intent_carries_pipeline():
     res = client.post("/api/v1/intent", json={"text": "机器狗巡检，雾天也要看得清"},
                       headers=h).json()
     assert res["auth"]["decision"] == "allow"
-    assert [s["code"] for s in res["auth"]["pipeline"]][0] == "access"
+    assert [s["code"] for s in res["auth"]["pipeline"]][0] == "credential"
+
+
+def test_failed_call_is_not_billed():
+    # 缺必填参数 → 422，且即使带 _confirm_pay 也不应计费
+    h = _hdr("pl_nobill")
+    before = client.get("/api/v1/auth/info", headers=h).json()["per_call_charges"]["count"]
+    r = client.post("/api/v1/capabilities/target_detection/invoke",
+                    json={"_confirm_pay": True}, headers=h)  # 缺 area
+    assert r.status_code == 422
+    after = client.get("/api/v1/auth/info", headers=h).json()["per_call_charges"]["count"]
+    assert after == before  # 调用失败不计费

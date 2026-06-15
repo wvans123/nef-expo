@@ -652,17 +652,19 @@ async function mySubscribedCaps(){ const i=await myAuthInfo(); return i?i.subscr
 async function myEntitledCaps(){ const i=await myAuthInfo(); return i?(i.entitled_capabilities||i.subscribed_capabilities):[]; }
 
 /* ============ CAPIF 鉴权流水线（逐级点亮，四入口复用） ============ */
-const DEC_TXT = {allow:'放行 ALLOW', deny_authz:'拒绝 · 未授权', deny_scope:'拒绝 · scope 不足'};
+const DEC_TXT = {allow:'放行', deny_authz:'拒绝 · 未授权', deny_scope:'拒绝 · 接口权限不足'};
 function renderAuthPipeline(el, pipeline, routing, onDone){
   if(!el) return;
-  if(!pipeline || !pipeline.stages){ el.innerHTML=''; if(onDone) onDone(); return; }
-  const q = pipeline.quota||{}, dec = pipeline.decision;
+  // 兼容两种形状：{stages:[...]}（前端构造）或 {pipeline:[...]}（nef_auth 回执）
+  const stages = pipeline && (pipeline.stages || pipeline.pipeline);
+  if(!pipeline || !stages){ el.innerHTML=''; if(onDone) onDone(); return; }
+  const dec = pipeline.decision;
   el.innerHTML = `<div class="authpl">
-    <div class="pl-head">🔐 <b>CAPIF 鉴权流水线</b> · AEF 对 API Invoker 逐次鉴权 · 审计 ${esc(pipeline.request_id||'')} · 配额 ${q.used||0}/${q.limit||0}
+    <div class="pl-head">🔐 <b>NEF 鉴权</b> · 每次调用都逐级执行 · 审计号 ${esc(pipeline.request_id||'')}
       <span class="pl-decision ${dec==='allow'?'allow':'deny'}">▷ ${esc(DEC_TXT[dec]||dec||'')}</span></div>
     <div class="pl-stages"></div><div class="pl-route"></div></div>`;
   const host = el.querySelector('.pl-stages'), routeEl = el.querySelector('.pl-route');
-  const stages = pipeline.stages; let i = 0;
+  let i = 0;
   (function step(){
     if(i>=stages.length){
       if(routing){
