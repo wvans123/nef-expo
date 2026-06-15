@@ -69,7 +69,7 @@ pytest -q
 ## 三、快速体验（5 分钟）
 
 1. 右上角 **「注册账号」**：输入名称（如 `developer_zhang`）→ 注册即签发 API Key（订阅与签发已解耦）。
-2. **「订阅与鉴权」**：查看 🔐 四步鉴权流程卡（凭证格式 / 身份识别 / 权限范围 / 审计追踪）；
+2. **「订阅与鉴权」**：查看 🔐 CAPIF 鉴权流水线（7 级逐级点亮：接入·限流 / 凭证解析 / 令牌校验 / 身份识别 Invoker / 权限范围 scope / 授权判定 / 审计落账，依据 3GPP CAPIF）；
    可切换账号等级 **FREE / PRO / MAX**（PRO 含 basic 层免订阅，MAX 含 basic+advanced）。
 3. **「API 直调」**：调一个未授权能力 → 弹 **402 Payment Required**（身份认证通过≠已授权）→ 确认按次支付 → 成功；
    响应以"业务结论 + 关键指标 + 可折叠原始 JSON"的标准信封呈现。
@@ -85,6 +85,8 @@ pytest -q
 
 - **注册即签发 Key**：`POST /api/v1/register` 立即返回 API Key；订阅只记录权益（entitlement）。
 - **认证 ≠ 授权**：未订阅 / 等级不足时身份认证通过但授权失败，返回 402（可订阅 / 升级 / 按次支付三条合法化路径）。
+- **CAPIF 鉴权流水线**：每次 API/MCP/意图/场景调用都逐级执行 7 级鉴权（依据 3GPP CAPIF，AEF 对 API Invoker 鉴权），前端逐级点亮，未授权时在「授权判定」级变红。
+- **路由分发表**（`GET /api/v1/dispatch-table`）：化解「NEF 是 tool 粒度、后台只实现到场景粒度」的错配——NEF 只把后台声明过的 `service_id` 转发出去（带显式请求信封），没实现的 tool 由 NEF 参考回显兜底，后台不会收到看不懂的请求。
 - **标准结果信封**：每次调用返回 `summary`（一行业务结论）+ `metrics`（关键指标）+ `result`（原始数据）+ `nef_auth`（鉴权回执）+ `billing`（按需）。
 - **两个 MCP Server**：`/mcp`（对外，AF 的 AI Agent，Bearer 鉴权）与 `/internal/mcp`（对内，网络 Agent/网元，信任域内免 AF 鉴权，用于发现并反向调用第三方能力）。
 - **能力分层**：`tier` = basic / advanced / premium；账号等级 `PLAN_TIERS` 决定免订阅可用的层级。

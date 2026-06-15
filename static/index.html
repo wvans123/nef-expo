@@ -124,6 +124,31 @@ th{background:var(--card);color:var(--muted)}
 .auth-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin:10px 0}
 .auth-check{background:var(--card);border:1px solid #39ffb055;border-radius:8px;padding:9px 11px;font-size:12px}
 .auth-check b{color:var(--green);display:block;margin-bottom:3px}
+/* CAPIF 鉴权流水线 */
+.authpl{border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;padding:10px 12px;margin:10px 0;background:var(--card)}
+.authpl .pl-head{font-size:12px;color:var(--muted);margin-bottom:8px}
+.authpl .pl-head b{color:var(--accent)}
+.pl-stage{display:flex;align-items:flex-start;gap:9px;padding:5px 0;opacity:0;transform:translateX(-6px);transition:opacity .25s,transform .25s}
+.pl-stage.show{opacity:1;transform:none}
+.pl-ic{flex:0 0 20px;height:20px;line-height:20px;text-align:center;border-radius:50%;font-size:11px;font-weight:700}
+.pl-ic.passed{background:#39ffb022;color:var(--green);border:1px solid #39ffb077}
+.pl-ic.denied{background:#ff5d6e22;color:var(--red);border:1px solid #ff5d6e77}
+.pl-ic.run{background:#39d2ff22;color:var(--accent);border:1px solid #39d2ff77;animation:plspin 1s linear infinite}
+@keyframes plspin{to{transform:rotate(360deg)}}
+.pl-stage .pl-body{flex:1;font-size:12px}
+.pl-stage .pl-body b{display:inline-block;margin-right:6px}
+.pl-stage .pl-lat{color:var(--muted);font-size:11px}
+.pl-stage .pl-detail{color:var(--muted);font-size:11px;display:block;margin-top:1px}
+.pl-route{margin-top:8px;padding:7px 10px;border-radius:7px;font-size:12px;opacity:0;transition:opacity .3s}
+.pl-route.show{opacity:1}
+.pl-route.backend{background:#39ffb014;border:1px solid #39ffb055}
+.pl-route.ref{background:#ffb45d14;border:1px solid #ffb45d55}
+.pl-decision{font-weight:700;margin-left:6px}
+.pl-decision.allow{color:var(--green)}
+.pl-decision.deny{color:var(--red)}
+.disp-tbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}
+.disp-tbl th{text-align:left;color:var(--muted);font-weight:600;padding:5px 8px;border-bottom:1px solid var(--border)}
+.disp-tbl td{padding:5px 8px;border-bottom:1px solid var(--border);vertical-align:top}
 .handoff-card{background:var(--card);border:1px solid var(--purple);border-left:4px solid var(--purple);border-radius:8px;padding:12px 14px;margin-top:12px}
 /* 编排器 */
 #composer-wrap{display:grid;grid-template-columns:1fr 340px;gap:16px}
@@ -174,7 +199,7 @@ th{background:var(--card);color:var(--muted)}
   <button data-tab="api">API 直调</button>
   <button data-tab="mcp">MCP 接口</button>
   <button data-tab="intent">意图受理</button>
-  <button data-tab="skill">场景蓝图</button>
+  <button data-tab="skill">场景方案</button>
   <button data-tab="composer">自助编排</button>
   <button data-tab="afreg">双向开放 · AF</button>
   <button data-tab="term">AF 智能终端</button>
@@ -206,6 +231,7 @@ th{background:var(--card);color:var(--muted)}
       </div>
       <div>
         <label>请求</label><pre id="api-req">--</pre>
+        <label>NEF 鉴权 · 路由</label><div id="api-pipeline"></div>
         <label>响应</label><pre id="api-resp">--</pre>
       </div>
     </div>
@@ -224,6 +250,7 @@ th{background:var(--card);color:var(--muted)}
       </div>
       <div>
         <label>JSON-RPC 请求</label><pre id="mcp-req">--</pre>
+        <label>NEF 鉴权 · 路由</label><div id="mcp-pipeline"></div>
         <label>JSON-RPC 响应</label><pre id="mcp-resp">--</pre>
       </div>
     </div>
@@ -244,7 +271,8 @@ th{background:var(--card);color:var(--muted)}
 
   <!-- Tab 6 Skill -->
   <div class="tabpane" id="pane-skill">
-    <h3 class="sec">场景蓝图 <span class="muted" style="font-weight:400;font-size:12px">— 一份 Skill，双重角色：外部指导 AF 调用，网络内部驱动 Agent 编排；也可一键运行整个场景</span></h3>
+    <h3 class="sec">场景方案 <span class="muted" style="font-weight:400;font-size:12px">— 每个场景的成套解决方案：怎么调（外部指导 AF）+ 怎么编排（网络内部驱动 Agent）+ 一键跑通整个场景</span></h3>
+    <div id="dispatch-panel" style="margin-bottom:14px"></div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
       <select id="skill-pkg-select" style="width:240px"></select>
       <div>
@@ -545,9 +573,8 @@ async function renderSubs(){
         </div>
       </div>
       <div class="agent-block" style="border-left-color:var(--green)">
-        <b class="ok">🔐 NEF 鉴权流程（每次调用都会执行）</b>
-        <div class="auth-grid">${(info.authentication.checks||[]).map(c=>`
-          <div class="auth-check"><b>✓ ${esc(c.label)}</b><span class="muted">${esc(c.detail)}</span></div>`).join('')}</div>
+        <b class="ok">🔐 NEF 鉴权流水线（每次调用都会逐级执行）</b>
+        <div id="subs-pipeline" style="margin-top:6px"></div>
         <b class="ok" style="font-size:12px">API Key 权限范围（scope）</b>
         <div style="margin-top:5px">${info.authentication.scopes.map(s=>`<span class="pill" style="cursor:default">${esc(s)}</span>`).join('')}</div>
       </div>
@@ -555,6 +582,9 @@ async function renderSubs(){
       <h3 class="sec">已订阅能力（${info.subscribed_capabilities.length}）</h3>
       ${info.subscribed_capabilities.length?'':'<p class="muted" style="font-size:12px">还没有订阅——你已持有 API Key，可直接按次付费调用任何可用能力（API/MCP 调用时会收到价格提醒），高频使用建议包月订阅。</p>'}
       <div class="grid">${capCards}</div>`;
+    const a = info.authentication;
+    if(a && a.pipeline) renderAuthPipeline($('#subs-pipeline'),
+      {request_id:a.request_id, decision:a.decision, quota:a.quota, stages:a.pipeline}, null);
   }catch(e){
     if(e && e.status === 401){
       el.innerHTML = `<div class="agent-block" style="border-left-color:var(--red)">
@@ -621,6 +651,39 @@ async function myAuthInfo(){
 async function mySubscribedCaps(){ const i=await myAuthInfo(); return i?i.subscribed_capabilities:[]; }
 async function myEntitledCaps(){ const i=await myAuthInfo(); return i?(i.entitled_capabilities||i.subscribed_capabilities):[]; }
 
+/* ============ CAPIF 鉴权流水线（逐级点亮，四入口复用） ============ */
+const DEC_TXT = {allow:'放行 ALLOW', deny_authz:'拒绝 · 未授权', deny_scope:'拒绝 · scope 不足'};
+function renderAuthPipeline(el, pipeline, routing, onDone){
+  if(!el) return;
+  if(!pipeline || !pipeline.stages){ el.innerHTML=''; if(onDone) onDone(); return; }
+  const q = pipeline.quota||{}, dec = pipeline.decision;
+  el.innerHTML = `<div class="authpl">
+    <div class="pl-head">🔐 <b>CAPIF 鉴权流水线</b> · AEF 对 API Invoker 逐次鉴权 · 审计 ${esc(pipeline.request_id||'')} · 配额 ${q.used||0}/${q.limit||0}
+      <span class="pl-decision ${dec==='allow'?'allow':'deny'}">▷ ${esc(DEC_TXT[dec]||dec||'')}</span></div>
+    <div class="pl-stages"></div><div class="pl-route"></div></div>`;
+  const host = el.querySelector('.pl-stages'), routeEl = el.querySelector('.pl-route');
+  const stages = pipeline.stages; let i = 0;
+  (function step(){
+    if(i>=stages.length){
+      if(routing){
+        routeEl.classList.add(routing.target==='backend'?'backend':'ref','show');
+        routeEl.innerHTML = routing.target==='backend'
+          ? `🧭 <b>路由判定</b>：命中后台 <b>service_id「${esc(routing.service_id)}」</b>（${esc(routing.backend_name||'')}）→ NEF 出向转发，回传业务结果`
+          : `🧭 <b>路由判定</b>：${esc(routing.note||'NEF 参考回显')}`;
+      }
+      if(onDone) onDone(); return;
+    }
+    const s = stages[i];
+    const row = document.createElement('div'); row.className='pl-stage';
+    row.innerHTML = `<span class="pl-ic run">◌</span><span class="pl-body"><b>${s.seq}. ${esc(s.label)}</b><span class="pl-lat">${s.latency_ms}ms</span><span class="pl-detail">${esc(s.detail)}</span></span>`;
+    host.appendChild(row); requestAnimationFrame(()=>row.classList.add('show'));
+    const ic = row.querySelector('.pl-ic');
+    setTimeout(()=>{ ic.classList.remove('run'); ic.classList.add(s.status);
+      ic.textContent = s.status==='denied'?'✕':'✓'; i++; step(); }, 150 + Math.random()*110);
+  })();
+}
+window.renderAuthPipeline = renderAuthPipeline;
+
 /* ============ API 调试 ============ */
 async function renderApiTab(){
   const entitled = await myEntitledCaps();
@@ -649,7 +712,7 @@ function renderApiChain(){
   PKGS.forEach(p=>{ const n=p.capabilities.filter(c=>ids.includes(c)).length; if(n>bestN){best=p;bestN=n;} });
   $('#api-chain').innerHTML = `<label>我组装的调用链（本会话）</label><div class="flow" style="margin:4px 0">` +
     apiChain.map((x,i)=>`<span class="node" style="border-color:${x.ok?'var(--green)':'var(--red)'};font-size:11px">${i+1}. ${esc(x.name)} ${x.ok?'✓':'✗'}</span>`).join('<span class="arrow">→</span>') + `</div>` +
-    (best?`<div class="muted" style="font-size:12px">💡 调用链已覆盖「${esc(best.name)}」${bestN}/${best.capabilities.length} 项能力 —— 也可以在「场景蓝图」一键运行该场景，或包月订阅套餐更划算</div>`:'') +
+    (best?`<div class="muted" style="font-size:12px">💡 调用链已覆盖「${esc(best.name)}」${bestN}/${best.capabilities.length} 项能力 —— 也可以在「场景方案」一键运行该场景，或包月订阅套餐更划算</div>`:'') +
     `<button style="font-size:11px;padding:2px 8px;margin-top:4px" onclick="apiChain=[];renderApiChain()">清空</button>`;
 }
 async function sendApi(confirmPay){
@@ -671,17 +734,20 @@ async function sendApi(confirmPay){
   try{
     const res = await api(`/api/v1/capabilities/${id}/invoke`, {method:'POST', body:JSON.stringify(params)});
     const chips = res.metrics ? Object.entries(res.metrics).slice(0,5).map(([k,v])=>`<span class="pill" style="cursor:default">${esc(k)}: <b>${esc(String(v))}</b></span>`).join('') : '';
-    $('#api-resp').innerHTML = `<span class="ok">200 OK</span>${res.nef_auth?`  <span class="ok">🔐 NEF 已鉴权 · 账号 ${esc(res.nef_auth.account)} · ${esc(res.nef_auth.scope)} · 审计 ${esc(res.nef_auth.request_id)}</span>`:''}${res.billing?`\n<span style="color:var(--orange)">💳 ${esc(res.billing.message)}</span>`:''}\n` +
+    renderAuthPipeline($('#api-pipeline'), res.nef_auth, res.routing);
+    $('#api-resp').innerHTML = `<span class="ok">200 OK</span>${res.billing?`  <span style="color:var(--orange)">💳 ${esc(res.billing.message)}</span>`:''}\n` +
       (res.summary?`<span style="font-size:14px;color:var(--green)">✓ ${esc(res.summary)}</span>\n${chips}\n`:'') +
       `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:12px">原始响应 JSON（点击展开）</summary>${esc(jfmt(res))}</details>`;
     apiChain.push({id, name:c.name, ok:true}); renderApiChain();
   }catch(e){
     if(e.status===402 && e.data && e.data.detail && e.data.detail.options){
       const d = e.data.detail;
+      renderAuthPipeline($('#api-pipeline'), d.nef_auth, null);
       $('#api-resp').innerHTML = `<span class="err">402 Payment Required</span>  <span style="color:var(--orange)">💳 ${esc(d.message)}</span>\n` +
         d.options.map(o=>`  · ${o.type==='monthly'?'包月':'按次'}：${esc(o.price)} — ${esc(o.how)}`).join('\n') +
         `\n\n<button class="primary" style="font-size:12px" onclick="sendApi(true)">✓ 确认支付 · 按次调用并重试</button>`;
     }else{
+      $('#api-pipeline').innerHTML='';
       $('#api-resp').innerHTML = `<span class="err">${e.status||'ERR'}</span>\n` + esc(jfmt(e.data||{}));
       apiChain.push({id, name:c.name, ok:false}); renderApiChain();
     }
@@ -724,9 +790,14 @@ $('#mcp-call').onclick = async ()=>{
   const c = CAPS.find(x=>x.id===id);
   const req = {jsonrpc:'2.0', id:2, method:'tools/call', params:{name:id, arguments:(id.startsWith('scenario_')||id.startsWith('pipeline_')||!c)?{}:collectParams(c,'mcpp')}};
   $('#mcp-req').textContent = jfmt(req);
+  $('#mcp-pipeline').innerHTML = '';
   try{
     const res = await api('/api/v1/mcp/tools/call',{method:'POST',body:JSON.stringify(req)});
     $('#mcp-resp').textContent = jfmt(res);
+    try{
+      const inner = JSON.parse(res.result.content[0].text);
+      renderAuthPipeline($('#mcp-pipeline'), inner.nef_auth||inner.auth, inner.routing||inner.dispatch);
+    }catch(_){}
   }catch(e){ $('#mcp-resp').textContent = jfmt(e.data||{detail:'需要 API Key（请先在顶栏注册账号）'}); }
 };
 
@@ -759,8 +830,7 @@ function renderIntentResult(res){
   let html = `<div class="flow">` + res.pipeline.map((s,i)=>
     `<span class="node${s.stage.startsWith('partner')?' planning':''}" title="${esc(s.detail)}">${esc(s.label)}</span>${i<res.pipeline.length-1?'<span class="arrow">→</span>':''}`).join('') + `</div>`;
   html += `<div class="muted" style="font-size:12px;margin-bottom:10px">` + res.pipeline.map(s=>`<div>▸ <b>${esc(s.label)}</b>：${esc(s.detail)}</div>`).join('') + `</div>`;
-  html += `<h3 class="sec">鉴权证据</h3><div class="auth-grid">${res.auth.checks.map(c=>`
-    <div class="auth-check"><b>✓ ${esc(c.label)}</b><span class="muted">${esc(c.detail)}</span></div>`).join('')}</div>`;
+  html += `<h3 class="sec">NEF 鉴权</h3><div id="intent-pipeline"></div>`;
   html += `<div class="handoff-card">
     <b style="color:var(--purple)">✓ 已转交 ${esc(res.handoff.partner_agent)}</b>
     <div class="kv" style="margin-top:8px"><b>Intent ID</b><code>${esc(res.intent_id)}</code></div>
@@ -773,6 +843,12 @@ function renderIntentResult(res){
   <h3 class="sec">执行状态跟踪 <span class="muted" style="font-weight:400;font-size:12px">GET /api/v1/intent/${esc(res.intent_id)} · 自动轮询中</span></h3>
   <div id="intent-track"><p class="muted">查询中…</p></div>`;
   $('#intent-result').innerHTML = html;
+  if(res.auth.pipeline){
+    renderAuthPipeline($('#intent-pipeline'), {request_id:res.auth.request_id, decision:res.auth.decision,
+      quota:res.auth.quota, stages:res.auth.pipeline}, null);
+  }else{
+    $('#intent-pipeline').innerHTML = `<div class="auth-grid">${res.auth.checks.map(c=>`<div class="auth-check"><b>✓ ${esc(c.label)}</b><span class="muted">${esc(c.detail)}</span></div>`).join('')}</div>`;
+  }
   pollIntentStatus(res.intent_id);
 }
 let intentPollTimer = null;
@@ -813,8 +889,29 @@ async function loadSkill(){
   const sel = $('#skill-pkg-select');
   if(!sel.options.length) sel.innerHTML = PKGS.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   sel.onchange = fetchSkill;
+  renderDispatchTable();
   if(!skillData) await fetchSkill();
 }
+async function renderDispatchTable(){
+  const el = $('#dispatch-panel'); if(!el) return;
+  let dt; try{ dt = await fetch('/api/v1/dispatch-table').then(r=>r.json()); }catch(e){ return; }
+  const s = dt.summary;
+  const scRows = dt.scenarios.map(x=>{
+    const backend = x.target==='backend';
+    return `<tr>
+      <td>${esc(x.name)} <span class="mono muted" style="font-size:11px">${esc(x.id)}</span></td>
+      <td>${backend?`<span class="pl-decision allow">后台 service_id</span> <code>${esc(x.service_id)}</code>`:`<span style="color:var(--orange)">NEF 参考回显</span>`}</td>
+      <td class="muted" style="font-size:11px">${esc(x.note)}</td></tr>`;
+  }).join('');
+  el.innerHTML = `<div class="agent-block" style="border-left-color:var(--accent)">
+    <b style="color:var(--accent)">🧭 NEF 路由分发表</b>
+    <span class="muted" style="font-size:12px;margin-left:6px">化解「NEF 是 tool 粒度、后台只实现到场景粒度」的错配——NEF 只把后台声明过的 service_id 转发出去，后台靠它无歧义分发；没实现的 tool 由 NEF 参考回显兜底，后台绝不会收到看不懂的请求。</span>
+    <div class="muted" style="font-size:12px;margin:8px 0">场景 ${s.scenarios} 个（命中后台 <b class="ok">${s.backend_scenarios}</b>，其余 NEF 参考回显）· 单个 tool ${s.tools} 个（均为 <b style="color:var(--orange)">NEF 参考回显</b>，后台未按 tool 粒度实现）</div>
+    <table class="disp-tbl"><thead><tr><th>场景 service_id</th><th>落地目标</th><th>说明</th></tr></thead><tbody>${scRows}</tbody></table>
+    <div class="muted" style="font-size:11px;margin-top:8px">转发信封示例：<code>{ "request_id":"req_…", "service_id":"robot_patrol", "tool_id":null, "params":{…} }</code></div>
+  </div>`;
+}
+window.renderDispatchTable = renderDispatchTable;
 async function fetchSkill(){
   const id = $('#skill-pkg-select').value || PKGS[0].id;
   skillData = await fetch(`/api/v1/packages/${id}/skill`).then(r=>r.json());
@@ -833,7 +930,7 @@ function renderScenarioRun(res){
   let html = `<h3 class="sec">场景执行回执 · ${esc(res.scenario)}</h3>`;
   html += `<div class="flow">` + res.pipeline.map((s,i)=>
     `<span class="node${s.stage.startsWith('partner')?' planning':''}" title="${esc(s.detail)}">${esc(s.label)}</span>${i<res.pipeline.length-1?'<span class="arrow">→</span>':''}`).join('') + `</div>`;
-  html += `<div class="auth-ribbon">🔐 NEF 已鉴权 · 账号 ${esc(res.auth.account)} · ${esc(res.auth.scope)} · 审计 ${esc(res.auth.request_id)}</div>`;
+  html += `<div id="scenario-pipeline"></div>`;
   html += `<div class="muted" style="font-size:12px;margin-bottom:6px">网络任务 <code>${esc(res.task_id)}</code> · 共 ${res.execution_trace.length} 步 · 总耗时 ${res.total_latency_ms}ms · 状态 <span class="ok">${esc(res.status)}</span></div>`;
   const byAgent = {};
   res.execution_trace.forEach(s => (byAgent[s.agent] = byAgent[s.agent]||{color:s.agent_color, list:[]}).list.push(s));
@@ -849,6 +946,9 @@ function renderScenarioRun(res){
   }
   html += `<p class="muted" style="font-size:12px">${esc(res.message)}</p>`;
   $('#skill-run-result').innerHTML = html;
+  if(res.auth && res.auth.pipeline){
+    renderAuthPipeline($('#scenario-pipeline'), res.auth, res.dispatch||res.auth.dispatch);
+  }
 }
 $('#skill-view-ext').onclick = ()=>{ skillView='ext'; $('#skill-view-ext').classList.add('primary'); $('#skill-view-int').classList.remove('primary'); renderSkill(); };
 $('#skill-view-int').onclick = ()=>{ skillView='int'; $('#skill-view-int').classList.add('primary'); $('#skill-view-ext').classList.remove('primary'); renderSkill(); };

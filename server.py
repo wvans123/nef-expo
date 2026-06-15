@@ -132,9 +132,9 @@ def _per_call_price(cap) -> float:
         return 0.5
 
 
-def _payment_required_payload(cap, channel: str) -> dict:
+def _payment_required_payload(cap, channel: str, pipeline: dict | None = None) -> dict:
     price = _per_call_price(cap)
-    return {
+    payload = {
         "status": "payment_required",
         "capability": cap.id, "name": cap.name,
         "message": f"身份认证通过，但未授权：账号未订阅「{cap.name}」且当前等级不含 {cap.tier} 层级。可订阅 / 升级账号 / 按次支付。",
@@ -147,6 +147,10 @@ def _payment_required_payload(cap, channel: str) -> dict:
                      "在 arguments 中携带 \"_confirm_pay\": true 重新调用（确认支付后调用）")},
         ],
     }
+    if pipeline:
+        payload["nef_auth"] = {"request_id": pipeline["request_id"], "decision": pipeline["decision"],
+                               "quota": pipeline["quota"], "pipeline": pipeline["stages"]}
+    return payload
 
 
 def _bill_per_call(rec, cap, request_id):
@@ -195,11 +199,123 @@ def _entitled(rec, cap) -> bool:
     return cap.tier in PLAN_TIERS.get(rec.get("plan", "free"), set())
 
 
+# ===== 路由分发：化解 tool 粒度 ↔ 后台场景粒度 的错配 =====
+# 演示初值：后台同事按场景粒度交付，已声明实现的 service_id。
+# 未列出的单个 tool / 场景由 NEF 参考回显兜底——NEF 绝不把后台未声明的 id 转发出去，
+# 后台只会收到自己注册过的 service_id，靠它无歧义分发，不会收到"看不懂的 tool 请求"。
+BACKEND_SERVICES = {
+    "robot_patrol": "机器狗巡检-感知融合",
+    "traffic_forecast_pkg": "城市车流量预测",
+    "uav_track": "无人机识别追踪",
+}
+
+
+def _dispatch(kind: str, ident: str, params: dict | None = None, request_id: str = "") -> dict:
+    """NEF 分发判定。kind: 'tool' | 'scenario'。
+    返回落地目标 + 转发请求信封（后台靠 service_id 分发，无歧义）。"""
+    if kind == "scenario" and ident in BACKEND_SERVICES:
+        return {
+            "target": "backend", "service_id": ident, "tool_id": None,
+            "backend_name": BACKEND_SERVICES[ident],
+            "note": f"命中后台 service_id「{ident}」→ NEF 出向转发并回传业务结果",
+            "envelope": {"request_id": request_id, "service_id": ident,
+                         "tool_id": None, "params": params or {}},
+        }
+    return {
+        "target": "nef-ref",
+        "service_id": ident if kind == "scenario" else None,
+        "tool_id": ident if kind == "tool" else None,
+        "backend_name": None,
+        "note": "后台未声明实现 → NEF 参考回显（mock）；真实业务按契约接入即替换",
+        "envelope": {"request_id": request_id,
+                     "service_id": ident if kind == "scenario" else None,
+                     "tool_id": ident if kind == "tool" else None, "params": params or {}},
+    }
+
+
+# ===== CAPIF 鉴权流水线（AEF 对 API Invoker 逐次鉴权，7 级动态判定） =====
+def _capif_pipeline(key, rec, *, scope, scope_ok=True, entitled=True, paid=False,
+                    cap=None, request_id=None) -> dict:
+    """逐级计算鉴权状态，供前端逐级点亮。decision: allow / deny_scope / deny_authz。"""
+    request_id = request_id or ("req_" + uuid.uuid4().hex[:12])
+    acct, plan = rec["account"], rec.get("plan", "free").upper()
+    used = rec.get("_calls", 0) + 1
+    rec["_calls"] = used
+    masked = f"{key[:8]}…{key[-4:]}"
+    stages = []
+
+    def add(code, label, status, detail):
+        stages.append({"seq": len(stages) + 1, "code": code, "label": label,
+                       "status": status, "latency_ms": random.randint(1, 5), "detail": detail})
+
+    def done(decision):
+        return {"request_id": request_id, "decision": decision,
+                "quota": {"used": used, "limit": 120}, "stages": stages}
+
+    add("access", "接入·限流", "passed", f"TLS 接入点校验通过 · 速率配额 {used}/120")
+    add("credential", "凭证解析", "passed", f"已解析 Authorization: Bearer {masked}")
+    add("token", "令牌校验", "passed", "签名有效 · 未过期 · 不在吊销列表")
+    add("invoker", "身份识别", "passed", f"API Invoker → AF 账号「{acct}」· 等级 {plan}")
+    if not scope_ok:
+        add("scope", "权限范围", "denied", f"API Key 缺少所需 scope：{scope}")
+        add("audit", "审计落账", "passed", f"审计请求 {request_id}（结果：拒绝 · scope 不足）")
+        return done("deny_scope")
+    add("scope", "权限范围", "passed", f"API Key 含所需 scope：{scope}")
+    capname = cap.name if cap else "本次调用"
+    if entitled:
+        add("authz", "授权判定", "passed", f"「{capname}」已授权（订阅 / 账号等级 / 第三方）")
+    elif paid:
+        add("authz", "授权判定", "passed", f"「{capname}」未订阅，已确认按次支付 → 授权放行")
+    else:
+        tier = getattr(cap, "tier", "?") if cap else "?"
+        add("authz", "授权判定", "denied",
+            f"「{capname}」未订阅且账号等级不含 {tier} 层级 → 402（可订阅 / 升级 / 按次）")
+        add("audit", "审计落账", "passed", f"审计请求 {request_id}（结果：拒绝 · 未授权）")
+        return done("deny_authz")
+    add("audit", "审计落账", "passed", f"审计请求 {request_id}（结果：放行）已写入审计")
+    return done("allow")
+
+
+def _nef_auth(key, rec, scope, pipeline, dispatch=None) -> dict:
+    """挂在调用结果上的 NEF 鉴权回执：精简 stamp + 流水线 + 配额 + 路由（保留旧字段兼容）。"""
+    out = {**_auth_stamp(key, rec, scope),
+           "request_id": pipeline["request_id"], "decision": pipeline["decision"],
+           "quota": pipeline["quota"], "pipeline": pipeline["stages"]}
+    if dispatch:
+        out["dispatch"] = {"target": dispatch["target"], "service_id": dispatch["service_id"],
+                           "backend_name": dispatch.get("backend_name"), "note": dispatch["note"]}
+    return out
+
+
 # ===== 能力目录 =====
 @app.get("/api/v1/capabilities")
 def list_capabilities():
     caps = [c.to_dict() for c in CAPABILITIES] + [c.to_dict() for c in THIRD_PARTY]
     return {"count": len(caps), "categories": CATEGORIES, "capabilities": caps}
+
+
+@app.get("/api/v1/dispatch-table")
+def dispatch_table():
+    """NEF 路由分发表：每个暴露能力落地到 后台 service_id 或 NEF 参考回显。
+    讲清 tool 粒度 ↔ 后台场景粒度 的错配如何在 NEF 这一层被消化。"""
+    scenarios = []
+    for pkg in PACKAGES:
+        d = _dispatch("scenario", pkg["id"])
+        scenarios.append({"id": pkg["id"], "name": pkg["name"], "kind": "scenario",
+                          "target": d["target"], "service_id": d["service_id"],
+                          "backend_name": d.get("backend_name"), "note": d["note"]})
+    tools = []
+    for c in CAPABILITIES:
+        if c.status != "available":
+            continue
+        d = _dispatch("tool", c.id)
+        tools.append({"id": c.id, "name": c.name, "kind": "tool",
+                      "target": d["target"], "tier": c.tier, "note": d["note"]})
+    backend_n = sum(1 for s in scenarios if s["target"] == "backend")
+    return {"backend_services": BACKEND_SERVICES,
+            "summary": {"scenarios": len(scenarios), "backend_scenarios": backend_n,
+                        "tools": len(tools), "tools_nef_ref": len(tools)},
+            "scenarios": scenarios, "tools": tools}
 
 
 @app.get("/api/v1/capabilities/{cap_id}")
@@ -230,17 +346,22 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
     except Exception:
         params = {}
     confirm_pay = bool(params.pop("_confirm_pay", False))
+    entitled = _entitled(rec, cap)
+    pipeline = _capif_pipeline(key, rec, scope="capabilities:invoke",
+                               entitled=entitled, paid=confirm_pay, cap=cap)
+    request_id = pipeline["request_id"]
     per_call_fee = None
-    if not _entitled(rec, cap):
+    if not entitled:
         if not confirm_pay:
-            raise HTTPException(402, _payment_required_payload(cap, "REST"))
-        stamp = _auth_stamp(key, rec, "capabilities:invoke")
-        per_call_fee = _bill_per_call(rec, cap, stamp["request_id"])
+            raise HTTPException(402, _payment_required_payload(cap, "REST", pipeline))
+        per_call_fee = _bill_per_call(rec, cap, request_id)
     missing = [p.name for p in cap.params if p.required and p.name not in params]
     if missing:
         raise HTTPException(422, f"缺少必填参数: {', '.join(missing)}")
+    dispatch = _dispatch("tool", cap_id, params, request_id)
     result = _result_envelope(cap, invoke_stub(cap_id, params))
-    result["nef_auth"] = _auth_stamp(key, rec, "capabilities:invoke")
+    result["nef_auth"] = _nef_auth(key, rec, "capabilities:invoke", pipeline, dispatch)
+    result["routing"] = dispatch
     if per_call_fee is not None:
         result["billing"] = {"mode": "per_call", "charged": per_call_fee,
                              "message": f"按次计费 ¥{per_call_fee}，已记入账号 {rec['account']} 账单"}
@@ -258,7 +379,10 @@ def list_packages():
 
 # ===== 场景级一键调用（一个请求跑完整场景，网络内部 Agent 编排并回传执行轨迹） =====
 def _scenario_run(pkg, key, rec, channel: str):
-    auth = _auth_stamp(key, rec, "capabilities:invoke")
+    pipeline = _capif_pipeline(key, rec, scope="capabilities:invoke", entitled=True, cap=None)
+    request_id = pipeline["request_id"]
+    dispatch = _dispatch("scenario", pkg["id"], {}, request_id)
+    auth = _nef_auth(key, rec, "capabilities:invoke", pipeline, dispatch)
     task_id = "partner_task_" + uuid.uuid4().hex[:12]
     steps, n = [], 0
     for grp in agent_flow(pkg):
@@ -273,13 +397,18 @@ def _scenario_run(pkg, key, rec, channel: str):
         steps.append({"step": n, "agent": "网络内部 Network Agent", "agent_color": "#bc8cff",
                       "capability": None, "name": s["name"], "detail": s["detail"],
                       "latency_ms": None, "status": "ok", "narrative": True})
-    pipeline = [
+    if dispatch["target"] == "backend":
+        route_detail = (f"命中后台 service_id「{pkg['id']}」（{dispatch['backend_name']}）→ "
+                        f"NEF 出向转发，信封含 request_id/service_id，网络内部任务 {task_id}")
+    else:
+        route_detail = (f"后台未声明该场景 → NEF 参考回显（mock）编排执行，网络内部任务 {task_id}")
+    biz_pipeline = [
         {"stage": "auth_verify", "label": "NEF 鉴权",
-         "detail": f"Bearer API Key 已验证，账号 {rec['account']} 已订阅场景「{pkg['name']}」"},
+         "detail": f"CAPIF 流水线 7 级通过，账号 {rec['account']} 已订阅场景「{pkg['name']}」"},
         {"stage": "nef_accept", "label": "NEF 受理",
-         "detail": f"场景调用（{channel}）已受理，审计请求 ID {auth['request_id']}"},
-        {"stage": "partner_route", "label": "转交网络 Agent",
-         "detail": f"场景请求转交 网络内部 Network Agent，网络内部任务 {task_id}"},
+         "detail": f"场景调用（{channel}）已受理，审计请求 ID {request_id}"},
+        {"stage": "partner_route", "label": "路由判定 · 转交网络 Agent",
+         "detail": route_detail},
         {"stage": "partner_execute", "label": "网络内部编排执行",
          "detail": f"网络内部 Network Agent 按场景 Skill 编排 {len(steps)} 个步骤并执行"},
         {"stage": "aggregate", "label": "回执返回",
@@ -289,7 +418,7 @@ def _scenario_run(pkg, key, rec, channel: str):
         "scenario_id": pkg["id"], "scenario": pkg["name"],
         "status": "completed", "task_id": task_id,
         "partner_agent": "网络内部 Network Agent",
-        "auth": auth, "pipeline": pipeline,
+        "auth": auth, "dispatch": dispatch, "pipeline": biz_pipeline,
         "execution_trace": steps,
         "total_latency_ms": sum(s["latency_ms"] or 0 for s in steps),
         "message": "场景由网络内部 Agent 编排执行，NEF 负责鉴权、受理、审计与回执转发。",
@@ -385,6 +514,7 @@ def subscribe(req: SubscribeReq):
 @app.get("/api/v1/auth/info")
 def auth_info(authorization: str = Header(None)):
     key, rec = _auth(authorization)
+    _pl = _capif_pipeline(key, rec, scope="auth:info", entitled=True, cap=None)
     caps = sorted(_subscribed_caps(rec))
     est = 0.0
     for cid in rec["subscriptions"]:
@@ -411,17 +541,22 @@ def auth_info(authorization: str = Header(None)):
                 "recent": PER_CALL_BILLS.get(rec["account"], [])[-5:][::-1],
             },
             "authentication": {
-                **_auth_evidence(key, rec, "auth:info", "req_" + uuid.uuid4().hex[:12]),
+                **_auth_evidence(key, rec, "auth:info", _pl["request_id"]),
                 "scopes": sorted(rec.get("scopes", DEFAULT_SCOPES)),
+                "pipeline": _pl["stages"], "decision": _pl["decision"], "quota": _pl["quota"],
             }}
 
 
 # ===== Intent =====
 @app.post("/api/v1/intent")
 def intent(req: IntentReq, authorization: str = Header(None)):
-    request_id = "req_" + uuid.uuid4().hex[:12]
     key, rec = _auth(authorization, required_scope="intent:submit")
+    pipeline = _capif_pipeline(key, rec, scope="intent:submit", entitled=True, cap=None)
+    request_id = pipeline["request_id"]
     auth = _auth_evidence(key, rec, "intent:submit", request_id)
+    auth["pipeline"] = pipeline["stages"]
+    auth["decision"] = pipeline["decision"]
+    auth["quota"] = pipeline["quota"]
     entitled = {c.id for c in CAPABILITIES if c.status == "available" and _entitled(rec, c)}
     entitled |= {c.id for c in THIRD_PARTY}
     return process_intent(req.text, auth, entitled)
@@ -557,18 +692,23 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
         return {"jsonrpc": "2.0", "id": req.id,
                 "error": {"code": -32602, "message": f"Unknown tool: {name}"}}
     confirm_pay = bool(args.pop("_confirm_pay", False))
+    entitled = _entitled(rec, cap)
+    pipeline = _capif_pipeline(key, rec, scope="mcp:tools",
+                               entitled=entitled, paid=confirm_pay, cap=cap)
+    request_id = pipeline["request_id"]
     per_call_fee = None
-    if not _entitled(rec, cap):
+    if not entitled:
         if not confirm_pay:
-            payload = _payment_required_payload(cap, "MCP")
+            payload = _payment_required_payload(cap, "MCP", pipeline)
             return {"jsonrpc": "2.0", "id": req.id,
                     "result": {"content": [{"type": "text",
                                             "text": _json.dumps(payload, ensure_ascii=False, indent=2)}],
                                "isError": False, "payment_required": True}}
-        stamp = _auth_stamp(key, rec, "mcp:tools")
-        per_call_fee = _bill_per_call(rec, cap, stamp["request_id"])
+        per_call_fee = _bill_per_call(rec, cap, request_id)
+    dispatch = _dispatch("tool", name, args, request_id)
     result = _result_envelope(cap, invoke_stub(name, args))
-    result["nef_auth"] = _auth_stamp(key, rec, "mcp:tools")
+    result["nef_auth"] = _nef_auth(key, rec, "mcp:tools", pipeline, dispatch)
+    result["routing"] = dispatch
     if per_call_fee is not None:
         result["billing"] = {"mode": "per_call", "charged": per_call_fee,
                              "message": f"按次计费 ¥{per_call_fee}，已记入账号 {rec['account']} 账单"}
