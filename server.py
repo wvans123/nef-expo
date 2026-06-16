@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """6G NEF 能力开放平台 — FastAPI 后端"""
+import os
 import random
 import secrets
 import time
@@ -51,6 +52,10 @@ class PlanReq(BaseModel):
 
 
 class IntentReq(BaseModel):
+    text: str
+
+
+class AfPlanReq(BaseModel):
     text: str
 
 
@@ -236,8 +241,10 @@ def _dispatch(kind: str, ident: str, params: dict | None = None, request_id: str
 # ===== NEF 鉴权流水线（每次调用都逐级执行；用大白话讲得清） =====
 # 依据 3GPP CAPIF（网络对调用方逐次鉴权）的思路，但只保留能一句话讲明白的步骤。
 def _capif_pipeline(key, rec, *, scope, scope_ok=True, entitled=True, paid=False,
-                    cap=None, request_id=None) -> dict:
-    """逐级计算鉴权状态，供前端逐级点亮。decision: allow / deny_scope / deny_authz。"""
+                    cap=None, request_id=None,
+                    authz_label="判定能力授权", authz_pass_detail=None) -> dict:
+    """逐级计算鉴权状态，供前端逐级点亮。decision: allow / deny_scope / deny_authz。
+    authz_label / authz_pass_detail 用于定制最后一步语义（如意图的『受理鉴权』）。"""
     request_id = request_id or ("req_" + uuid.uuid4().hex[:12])
     acct, plan = rec["account"], rec.get("plan", "free").upper()
     masked = f"{key[:8]}…{key[-4:]}"
@@ -260,7 +267,8 @@ def _capif_pipeline(key, rec, *, scope, scope_ok=True, entitled=True, paid=False
     add("scope", "检查接口权限", "passed", f"该 Key 允许调用这类接口（scope：{scope}）")
     capname = cap.name if cap else "本次调用"
     if entitled:
-        add("authorize", "判定能力授权", "passed", f"账号已获「{capname}」授权（订阅 / 账号等级 / 第三方）")
+        add("authorize", authz_label, "passed",
+            authz_pass_detail or f"账号已获「{capname}」授权（订阅 / 账号等级 / 第三方）")
     elif paid:
         add("authorize", "判定能力授权", "passed", f"「{capname}」未订阅，已确认按次付费 → 准许本次调用")
     else:
@@ -551,7 +559,12 @@ def auth_info(authorization: str = Header(None)):
 @app.post("/api/v1/intent")
 def intent(req: IntentReq, authorization: str = Header(None)):
     key, rec = _auth(authorization, required_scope="intent:submit")
-    pipeline = _capif_pipeline(key, rec, scope="intent:submit", entitled=True, cap=None)
+    # 第一道：NEF 受理鉴权 —— 判定该账号能否发起意图（有 intent:submit 权限即可受理；
+    # 具体用哪些能力在第二道（网络侧业务鉴权）逐项判定）
+    pipeline = _capif_pipeline(
+        key, rec, scope="intent:submit", entitled=True, cap=None,
+        authz_label="受理鉴权",
+        authz_pass_detail="账号具备 intent:submit 权限，准许发起意图（具体能力在网络侧逐项鉴权）")
     request_id = pipeline["request_id"]
     auth = _auth_evidence(key, rec, "intent:submit", request_id)
     auth["pipeline"] = pipeline["stages"]
@@ -571,6 +584,100 @@ def get_intent_status(intent_id: str, authorization: str = Header(None)):
     if st["account"] != rec["account"]:
         raise HTTPException(403, "只能查询本账号提交的 Intent")
     return st
+
+
+# ===== AF Agent 规划（智能终端用：把用户的话映射到该调哪些 NEF 工具） =====
+_META_PATTERNS = ["多少", "几个", "几种", "列出", "有哪些", "都有什么", "能做什么", "可以做什么",
+                  "支持哪些", "帮助", "help", "工具列表", "tools", "怎么用", "你会"]
+
+
+def _rule_plan(text: str, top=2):
+    """规则规划：关键词命中打分，取前若干个能力（与意图/场景的匹配口径一致）。"""
+    low = text.lower()
+    scored = []
+    for c in CAPABILITIES:
+        if c.status != "available":
+            continue
+        hits = [kw for kw in c.intent_keywords if kw.lower() in low]
+        if hits:
+            scored.append((c, hits))
+    scored.sort(key=lambda x: -len(x[1]))
+    return [{"capability": c.id, "name": c.name, "reason": "命中关键词：" + "、".join(h)}
+            for c, h in scored[:top]]
+
+
+def _llm_available() -> bool:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return False
+    try:
+        import anthropic  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _llm_plan(text: str):
+    """可选 LLM 规划：把 NEF 可用能力当作 function-calling 的工具集喂给模型，
+    让模型按用户原话选工具。仅在配置了 ANTHROPIC_API_KEY 且安装了 anthropic 时启用。"""
+    import anthropic
+    tools = []
+    for c in CAPABILITIES:
+        if c.status != "available":
+            continue
+        t = c.mcp_tool()
+        tools.append({"name": c.id, "description": t["description"],
+                      "input_schema": t.get("inputSchema", {"type": "object", "properties": {}})})
+    client = anthropic.Anthropic()
+    msg = client.messages.create(
+        model="claude-opus-4-8", max_tokens=1024, tools=tools,
+        tool_choice={"type": "any"},
+        system=("你是 AF（第三方应用）的 AI Agent。用户会用自然语言描述需求，"
+                "你只能通过调用下列 NEF 网络能力工具来满足需求。选择最合适的 1-3 个工具并给出参数。"),
+        messages=[{"role": "user", "content": text}],
+    )
+    plan = []
+    for block in msg.content:
+        if getattr(block, "type", None) == "tool_use":
+            cap = CAP_INDEX.get(block.name)
+            if cap:
+                plan.append({"capability": cap.id, "name": cap.name,
+                             "reason": "LLM 选择（基于工具描述与你的需求）", "args": block.input or {}})
+    return plan
+
+
+@app.post("/api/v1/af-agent/plan")
+def af_agent_plan(req: AfPlanReq, authorization: str = Header(None)):
+    """AF 的 AI Agent 规划入口：把终端用户的话 → 该调哪些 NEF 工具。
+    1) 元查询（问工具箱本身）直接作答；2) 规则匹配兜底；3) 配了 LLM 则用 LLM 基于 tools/list 选工具。"""
+    key, rec = _auth(authorization, required_scope="mcp:tools")
+    text = req.text.strip()
+    low = text.lower()
+    if any(p in low for p in _META_PATTERNS):
+        avail = [c for c in CAPABILITIES if c.status == "available"]
+        by_cat = {}
+        for c in avail:
+            by_cat.setdefault(c.category, []).append(c)
+        cat_summary = " · ".join(f"{CATEGORIES[k]['name']} {len(v)} 个" for k, v in by_cat.items())
+        return {"mode": "meta", "plan": [],
+                "answer": f"我的工具箱（NEF tools/list）共 {len(avail)} 个可用能力：{cat_summary}。",
+                "examples": ["检测仓库里有没有异常物体", "预测早高峰的车流量",
+                             "追踪这架无人机的位置", "把直播流转码卸载到边缘"]}
+    plan, mode = _rule_plan(text), "rule"
+    if _llm_available():
+        try:
+            llm = _llm_plan(text)
+            if llm:
+                plan, mode = llm, "llm"
+        except Exception:
+            mode = "rule"
+    if not plan:
+        cats = "、".join(CATEGORIES[k]["name"] for k in CATEGORIES)
+        return {"mode": mode, "plan": [],
+                "suggestion": f"没匹配到能完成「{text}」的网络能力。我覆盖这些类别：{cats}；"
+                              f"可试试含「检测 / 转码 / 车流量 / 追踪 / 定位 / 切片」等业务词的说法。",
+                "examples": ["检测仓库里有没有异常物体", "预测早高峰的车流量", "追踪这架无人机的位置"]}
+    return {"mode": mode, "plan": plan,
+            "llm_enabled": _llm_available()}
 
 
 # ===== Pipeline 编排 =====

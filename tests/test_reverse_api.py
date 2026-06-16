@@ -103,8 +103,9 @@ def test_my_calls_summary():
 
 
 def test_intent_is_authenticated_and_handed_to_partner_agent():
-    key = _key()
-    r = client.post("/api/v1/intent", json={"text": "帮我对产线做质检"}, headers=_hdr(key))
+    key = _key()   # 已订阅 network_diagnosis
+    # 用账号已授权的能力对应的意图，第二道鉴权才会放行转发
+    r = client.post("/api/v1/intent", json={"text": "帮我诊断一下网络"}, headers=_hdr(key))
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "dispatched"
@@ -127,7 +128,8 @@ def test_intent_does_not_match_or_execute_local_capabilities():
     r = client.post("/api/v1/intent", json={"text": "帮我检测产线并做质检"}, headers=_hdr(key))
     assert r.status_code == 200
     body = r.json()
-    assert body["pipeline"][-1]["stage"] == "partner_accept"
+    # 关键不变量：意图链路绝不直接反向调用第三方能力（无论受理或拒绝）
+    assert body["status"] in ("dispatched", "rejected")
     assert cap_id not in registry.REVERSE_CALLS
 
 
@@ -161,10 +163,11 @@ def test_mcp_list_marks_subscription():
 
 
 def test_intent_pipeline_baseline_stages():
-    key = _key()
+    key = _key()   # 订阅 network_diagnosis；"诊断"意图命中它 → 第二道放行
     r = client.post("/api/v1/intent", json={"text": "帮我诊断一下网络"}, headers=_hdr(key))
     stages = [s["stage"] for s in r.json()["pipeline"]]
-    assert stages == ["auth_verify", "nef_accept", "partner_route", "partner_accept"]
+    # 两段鉴权后插入了 network_authz 阶段
+    assert stages == ["auth_verify", "nef_accept", "network_authz", "partner_route", "partner_accept"]
 
 
 def test_intent_rejects_missing_api_key_before_handoff():

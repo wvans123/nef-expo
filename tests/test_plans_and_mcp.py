@@ -33,15 +33,18 @@ def test_plan_entitles_tiers_without_subscription():
     assert info["plan"] == "max" and len(info["entitled_capabilities"]) > 5
 
 
-def test_intent_marks_unauthorized_steps_denied():
-    h = _hdr("plan_intent")  # free，未订阅任何能力
-    iid = client.post("/api/v1/intent", json={"text": "机器狗巡检，雾天也要看得清"},
-                      headers=h).json()["intent_id"]
-    INTENTS[iid]["submitted_ts"] -= 20
-    st = client.get(f"/api/v1/intent/{iid}", headers=h).json()
-    assert st["status"] == "completed"
+def test_intent_all_unauthorized_is_rejected():
+    # free 账号未订阅任何能力：第二道（网络侧业务鉴权）全未授权 → NEF 不予转发
+    h = _hdr("plan_intent")
+    r = client.post("/api/v1/intent", json={"text": "机器狗巡检，雾天也要看得清"}, headers=h).json()
+    assert r["status"] == "rejected"
+    assert r["network_authz"]["decision"] == "rejected"
+    assert r["network_authz"]["authorized_count"] == 0
+    assert all(not c["authorized"] for c in r["network_authz"]["checks"])
+    # 状态查询同样是 rejected，执行轨迹全部 denied
+    st = client.get(f"/api/v1/intent/{r['intent_id']}", headers=h).json()
+    assert st["status"] == "rejected"
     assert all(s["status"] == "denied" for s in st["execution_trace"])
-    assert "未授权" in st["summary"]
 
 
 def test_pipeline_exposed_and_callable_via_mcp():

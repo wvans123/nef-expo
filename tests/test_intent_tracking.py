@@ -14,8 +14,12 @@ def _key(account="trk_tester"):
 
 
 def test_intent_status_progresses_to_completed():
-    h = _key()
+    # 订阅机器狗巡检套餐 → 意图解析出的能力均已授权 → 第二道鉴权通过 → 转发并推进
+    rr = client.post("/api/v1/subscribe", json={"account": "trk_done",
+                                                "capability_ids": [], "package_ids": ["robot_patrol"]})
+    h = {"Authorization": "Bearer " + rr.json()["api_key"]}
     r = client.post("/api/v1/intent", json={"text": "机器狗巡检，雾天也要看得清"}, headers=h)
+    assert r.json()["status"] == "dispatched"
     iid = r.json()["intent_id"]
     assert r.json()["handoff"]["status_endpoint"].endswith(iid)
     st = client.get(f"/api/v1/intent/{iid}", headers=h).json()

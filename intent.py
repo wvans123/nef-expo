@@ -70,23 +70,61 @@ def process_intent(text: str, auth: dict, entitled_ids=None) -> dict:
     partner_task_id = "partner_task_" + uuid.uuid4().hex[:12]
     submitted_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     scenario, trace = _plan_trace(text)
-    if entitled_ids is not None:
-        for step in trace:
-            step["authorized"] = step["capability"] in entitled_ids
-    else:
-        for step in trace:
-            step["authorized"] = True
+    for step in trace:
+        step["authorized"] = (entitled_ids is None) or (step["capability"] in entitled_ids)
+
+    # 第二道：网络侧业务鉴权 —— 意图解析出的每个能力逐项按订阅/等级判定
+    authz_checks = [{"capability": s["capability"], "name": s["name"],
+                     "authorized": s["authorized"],
+                     "reason": ("已授权（订阅 / 等级 / 第三方）" if s["authorized"]
+                                else "未授权（未订阅且等级不足）")}
+                    for s in trace]
+    n_auth = sum(1 for s in trace if s["authorized"])
+    # 解析出能力、但一个都没授权 → NEF 不予转发（挡住白嫖/网络过载）
+    rejected = bool(trace) and n_auth == 0
+
     INTENTS[intent_id] = {
         "intent_id": intent_id, "text": text, "account": auth["account"],
         "task_id": partner_task_id, "submitted_ts": time.time(),
         "submitted_at": submitted_at, "scenario": scenario, "trace": trace,
+        "rejected": rejected,
     }
 
+    network_authz = {
+        "layer": "network", "label": "网络侧业务鉴权（第二道）",
+        "decision": "rejected" if rejected else "forwarded",
+        "authorized_count": n_auth, "denied_count": len(trace) - n_auth,
+        "checks": authz_checks,
+        "detail": (f"解析出 {len(trace)} 个能力，{n_auth} 个已授权、{len(trace) - n_auth} 个未授权"
+                   if trace else "未从意图中解析出可执行能力"),
+    }
+
+    if rejected:
+        pipeline = [
+            {"stage": "auth_verify", "label": "NEF 受理鉴权（第一道）",
+             "detail": f"账号 {auth['account']} 具备 intent:submit 权限，准许发起意图"},
+            {"stage": "network_authz", "label": "网络侧业务鉴权（第二道）",
+             "detail": f"解析出 {len(trace)} 个能力均未授权，NEF 不予转发（请订阅 / 升级后重试）"},
+        ]
+        return {
+            "intent_id": intent_id, "intent": text, "status": "rejected",
+            "submitted_at": submitted_at, "auth": auth, "pipeline": pipeline,
+            "network_authz": network_authz,
+            "handoff": {
+                "status": "rejected", "partner_agent": PARTNER_AGENT_NAME,
+                "endpoint": PARTNER_INTENT_ENDPOINT, "task_id": None,
+                "status_owner": "nef", "status_endpoint": None,
+                "message": "意图解析出的能力均未授权，NEF 未转发网络 Agent。订阅相关能力 / 套餐或升级账号等级后重试。",
+            },
+        }
+
     pipeline = [
-        {"stage": "auth_verify", "label": "NEF 鉴权",
-         "detail": f"Bearer API Key 已验证，账号 {auth['account']} 具备 intent:submit 权限"},
+        {"stage": "auth_verify", "label": "NEF 受理鉴权（第一道）",
+         "detail": f"账号 {auth['account']} 具备 intent:submit 权限，准许发起意图"},
         {"stage": "nef_accept", "label": "NEF 受理",
          "detail": f"已生成 Intent ID {intent_id} 与审计请求 ID {auth['request_id']}"},
+        {"stage": "network_authz", "label": "网络侧业务鉴权（第二道）",
+         "detail": network_authz["detail"] + ("；未授权步骤将被拒绝执行" if network_authz["denied_count"] else "")},
         {"stage": "partner_route", "label": "转发网络 Agent",
          "detail": f"Intent 原文透传至{PARTNER_AGENT_NAME}，NEF 不做语义解析和业务执行"},
         {"stage": "partner_accept", "label": "网络内部接收",
@@ -100,6 +138,7 @@ def process_intent(text: str, auth: dict, entitled_ids=None) -> dict:
         "submitted_at": submitted_at,
         "auth": auth,
         "pipeline": pipeline,
+        "network_authz": network_authz,
         "handoff": {
             "status": "accepted",
             "partner_agent": PARTNER_AGENT_NAME,
@@ -117,6 +156,15 @@ def intent_status(intent_id: str):
     rec = INTENTS.get(intent_id)
     if not rec:
         return None
+    if rec.get("rejected"):
+        return {
+            "intent_id": intent_id, "text": rec["text"], "task_id": None,
+            "submitted_at": rec["submitted_at"], "account": rec["account"],
+            "status": "rejected", "status_label": "网络侧鉴权未通过 · NEF 未转发",
+            "progress": 100, "stages": [], "partner_agent": PARTNER_AGENT_NAME,
+            "summary": f"解析出 {len(rec['trace'])} 个能力均未授权，NEF 未转发（订阅 / 升级后重试）",
+            "execution_trace": [{**s, "status": "denied"} for s in rec["trace"]],
+        }
     elapsed = time.time() - rec["submitted_ts"]
     status, label = STAGE_TIMELINE[0][1], STAGE_TIMELINE[0][2]
     for t, s, l in STAGE_TIMELINE:

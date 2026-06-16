@@ -82,6 +82,21 @@ def test_intent_carries_pipeline():
     assert [s["code"] for s in res["auth"]["pipeline"]][0] == "credential"
 
 
+def test_af_agent_plan_meta_business_and_nomatch():
+    h = _hdr("af_plan")
+    # 元查询：问工具箱本身
+    meta = client.post("/api/v1/af-agent/plan", json={"text": "当前有多少 tool"}, headers=h).json()
+    assert meta["mode"] == "meta" and "可用能力" in meta["answer"] and meta["examples"]
+    # 业务请求：规则匹配出能力
+    biz = client.post("/api/v1/af-agent/plan",
+                      json={"text": "帮我检测仓库里有没有异常物体"}, headers=h).json()
+    assert biz["mode"] in ("rule", "llm") and biz["plan"]
+    assert biz["plan"][0]["capability"] == "target_detection"
+    # 无匹配：给出建议而非空手
+    nm = client.post("/api/v1/af-agent/plan", json={"text": "帮我写一首诗"}, headers=h).json()
+    assert nm["plan"] == [] and nm.get("suggestion")
+
+
 def test_failed_call_is_not_billed():
     # 缺必填参数 → 422，且即使带 _confirm_pay 也不应计费
     h = _hdr("pl_nobill")

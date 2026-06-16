@@ -272,7 +272,7 @@ th{background:var(--card);color:var(--muted)}
   <!-- Tab 6 Skill -->
   <div class="tabpane" id="pane-skill">
     <h3 class="sec">场景方案 <span class="muted" style="font-weight:400;font-size:12px">— 每个场景的成套解决方案：怎么调（外部指导 AF）+ 怎么编排（网络内部驱动 Agent）+ 一键跑通整个场景</span></h3>
-    <div id="dispatch-panel" style="margin-bottom:14px"></div>
+    <div class="muted" style="font-size:12px;margin-bottom:12px;padding:8px 12px;background:var(--card);border-radius:8px;border:1px solid var(--border)">💡 <b>套餐 vs 自助编排</b>：套餐是运营商<b>优化编排好的成套方案</b>（高精度、有 SLA、一口价，不用你操心怎么串）；想更省、更灵活，也可以去「自助编排」自己挑几个 tool 拼（精度自负）。</div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
       <select id="skill-pkg-select" style="width:240px"></select>
       <div>
@@ -291,7 +291,7 @@ th{background:var(--card);color:var(--muted)}
 
   <!-- Tab 7 编排器 -->
   <div class="tabpane" id="pane-composer">
-    <h3 class="sec">能力编排器</h3>
+    <h3 class="sec">能力编排器 <span class="muted" style="font-weight:400;font-size:12px">— 自己挑 tool 拼成 Pipeline：更省、更灵活，精度自负（对比「场景方案」里运营商优化好的成套套餐）</span></h3>
     <div class="banner" style="display:block">
       <b style="font-size:13px">快速订阅套餐</b>
       <div id="composer-quick-pkgs" style="margin-top:8px"></div>
@@ -832,7 +832,25 @@ function renderIntentResult(res){
   let html = `<div class="flow">` + res.pipeline.map((s,i)=>
     `<span class="node${s.stage.startsWith('partner')?' planning':''}" title="${esc(s.detail)}">${esc(s.label)}</span>${i<res.pipeline.length-1?'<span class="arrow">→</span>':''}`).join('') + `</div>`;
   html += `<div class="muted" style="font-size:12px;margin-bottom:10px">` + res.pipeline.map(s=>`<div>▸ <b>${esc(s.label)}</b>：${esc(s.detail)}</div>`).join('') + `</div>`;
-  html += `<h3 class="sec">NEF 鉴权</h3><div id="intent-pipeline"></div>`;
+  html += `<h3 class="sec">第一道 · NEF 受理鉴权 <span class="muted" style="font-weight:400;font-size:12px">— 判定该账号能否发起意图</span></h3><div id="intent-pipeline"></div>`;
+  if(res.network_authz){
+    const na = res.network_authz;
+    html += `<h3 class="sec">第二道 · 网络侧业务鉴权 <span class="muted" style="font-weight:400;font-size:12px">— 解析出的每个能力逐项按订阅鉴权</span></h3>`;
+    html += `<div class="agent-block" style="border-left-color:${na.decision==='rejected'?'var(--red)':'var(--green)'}">
+      <div class="muted" style="font-size:12px;margin-bottom:6px">${esc(na.detail)}</div>
+      ${na.checks.map(c=>`<div style="font-size:13px;margin:3px 0"><b>${esc(c.name)}</b> <span class="mono muted" style="font-size:11px">${esc(c.capability)}</span> ${c.authorized?`<span class="ok" style="font-size:11px">✓ ${esc(c.reason)}</span>`:`<span class="err" style="font-size:11px">🚫 ${esc(c.reason)}</span>`}</div>`).join('')}
+    </div>`;
+  }
+  if(res.status==='rejected'){
+    html += `<div class="handoff-card" style="border-color:var(--red)">
+      <b class="err">⛔ NEF 未转发网络 Agent</b>
+      <p class="muted" style="margin-top:6px">${esc(res.handoff.message)}</p>
+    </div>`;
+    $('#intent-result').innerHTML = html;
+    if(res.auth.pipeline) renderAuthPipeline($('#intent-pipeline'),
+      {request_id:res.auth.request_id, decision:res.auth.decision, stages:res.auth.pipeline}, null);
+    return;
+  }
   html += `<div class="handoff-card">
     <b style="color:var(--purple)">✓ 已转交 ${esc(res.handoff.partner_agent)}</b>
     <div class="kv" style="margin-top:8px"><b>Intent ID</b><code>${esc(res.intent_id)}</code></div>
@@ -847,7 +865,7 @@ function renderIntentResult(res){
   $('#intent-result').innerHTML = html;
   if(res.auth.pipeline){
     renderAuthPipeline($('#intent-pipeline'), {request_id:res.auth.request_id, decision:res.auth.decision,
-      quota:res.auth.quota, stages:res.auth.pipeline}, null);
+      stages:res.auth.pipeline}, null);
   }else{
     $('#intent-pipeline').innerHTML = `<div class="auth-grid">${res.auth.checks.map(c=>`<div class="auth-check"><b>✓ ${esc(c.label)}</b><span class="muted">${esc(c.detail)}</span></div>`).join('')}</div>`;
   }
@@ -891,29 +909,8 @@ async function loadSkill(){
   const sel = $('#skill-pkg-select');
   if(!sel.options.length) sel.innerHTML = PKGS.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   sel.onchange = fetchSkill;
-  renderDispatchTable();
   if(!skillData) await fetchSkill();
 }
-async function renderDispatchTable(){
-  const el = $('#dispatch-panel'); if(!el) return;
-  let dt; try{ dt = await fetch('/api/v1/dispatch-table').then(r=>r.json()); }catch(e){ return; }
-  const s = dt.summary;
-  const scRows = dt.scenarios.map(x=>{
-    const backend = x.target==='backend';
-    return `<tr>
-      <td>${esc(x.name)} <span class="mono muted" style="font-size:11px">${esc(x.id)}</span></td>
-      <td>${backend?`<span class="pl-decision allow">后台 service_id</span> <code>${esc(x.service_id)}</code>`:`<span style="color:var(--orange)">NEF 参考回显</span>`}</td>
-      <td class="muted" style="font-size:11px">${esc(x.note)}</td></tr>`;
-  }).join('');
-  el.innerHTML = `<div class="agent-block" style="border-left-color:var(--accent)">
-    <b style="color:var(--accent)">🧭 NEF 路由分发表</b>
-    <span class="muted" style="font-size:12px;margin-left:6px">化解「NEF 是 tool 粒度、后台只实现到场景粒度」的错配——NEF 只把后台声明过的 service_id 转发出去，后台靠它无歧义分发；没实现的 tool 由 NEF 参考回显兜底，后台绝不会收到看不懂的请求。</span>
-    <div class="muted" style="font-size:12px;margin:8px 0">场景 ${s.scenarios} 个（命中后台 <b class="ok">${s.backend_scenarios}</b>，其余 NEF 参考回显）· 单个 tool ${s.tools} 个（均为 <b style="color:var(--orange)">NEF 参考回显</b>，后台未按 tool 粒度实现）</div>
-    <table class="disp-tbl"><thead><tr><th>场景 service_id</th><th>落地目标</th><th>说明</th></tr></thead><tbody>${scRows}</tbody></table>
-    <div class="muted" style="font-size:11px;margin-top:8px">转发信封示例：<code>{ "request_id":"req_…", "service_id":"robot_patrol", "tool_id":null, "params":{…} }</code></div>
-  </div>`;
-}
-window.renderDispatchTable = renderDispatchTable;
 async function fetchSkill(){
   const id = $('#skill-pkg-select').value || PKGS[0].id;
   skillData = await fetch(`/api/v1/packages/${id}/skill`).then(r=>r.json());
@@ -1189,7 +1186,7 @@ loadMarket();
 
 /* ============ 终端 · AF · NEF 全链路 ============ */
 let termInit = false, termPayResolver = null;
-const TERM_EXAMPLES = ['帮我检测仓库里有没有异常物体','把我的直播流转码卸载到边缘节点','帮我预测早高峰的车流量','追踪这架无人机的位置'];
+const TERM_EXAMPLES = ['当前有多少 tool','帮我检测仓库里有没有异常物体','把我的直播流转码卸载到边缘节点','帮我预测早高峰的车流量','追踪这架无人机的位置'];
 function tprint(html, cls){ const sc=$('#term-screen'); const d=document.createElement('div'); if(cls)d.className=cls; d.innerHTML=html; sc.appendChild(d); sc.scrollTop=sc.scrollHeight; return d; }
 const tTerm = t=>tprint('📱 <b>[终端]</b> '+t, 'tl-user');
 const tAf   = t=>tprint('🤖 <b>[AF Agent]</b> '+t, 'tl-agent');
@@ -1202,15 +1199,9 @@ function initTerm(){
   tprint('<span class="muted">mcp server: nef-exposure · endpoint: /api/v1/mcp · auth: Bearer '+(apiKey()?apiKey().slice(0,14)+'…':'（无 Key，请先在顶栏注册账号）')+'</span>');
   tprint('<span class="muted">点击上方示例，或输入业务请求，模拟终端用户触发 AF 服务。</span>');
 }
-function termPlan(text){
-  const scored = [];
-  CAPS.forEach(c=>{
-    if(c.status!=='available'||c.source==='third_party') return;
-    const hits = (c.intent_keywords||[]).filter(k=>text.toLowerCase().includes(k.toLowerCase()));
-    if(hits.length) scored.push({cap:c, hits});
-  });
-  scored.sort((a,b)=>b.hits.length-a.hits.length);
-  return scored.slice(0,2);
+async function termPlan(text){
+  // 交给后端 AF Agent 规划端点：元查询直接作答 / 规则匹配 / 可选 LLM
+  return await api('/api/v1/af-agent/plan',{method:'POST',body:JSON.stringify({text})});
 }
 async function termMcpCall(cap, confirmPay){
   const args = {};
@@ -1227,14 +1218,29 @@ async function termRequest(text){
   tTerm(esc(text));
   await tWait(500);
   tAf('收到终端请求，正在检索 NEF MCP 工具箱（tools/list）…');
-  try{ await api('/api/v1/mcp/tools/list',{method:'POST',body:JSON.stringify({jsonrpc:'2.0',id:8,method:'tools/list',params:{}})}); }
-  catch(e){ tNef('<span class="tl-err">鉴权失败：'+esc((e.data&&e.data.detail)||'')+'</span>'); return; }
-  const plan = termPlan(text);
-  if(!plan.length){ tAf('抱歉，我在 NEF 工具箱里没找到能完成该请求的工具，请换个说法（含"检测/转码/车流量/追踪"等业务词）。'); return; }
-  await tWait(600);
-  tAf('规划完成：将调用 '+plan.map(p=>`<code>${p.cap.id}</code>（命中：${p.hits.join('、')}）`).join(' → '));
+  let resp;
+  try{
+    await api('/api/v1/mcp/tools/list',{method:'POST',body:JSON.stringify({jsonrpc:'2.0',id:8,method:'tools/list',params:{}})});
+    resp = await termPlan(text);
+  }catch(e){ tNef('<span class="tl-err">鉴权失败：'+esc((e.data&&e.data.detail)||'')+'</span>'); return; }
+  await tWait(500);
+  // 元查询：关于工具箱本身的问题，直接作答
+  if(resp.mode==='meta'){
+    tAf(esc(resp.answer));
+    if(resp.examples) tAf('试试这些：'+resp.examples.map(x=>`<span class="pill" style="cursor:pointer" onclick="termRequest('${x}')">${esc(x)}</span>`).join(' '));
+    return;
+  }
+  if(!resp.plan||!resp.plan.length){
+    tAf(esc(resp.suggestion||'没找到能完成该请求的工具。'));
+    if(resp.examples) tAf('试试这些：'+resp.examples.map(x=>`<span class="pill" style="cursor:pointer" onclick="termRequest('${x}')">${esc(x)}</span>`).join(' '));
+    return;
+  }
+  const modeBadge = resp.mode==='llm' ? '🧠 LLM 规划' : '📐 规则规划';
+  tAf(`${modeBadge}：将调用 `+resp.plan.map(p=>`<code>${esc(p.capability)}</code>（${esc(p.reason||'')}）`).join(' → '));
   const results = [];
-  for(const {cap} of plan){
+  for(const item of resp.plan){
+    const cap = CAPS.find(x=>x.id===item.capability);
+    if(!cap){ continue; }
     await tWait(500);
     tAf(`MCP <code>tools/call</code> → <code>${cap.id}</code> …`);
     try{
