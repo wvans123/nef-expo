@@ -166,8 +166,8 @@ def test_intent_pipeline_baseline_stages():
     key = _key()   # 订阅 network_diagnosis；"诊断"意图命中它 → 第二道放行
     r = client.post("/api/v1/intent", json={"text": "帮我诊断一下网络"}, headers=_hdr(key))
     stages = [s["stage"] for s in r.json()["pipeline"]]
-    # 两段鉴权后插入了 network_authz 阶段
-    assert stages == ["auth_verify", "nef_accept", "network_authz", "partner_route", "partner_accept"]
+    # 第一道在受理时鉴权；第二道（逐能力）改由网络侧 Planning Agent 运行时进行，不在提交流水线里
+    assert stages == ["auth_verify", "nef_accept", "partner_route", "partner_accept"]
 
 
 def test_intent_rejects_missing_api_key_before_handoff():

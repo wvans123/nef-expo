@@ -75,7 +75,7 @@ def test_scenario_run_dispatches_to_backend_service_id():
 
 
 def test_intent_carries_pipeline():
-    h = _hdr("pl_intent")
+    h = _hdr("pl_intent", plan="pro")  # PRO 可发起意图（第一道通过）
     res = client.post("/api/v1/intent", json={"text": "机器狗巡检，雾天也要看得清"},
                       headers=h).json()
     assert res["auth"]["decision"] == "allow"

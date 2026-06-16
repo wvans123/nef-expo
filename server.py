@@ -242,7 +242,8 @@ def _dispatch(kind: str, ident: str, params: dict | None = None, request_id: str
 # 依据 3GPP CAPIF（网络对调用方逐次鉴权）的思路，但只保留能一句话讲明白的步骤。
 def _capif_pipeline(key, rec, *, scope, scope_ok=True, entitled=True, paid=False,
                     cap=None, request_id=None,
-                    authz_label="判定能力授权", authz_pass_detail=None) -> dict:
+                    authz_label="判定能力授权", authz_pass_detail=None,
+                    authz_deny_detail=None) -> dict:
     """逐级计算鉴权状态，供前端逐级点亮。decision: allow / deny_scope / deny_authz。
     authz_label / authz_pass_detail 用于定制最后一步语义（如意图的『受理鉴权』）。"""
     request_id = request_id or ("req_" + uuid.uuid4().hex[:12])
@@ -273,8 +274,8 @@ def _capif_pipeline(key, rec, *, scope, scope_ok=True, entitled=True, paid=False
         add("authorize", "判定能力授权", "passed", f"「{capname}」未订阅，已确认按次付费 → 准许本次调用")
     else:
         tier = getattr(cap, "tier", "?") if cap else "?"
-        add("authorize", "判定能力授权", "denied",
-            f"账号没订阅「{capname}」、等级也不含 {tier} 层 → 拒绝（可订阅 / 升级 / 按次付费）")
+        add("authorize", authz_label, "denied",
+            authz_deny_detail or f"账号没订阅「{capname}」、等级也不含 {tier} 层 → 拒绝（可订阅 / 升级 / 按次付费）")
         add("audit", "记录审计", "passed", f"写审计日志 {request_id}（结果：拒绝 · 未授权）")
         return done("deny_authz")
     add("audit", "记录审计", "passed", f"写审计日志 {request_id}（记下谁/何时/调了什么/放行）")
@@ -559,16 +560,34 @@ def auth_info(authorization: str = Header(None)):
 @app.post("/api/v1/intent")
 def intent(req: IntentReq, authorization: str = Header(None)):
     key, rec = _auth(authorization, required_scope="intent:submit")
-    # 第一道：NEF 受理鉴权 —— 判定该账号能否发起意图（有 intent:submit 权限即可受理；
-    # 具体用哪些能力在第二道（网络侧业务鉴权）逐项判定）
+    # 第一道：NEF 受理鉴权 —— 按套餐/等级判定能否发起意图。
+    # 免费且无任何订阅的账号不支持意图编排（会触发网络侧多步编排，开销大）；
+    # PRO/MAX 或已订阅能力/套餐的账号可发起。具体能用哪些 tool 留给第二道——
+    # 由网络侧 Planning Agent 在执行过程中逐能力鉴权并反馈。
+    can_submit = (rec.get("plan", "free") in ("pro", "max")
+                  or bool(rec["subscriptions"]) or bool(rec["packages"]))
     pipeline = _capif_pipeline(
-        key, rec, scope="intent:submit", entitled=True, cap=None,
+        key, rec, scope="intent:submit", entitled=can_submit, cap=None,
         authz_label="受理鉴权",
-        authz_pass_detail="账号具备 intent:submit 权限，准许发起意图（具体能力在网络侧逐项鉴权）")
+        authz_pass_detail="账号具备意图编排权限，准许发起；具体能力由网络侧 Planning Agent 在执行中逐项鉴权",
+        authz_deny_detail="免费套餐不支持意图编排（意图触发网络侧多步编排，开销较大）。"
+                          "请升级 PRO/MAX 或订阅能力/套餐；也可改用 API/MCP 单能力直调")
     request_id = pipeline["request_id"]
     auth = _auth_evidence(key, rec, "intent:submit", request_id)
     auth["pipeline"] = pipeline["stages"]
     auth["decision"] = pipeline["decision"]
+    if pipeline["decision"] != "allow":   # 第一道未过：NEF 不受理、不转发
+        return {
+            "intent_id": None, "intent": req.text, "status": "rejected",
+            "submitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "auth": auth,
+            "pipeline": [{"stage": "auth_verify", "label": "NEF 受理鉴权（第一道）",
+                          "detail": "免费套餐不支持意图编排，NEF 未受理"}],
+            "handoff": {"status": "rejected", "partner_agent": "网络内部 Network Agent",
+                        "task_id": None, "status_owner": "nef", "status_endpoint": None,
+                        "message": "免费套餐不支持意图编排，请升级 PRO/MAX 或订阅能力/套餐后重试；"
+                                   "也可改用 API 直调 / MCP 单能力调用。"},
+        }
     entitled = {c.id for c in CAPABILITIES if c.status == "available" and _entitled(rec, c)}
     entitled |= {c.id for c in THIRD_PARTY}
     return process_intent(req.text, auth, entitled)
@@ -587,8 +606,22 @@ def get_intent_status(intent_id: str, authorization: str = Header(None)):
 
 
 # ===== AF Agent 规划（智能终端用：把用户的话映射到该调哪些 NEF 工具） =====
-_META_PATTERNS = ["多少", "几个", "几种", "列出", "有哪些", "都有什么", "能做什么", "可以做什么",
-                  "支持哪些", "帮助", "help", "工具列表", "tools", "怎么用", "你会"]
+_META_PATTERNS = ["多少", "几个", "几种", "列出", "有哪些", "哪些", "都有什么", "有什么",
+                  "能做什么", "可以做什么", "做什么", "做啥", "干什么", "能干", "支持哪些",
+                  "能力", "功能", "本事", "你能", "你会", "会做", "会什么", "清单", "列表",
+                  "菜单", "介绍", "帮助", "help", "工具列表", "tools", "怎么用"]
+
+
+def _meta_answer():
+    avail = [c for c in CAPABILITIES if c.status == "available"]
+    by_cat = {}
+    for c in avail:
+        by_cat.setdefault(c.category, []).append(c)
+    cat_summary = " · ".join(f"{CATEGORIES[k]['name']} {len(v)} 个" for k, v in by_cat.items())
+    return {"mode": "meta", "plan": [],
+            "answer": f"我的工具箱（NEF tools/list）共 {len(avail)} 个可用能力：{cat_summary}。",
+            "examples": ["检测仓库里有没有异常物体", "预测早高峰的车流量",
+                         "追踪这架无人机的位置", "把直播流转码卸载到边缘"]}
 
 
 def _rule_plan(text: str, top=2):
@@ -652,17 +685,12 @@ def af_agent_plan(req: AfPlanReq, authorization: str = Header(None)):
     key, rec = _auth(authorization, required_scope="mcp:tools")
     text = req.text.strip()
     low = text.lower()
-    if any(p in low for p in _META_PATTERNS):
-        avail = [c for c in CAPABILITIES if c.status == "available"]
-        by_cat = {}
-        for c in avail:
-            by_cat.setdefault(c.category, []).append(c)
-        cat_summary = " · ".join(f"{CATEGORIES[k]['name']} {len(v)} 个" for k, v in by_cat.items())
-        return {"mode": "meta", "plan": [],
-                "answer": f"我的工具箱（NEF tools/list）共 {len(avail)} 个可用能力：{cat_summary}。",
-                "examples": ["检测仓库里有没有异常物体", "预测早高峰的车流量",
-                             "追踪这架无人机的位置", "把直播流转码卸载到边缘"]}
-    plan, mode = _rule_plan(text), "rule"
+    biz = _rule_plan(text)
+    is_meta = any(p in low for p in _META_PATTERNS)
+    # 业务没命中、但像是在问“你有什么能力 / 几个工具” → 直接列能力（元查询兜底）
+    if not biz and is_meta:
+        return _meta_answer()
+    plan, mode = biz, "rule"
     if _llm_available():
         try:
             llm = _llm_plan(text)
@@ -671,13 +699,14 @@ def af_agent_plan(req: AfPlanReq, authorization: str = Header(None)):
         except Exception:
             mode = "rule"
     if not plan:
+        if is_meta:
+            return _meta_answer()
         cats = "、".join(CATEGORIES[k]["name"] for k in CATEGORIES)
         return {"mode": mode, "plan": [],
                 "suggestion": f"没匹配到能完成「{text}」的网络能力。我覆盖这些类别：{cats}；"
                               f"可试试含「检测 / 转码 / 车流量 / 追踪 / 定位 / 切片」等业务词的说法。",
                 "examples": ["检测仓库里有没有异常物体", "预测早高峰的车流量", "追踪这架无人机的位置"]}
-    return {"mode": mode, "plan": plan,
-            "llm_enabled": _llm_available()}
+    return {"mode": mode, "plan": plan, "llm_enabled": _llm_available()}
 
 
 # ===== Pipeline 编排 =====

@@ -829,47 +829,37 @@ function renderIntentResult(res){
     $('#intent-result').innerHTML = `<p class="err">响应格式异常（前后端版本可能不一致，请重启 server.py 后重试）</p><pre>${esc(jfmt(res||{}))}</pre>`;
     return;
   }
-  let html = `<div class="flow">` + res.pipeline.map((s,i)=>
-    `<span class="node${s.stage.startsWith('partner')?' planning':''}" title="${esc(s.detail)}">${esc(s.label)}</span>${i<res.pipeline.length-1?'<span class="arrow">→</span>':''}`).join('') + `</div>`;
-  html += `<div class="muted" style="font-size:12px;margin-bottom:10px">` + res.pipeline.map(s=>`<div>▸ <b>${esc(s.label)}</b>：${esc(s.detail)}</div>`).join('') + `</div>`;
-  html += `<h3 class="sec">第一道 · NEF 受理鉴权 <span class="muted" style="font-weight:400;font-size:12px">— 判定该账号能否发起意图</span></h3><div id="intent-pipeline"></div>`;
-  if(res.network_authz){
-    const na = res.network_authz;
-    html += `<h3 class="sec">第二道 · 网络侧业务鉴权 <span class="muted" style="font-weight:400;font-size:12px">— 解析出的每个能力逐项按订阅鉴权</span></h3>`;
-    html += `<div class="agent-block" style="border-left-color:${na.decision==='rejected'?'var(--red)':'var(--green)'}">
-      <div class="muted" style="font-size:12px;margin-bottom:6px">${esc(na.detail)}</div>
-      ${na.checks.map(c=>`<div style="font-size:13px;margin:3px 0"><b>${esc(c.name)}</b> <span class="mono muted" style="font-size:11px">${esc(c.capability)}</span> ${c.authorized?`<span class="ok" style="font-size:11px">✓ ${esc(c.reason)}</span>`:`<span class="err" style="font-size:11px">🚫 ${esc(c.reason)}</span>`}</div>`).join('')}
-    </div>`;
-  }
-  if(res.status==='rejected'){
-    html += `<div class="handoff-card" style="border-color:var(--red)">
-      <b class="err">⛔ NEF 未转发网络 Agent</b>
-      <p class="muted" style="margin-top:6px">${esc(res.handoff.message)}</p>
-    </div>`;
-    $('#intent-result').innerHTML = html;
-    if(res.auth.pipeline) renderAuthPipeline($('#intent-pipeline'),
-      {request_id:res.auth.request_id, decision:res.auth.decision, stages:res.auth.pipeline}, null);
-    return;
-  }
-  html += `<div class="handoff-card">
-    <b style="color:var(--purple)">✓ 已转交 ${esc(res.handoff.partner_agent)}</b>
-    <div class="kv" style="margin-top:8px"><b>Intent ID</b><code>${esc(res.intent_id)}</code></div>
-    <div class="kv"><b>网络任务 ID</b><code>${esc(res.handoff.task_id)}</code></div>
-    <div class="kv"><b>当前状态</b><span class="ok">${esc(res.status)}</span></div>
-    <div class="kv"><b>状态归属</b>${esc(res.handoff.status_owner)}</div>
-    <div class="kv"><b>网络任务状态地址</b><code>${esc(res.handoff.status_endpoint)}</code></div>
-    <p class="muted" style="margin-top:8px">${esc(res.handoff.message)}</p>
-  </div>
-  <h3 class="sec">执行状态跟踪 <span class="muted" style="font-weight:400;font-size:12px">GET /api/v1/intent/${esc(res.intent_id)} · 自动轮询中</span></h3>
-  <div id="intent-track"><p class="muted">查询中…</p></div>`;
-  $('#intent-result').innerHTML = html;
+  // 先播放第一道鉴权动画，走完再揭晓后续（转发/拒绝 + 执行跟踪）
+  $('#intent-result').innerHTML =
+    `<h3 class="sec">第一道 · NEF 受理鉴权 <span class="muted" style="font-weight:400;font-size:12px">— 按套餐/等级判定该账号能否发起意图（免费套餐不支持）</span></h3>`
+    + `<div id="intent-pipeline"></div><div id="intent-after"></div>`;
+  const reveal = ()=>{
+    const after = $('#intent-after');
+    if(res.status==='rejected'){
+      after.innerHTML = `<div class="handoff-card" style="border-color:var(--red)">
+        <b class="err">⛔ NEF 未受理（第一道未通过）</b>
+        <p class="muted" style="margin-top:6px">${esc(res.handoff.message)}</p></div>`;
+      return;
+    }
+    after.innerHTML = `<div class="handoff-card">
+      <b style="color:var(--purple)">✓ 已转交 ${esc(res.handoff.partner_agent)}</b>
+      <div class="kv" style="margin-top:8px"><b>Intent ID</b><code>${esc(res.intent_id)}</code></div>
+      <div class="kv"><b>网络任务 ID</b><code>${esc(res.handoff.task_id)}</code></div>
+      <div class="kv"><b>状态归属</b>${esc(res.handoff.status_owner)}</div>
+      <div class="kv"><b>网络任务状态地址</b><code>${esc(res.handoff.status_endpoint)}</code></div>
+      <p class="muted" style="margin-top:8px">${esc(res.handoff.message)}</p>
+    </div>
+    <h3 class="sec">第二道 · 网络侧 Planning Agent 逐能力鉴权 <span class="muted" style="font-weight:400;font-size:12px">— 在执行过程中进行，状态逐步回传</span></h3>
+    <div id="intent-track"><p class="muted">查询中…</p></div>`;
+    pollIntentStatus(res.intent_id);
+  };
   if(res.auth.pipeline){
-    renderAuthPipeline($('#intent-pipeline'), {request_id:res.auth.request_id, decision:res.auth.decision,
-      stages:res.auth.pipeline}, null);
+    renderAuthPipeline($('#intent-pipeline'), {request_id:res.auth.request_id,
+      decision:res.auth.decision, stages:res.auth.pipeline}, null, reveal);
   }else{
     $('#intent-pipeline').innerHTML = `<div class="auth-grid">${res.auth.checks.map(c=>`<div class="auth-check"><b>✓ ${esc(c.label)}</b><span class="muted">${esc(c.detail)}</span></div>`).join('')}</div>`;
+    reveal();
   }
-  pollIntentStatus(res.intent_id);
 }
 let intentPollTimer = null;
 async function pollIntentStatus(iid){
@@ -889,6 +879,14 @@ function renderIntentTrack(st){
   let html = `<div class="stage-flow">` + st.stages.map(s=>`<span class="st ${s.state}">${s.state==='done'?'✓ ':''}${esc(s.label.split(' ·')[0])}</span>`).join('<span class="arrow muted">→</span>') + `</div>`;
   html += `<div class="pbar"><i style="width:${st.progress}%"></i></div>`;
   html += `<div class="muted" style="font-size:12px;margin-bottom:8px">状态：<b class="${st.status==='completed'?'ok':''}">${esc(st.status)}</b> · ${esc(st.status_label)}${st.summary?` · ${esc(st.summary)}`:''}</div>`;
+  if(st.network_authz){
+    const na = st.network_authz;
+    html += `<div class="agent-block" style="border-left-color:${na.denied_count?'var(--orange)':'var(--green)'}">
+      <b style="color:var(--purple)">🔐 ${esc(na.by)} · 逐能力鉴权</b>
+      <span class="muted" style="font-size:11px;margin-left:6px">${na.authorized_count} 个已授权 · ${na.denied_count} 个未授权</span>
+      <div style="margin-top:5px">${na.checks.map(c=>`<div style="font-size:12px;margin:2px 0"><b>${esc(c.name)}</b> ${c.authorized?`<span class="ok" style="font-size:11px">✓ ${esc(c.reason)}</span>`:`<span class="err" style="font-size:11px">🚫 ${esc(c.reason)}</span>`}</div>`).join('')}</div>
+    </div>`;
+  }
   if(st.execution_trace && st.execution_trace.length){
     const byAgent = {};
     st.execution_trace.forEach(s => (byAgent[s.agent] = byAgent[s.agent]||{color:s.agent_color, list:[]}).list.push(s));
