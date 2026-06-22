@@ -9,7 +9,8 @@ import time
 from skills import AGENTS
 
 THIRD_PARTY = []        # list[Capability]，AF 注册进来的能力
-THIRD_PARTY_META = {}   # cap_id -> {"cap_type", "endpoint", "owner", "registered_ts"}
+THIRD_PARTY_META = {}   # cap_id -> {"cap_type", "endpoint", "owner", "registered_ts", "billing_mode"}
+THIRD_PARTY_SUBS = {}   # cap_id -> set(订阅方账号)：包月第三方能力的订阅方，用于结算月收入
 REVERSE_CALLS = {}      # cap_id -> [record]
 INTENTS = {}            # intent_id -> 受理登记（供状态查询，演示用内存态）
 

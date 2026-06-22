@@ -160,8 +160,7 @@ th{background:var(--card);color:var(--muted)}
 .pill.dragging{opacity:.4;transform:scale(.95)}
 .pill .x{color:var(--red);cursor:pointer;margin-left:4px}
 /* skill 视图 */
-#skill-wrap{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-@media(max-width:1000px){#skill-wrap{grid-template-columns:1fr}}
+#skill-wrap{display:block}
 .step-card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;padding:10px 14px;margin:8px 0}
 .copy{cursor:pointer;color:var(--accent);font-size:11px}
 .kv{font-size:12px;margin:3px 0}.kv b{color:var(--muted);font-weight:400;margin-right:6px}
@@ -282,7 +281,6 @@ th{background:var(--card);color:var(--muted)}
       <span class="muted" style="font-size:11px;align-self:center">这页只讲方案本身：外部视图告诉 AF 怎么调，网络内部视图告诉网元怎么编排。实际发起调用请到「API 直调」或「MCP 接口」页（可直调场景 / pipeline / 单 tool）。</span>
     </div>
     <div id="skill-wrap">
-      <div id="skill-left"></div>
       <div><label>Skill 文档（Markdown 渲染）</label><div id="skill-md" class="md">--</div></div>
     </div>
   </div>
@@ -571,12 +569,17 @@ async function renderSubs(){
   if(!apiKey()){ el.innerHTML = '<p class="muted">请先在顶栏「注册账号」——注册即签发 API Key，订阅只是记录权益。</p>'; return; }
   try{
     const info = await api('/api/v1/auth/info');
-    const capCards = info.subscribed_capabilities.map(cid=>{
+    const subs = info.subscribed_capabilities, direct = info.direct_subscriptions||[], entitled = info.entitled_capabilities||[];
+    const capCards = entitled.map(cid=>{
       const c = CAPS.find(x=>x.id===cid); if(!c) return '';
-      const viaPkg = !info.direct_subscriptions.includes(cid);
+      let badge, color;
+      if(c.source==='third_party'){ badge='第三方订阅'; color='#f0883e'; }
+      else if(direct.includes(cid)){ badge='单项直订'; color='var(--green)'; }
+      else if(subs.includes(cid)){ badge='套餐内'; color='#39d2ff'; }
+      else { badge=`等级解锁(${(info.plan||'').toUpperCase()})`; color='var(--purple)'; }
       return `<div class="card" style="cursor:default"><b>${c.icon||''} ${esc(c.name)}</b> <span class="tier ${c.tier}">${c.tier}</span>
         <div class="muted" style="font-size:12px;margin:5px 0">${esc(c.description.slice(0,50))}…</div>
-        <span class="mono muted" style="font-size:11px">${c.id}</span> ${viaPkg?'<span class="tag-tp" style="color:#39d2ff;border-color:#39d2ff55">套餐内</span>':''}</div>`;
+        <span class="mono muted" style="font-size:11px">${c.id}</span> <span class="tag-tp" style="color:${color};border-color:${color}55">${badge}</span></div>`;
     }).join('');
     el.innerHTML = `
       <div class="banner">
@@ -603,8 +606,8 @@ async function renderSubs(){
         <div class="muted" style="font-size:11px;margin-top:6px">注：<code>intent:submit</code> 只代表「<b>能调用</b>意图接口」（接口级）；能否被 NEF <b>受理</b>，还要看上面的「意图受理资格」（授权级）。这就是为什么有 scope 仍可能在意图受理被拦。🔐 鉴权流水线在每次调用时逐级展示。</div>
       </div>
       ${info.packages.length?`<h3 class="sec">已订阅套餐</h3><div>${info.packages.map(p=>{const pk=PKGS.find(x=>x.id===p);return `<span class="pkg-chip" style="display:inline-block;margin:4px"><b>${esc(pk.name)}</b><span class="pprice">${esc(pk.price)}</span></span>`}).join('')}</div>`:''}
-      <h3 class="sec">已订阅能力（${info.subscribed_capabilities.length}）</h3>
-      ${info.subscribed_capabilities.length?'':'<p class="muted" style="font-size:12px">还没有订阅——你已持有 API Key，可直接按次付费调用任何可用能力（API/MCP 调用时会收到价格提醒），高频使用建议包月订阅。</p>'}
+      <h3 class="sec">可用能力（${entitled.length}） <span class="muted" style="font-weight:400;font-size:12px">— 含单项直订 / 套餐内 / 等级解锁 / 第三方订阅</span></h3>
+      ${entitled.length?'':'<p class="muted" style="font-size:12px">当前无可用能力——升级 PRO/MAX 可免订阅直用 basic（+advanced）层能力，或单独订阅；也可直接按次付费调用（API/MCP 调用时会收到价格提醒）。</p>'}
       <div class="grid">${capCards}</div>`;
   }catch(e){
     if(e && e.status === 401){
@@ -1109,33 +1112,8 @@ function mdToHtml(md){
 }
 function renderSkill(){
   if(!skillData) return;
+  // 场景方案只保留 Skill 文档本身（外部视图 = 怎么调，网络内部视图 = 怎么编排）
   $('#skill-md').innerHTML = mdToHtml(skillView==='ext' ? skillData.external_markdown : skillData.internal_markdown);
-  const left = $('#skill-left');
-  if(skillView==='ext'){
-    // 对 AF：套餐是运营商编排好的成套方案，不暴露内部分步。左侧只给「怎么调」的入口，套餐说明在右侧文档。
-    const pk = skillData.package;
-    left.innerHTML = `<label>调用入口（AF 怎么调这套方案）</label>
-      <div class="step-card" style="border-left-color:var(--green)">
-        <div class="kv"><b>前置</b>订阅本套餐 <span class="price">${esc(pk.price)}</span> + 携带 <code>Authorization: Bearer &lt;api_key&gt;</code></div>
-        <div class="kv" style="margin-top:6px"><b>REST</b><code style="font-size:11px">POST /api/v1/scenarios/${pk.id}/run</code></div>
-        <div class="kv"><b>MCP Tool</b><code>scenario_${pk.id}</code></div>
-        <div class="muted" style="font-size:12px;margin-top:8px">一口价成套方案：AF 无需关心内部怎么串、调了哪些网元，发起调用即拿业务回执。右侧 Skill 文档给出完整参数与示例。</div>
-        <div class="muted" style="font-size:11px;margin-top:6px">实际发起调用可到「API 直调」或「MCP 接口」页（已支持直调场景）。</div>
-      </div>`;
-  }else{
-    const flow = skillData.agent_flow;
-    left.innerHTML = `<label>Agent 调度流程（网络内部视图）</label>
-      <div class="flow"><span class="node">AF</span><span class="arrow">→</span><span class="node" style="border-color:var(--orange)">NEF 鉴权与转发</span><span class="arrow">→</span><span class="node" style="border-color:var(--purple)">网络内部 Network Agent</span></div>
-      <div style="margin-left:18px;border-left:2px dashed var(--border);padding-left:14px">` +
-      flow.map(g=>`
-        <div class="agent-block" style="border-left-color:${g.color}">
-          <b style="color:${g.color}">${esc(g.agent)}</b>
-          <div style="font-size:12px;margin:5px 0">${g.steps.map(s=>`<span class="pill" style="cursor:default">[${s.step}] ${esc(s.name)}</span>`).join('')}</div>
-          <table><tr><th>NF Tool</th><th>SBI Interface</th></tr>
-          ${g.nf_tools.map(t=>`<tr><td class="mono">${t.tool}</td><td class="mono">${t.sbi}</td></tr>`).join('')}</table>
-        </div>`).join('') +
-      `</div><div class="flow"><span class="node" style="border-color:var(--green)">结果聚合</span><span class="arrow">→</span><span class="node">返回 AF</span></div>`;
-  }
 }
 
 /* ============ 能力编排器 ============ */
@@ -1285,27 +1263,36 @@ async function loadAfBoard(){
       <div id="internal-cat" class="muted" style="font-size:11px;margin-top:5px"></div>
       <div id="internal-disc" class="muted" style="font-size:11px;margin-top:5px"></div>
     </div>`;
-    el.innerHTML = agentView + (bill.total_calls?`<div class="agent-block" style="border-left-color:var(--orange);display:flex;gap:24px;flex-wrap:wrap">
-      <span>被网络调用 <b style="color:var(--accent)">${bill.total_calls}</b> 次</span>
-      <span>累计计费 <b style="color:var(--orange)">¥${bill.gross_revenue}</b></span>
+    const hasRevenue = (bill.gross_revenue||0) > 0 || bill.total_calls || bill.total_subscribers;
+    el.innerHTML = agentView + (hasRevenue?`<div class="agent-block" style="border-left-color:var(--orange);display:flex;gap:24px;flex-wrap:wrap">
+      <span>被网络调用 <b style="color:var(--accent)">${bill.total_calls||0}</b> 次</span>
+      <span>包月订阅 <b style="color:var(--accent)">${bill.total_subscribers||0}</b> 人</span>
+      <span>累计收入 <b style="color:var(--orange)">¥${bill.gross_revenue}</b></span>
       <span>分成 <b class="muted" style="font-size:12px">${esc(bill.revenue_share)}</b></span>
       <span>我的收益 <b class="ok">¥${bill.af_income}</b></span>
-    </div>`:'') + res.capabilities.map(c=>`
+    </div>`:'') + res.capabilities.map(c=>{
+      const monthly = c.billing_mode==='monthly';
+      const found = monthly ? c.subscriber_count>0 : c.discovered;
+      const incomeRow = monthly
+        ? `<b>计费</b>包月 <span class="price">${esc(c.unit_price)}</span>
+           <b style="margin-left:12px">订阅</b>${c.subscriber_count} 人
+           <b style="margin-left:12px">月收入</b><span class="price">¥${c.total_fee.toFixed(2)}</span>`
+        : `<b>计费</b>按次 <span class="price">${esc(c.unit_price)}</span>
+           <b style="margin-left:12px">被调用</b>${c.call_count} 次
+           <b style="margin-left:12px">累计收益</b><span class="price">¥${c.total_fee.toFixed(2)}</span>`;
+      return `
       <div class="tp-card">
         <b>${esc(c.name)}</b>
-        ${c.discovered?'<span class="badge-found">✓ 已被网络发现</span>':'<span class="badge-wait">registered · 等待网络调用</span>'}
+        ${found?`<span class="badge-found">✓ ${monthly?'已被订阅':'已被网络发现'}</span>`:'<span class="badge-wait">registered · 等待'+(monthly?'订阅':'网络调用')+'</span>'}
         <span class="mono muted" style="font-size:11px;margin-left:6px">${c.id}</span>
-        <div class="kv" style="margin-top:6px">
-          <b>被调用</b>${c.call_count} 次
-          <b style="margin-left:12px">最近</b>${c.last_call_ts?fmtTs(c.last_call_ts):'--'}
-          <b style="margin-left:12px">累计收益</b><span class="price">¥${c.total_fee.toFixed(2)}</span>
-        </div>
+        <div class="kv" style="margin-top:6px">${incomeRow}</div>
         <button class="primary" style="margin-top:8px" onclick="simCall('${c.id}')">⚡ 模拟网络调用</button>
+        ${monthly?'<span class="muted" style="font-size:11px;margin-left:8px">包月能力收入来自订阅，单次调用不另计费</span>':''}
         ${c.recent_calls.length?`<div class="tp-log">${c.recent_calls.map(r=>`
           <div class="row">${fmtTs(r.ts)} <b style="color:${r.agent_color}">${esc(r.caller_agent)}</b>
           → 你的能力 <span class="ok">✓ ${r.latency_ms}ms</span>
           · ${esc(r.trigger_detail)} · 计费 +${r.fee}</div>`).join('')}</div>`:''}
-      </div>`).join('');
+      </div>`;}).join('');
   }catch(e){ /* 轮询失败静默，保留上次内容，不打断演示 */ }
 }
 
@@ -1365,7 +1352,7 @@ $('#af-submit').onclick = async ()=>{
 };
 
 /* ============ 初始化 ============ */
-function refreshAll(){ afTotalCalls = -1; afBoardCache = ''; renderAccounts(); loadMarket(); }
+function refreshAll(){ afTotalCalls = -1; afBoardCache = ''; const ar=$('#af-result'); if(ar) ar.innerHTML=''; renderAccounts(); loadMarket(); }
 renderAccounts();
 loadMarket();
 

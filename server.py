@@ -15,7 +15,7 @@ from skills import (CAPABILITIES, CAP_INDEX, PACKAGES, PKG_INDEX, CATEGORIES,
                     AGENTS, Capability, CapParam, agent_for_capability)
 from stubs import invoke_stub
 from intent import process_intent, intent_status
-from registry import (THIRD_PARTY, THIRD_PARTY_META, REVERSE_CALLS,
+from registry import (THIRD_PARTY, THIRD_PARTY_META, THIRD_PARTY_SUBS, REVERSE_CALLS,
                       record_reverse_call, caller_agent_for)
 
 app = FastAPI(title="6G NEF Capability Exposure Platform", version="0.9.0-demo")
@@ -209,6 +209,14 @@ def _subscribed_caps(rec) -> set:
     for pid in rec["packages"]:
         caps |= set(PKG_INDEX[pid]["capabilities"])
     return caps
+
+
+def _monthly_price(cap) -> float:
+    """月价数值（用于包月第三方能力按订阅人数结算收入）。"""
+    try:
+        return float(str(cap.unit_price).split("/")[0].replace("¥", "").strip())
+    except ValueError:
+        return 0.0
 
 
 def _tp_billing_mode(cap) -> str:
@@ -581,6 +589,11 @@ def subscribe(req: SubscribeReq):
     rec = API_KEYS[key]
     rec["subscriptions"] |= set(req.capability_ids)
     rec["packages"] |= set(req.package_ids)
+    # 登记第三方能力的订阅方（包月结算用：提供方按订阅人数 × 月价计收入）
+    tp_owner = {c.id: THIRD_PARTY_META.get(c.id, {}).get("owner") for c in THIRD_PARTY}
+    for cid in req.capability_ids:
+        if cid in tp_owner and tp_owner[cid] != req.account:  # 自己订自己不计
+            THIRD_PARTY_SUBS.setdefault(cid, set()).add(req.account)
     return {"account": req.account, "api_key": key,
             "subscriptions": sorted(rec["subscriptions"]),
             "packages": sorted(rec["packages"]),
@@ -1042,7 +1055,10 @@ def simulate_reverse_call(cap_id: str, authorization: str = Header(None)):
         raise HTTPException(404, f"第三方能力 {cap_id} 不存在")
     if meta["owner"] != rec["account"]:
         raise HTTPException(403, f"能力 {cap_id} 不属于账号 {rec['account']}")
-    record = record_reverse_call(cap_id, trigger="manual", trigger_detail="手动模拟网络调用")
+    # 包月能力的调用已含在月费里，单次不再计费（fee=0）；按次能力记一笔模拟费
+    cap = _any_cap(cap_id)
+    fee = 0.0 if (cap and _tp_billing_mode(cap) == "monthly") else None
+    record = record_reverse_call(cap_id, trigger="manual", trigger_detail="手动模拟网络调用", fee=fee)
     request_payload = {"payload": {"source": "nef_outbound_gateway",
                                    "caller": record["caller_agent"],
                                    "task_ref": "demo_task"}}
@@ -1061,18 +1077,27 @@ def my_reverse_calls(authorization: str = Header(None)):
         if meta.get("owner") != rec["account"]:
             continue
         calls = REVERSE_CALLS.get(cap.id, [])
+        mode = _tp_billing_mode(cap)
+        subs = sorted(THIRD_PARTY_SUBS.get(cap.id, set()))
+        if mode == "monthly":          # 包月：收入 = 订阅人数 × 月价
+            revenue = round(_monthly_price(cap) * len(subs), 2)
+        else:                          # 按次：收入 = 各次调用计费之和
+            revenue = round(sum(c["fee"] for c in calls), 2)
         out.append({
             "id": cap.id, "name": cap.name,
             "cap_type": meta.get("cap_type"), "endpoint": meta.get("endpoint"),
+            "billing_mode": mode, "unit_price": cap.unit_price,
+            "subscriber_count": len(subs),
             "call_count": len(calls),
             "last_call_ts": calls[-1]["ts"] if calls else None,
-            "total_fee": round(sum(c["fee"] for c in calls), 2),
-            "discovered": bool(calls),
+            "total_fee": revenue,
+            "discovered": bool(calls) or bool(subs),
             "recent_calls": list(reversed(calls[-10:])),
         })
     gross = round(sum(c["total_fee"] for c in out), 2)
     return {"count": len(out), "capabilities": out,
             "billing": {"total_calls": sum(c["call_count"] for c in out),
+                        "total_subscribers": sum(c["subscriber_count"] for c in out),
                         "gross_revenue": gross,
                         "revenue_share": "70% 归 AF / 30% 归运营商",
                         "af_income": round(gross * 0.7, 2)}}

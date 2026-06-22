@@ -269,6 +269,26 @@ def test_third_party_monthly_requires_subscription_no_per_call():
     assert info["per_call_charges"]["count"] == 0
 
 
+def test_monthly_third_party_subscription_credits_provider_income():
+    # 包月第三方能力：他人订阅后，提供方看板按「订阅人数 × 月价」显示月收入
+    owner = _hdr("tp_inc_owner")
+    tp = client.post("/api/v1/register-af",
+                     json={"name": "包月路况源", "endpoint": "https://i.example.com/api",
+                           "price": "9.9/月"},
+                     headers=owner).json()["registration_id"]
+    # 注册当下还没订阅 → 月收入 0
+    board0 = client.get("/api/v1/third-party/my-calls", headers=owner).json()
+    c0 = next(c for c in board0["capabilities"] if c["id"] == tp)
+    assert c0["billing_mode"] == "monthly" and c0["subscriber_count"] == 0 and c0["total_fee"] == 0.0
+    # 两个不同账号包月订阅
+    client.post("/api/v1/subscribe", json={"account": "buyer_1", "capability_ids": [tp], "package_ids": []})
+    client.post("/api/v1/subscribe", json={"account": "buyer_2", "capability_ids": [tp], "package_ids": []})
+    board = client.get("/api/v1/third-party/my-calls", headers=owner).json()
+    c = next(c for c in board["capabilities"] if c["id"] == tp)
+    assert c["subscriber_count"] == 2 and c["total_fee"] == 19.8
+    assert board["billing"]["total_subscribers"] == 2 and board["billing"]["gross_revenue"] == 19.8
+
+
 def test_tool_dispatch_carries_sbi_target():
     # 调用去向：tool 级在鉴权回执里给出落到的 SBI 接口；不再暴露后台 service_id / 路由细节
     h = _hdr("sbi_acct", plan="max")
