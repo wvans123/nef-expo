@@ -231,7 +231,7 @@ th{background:var(--card);color:var(--muted)}
       </div>
       <div>
         <label>请求</label><pre id="api-req">--</pre>
-        <label>NEF 鉴权 · 路由</label><div id="api-pipeline"></div>
+        <label>NEF 鉴权 · 调用去向</label><div id="api-pipeline"></div>
         <label>响应</label><pre id="api-resp">--</pre>
       </div>
     </div>
@@ -250,7 +250,7 @@ th{background:var(--card);color:var(--muted)}
       </div>
       <div>
         <label>JSON-RPC 请求</label><pre id="mcp-req">--</pre>
-        <label>NEF 鉴权 · 路由</label><div id="mcp-pipeline"></div>
+        <label>NEF 鉴权 · 调用去向</label><div id="mcp-pipeline"></div>
         <label>JSON-RPC 响应</label><pre id="mcp-resp">--</pre>
       </div>
     </div>
@@ -282,6 +282,7 @@ th{background:var(--card);color:var(--muted)}
       </div>
       <span class="muted" style="font-size:11px;align-self:center">一键运行 = 场景级 REST 调用（POST /api/v1/scenarios/{id}/run，同步回执），区别于 Intent（自然语言、异步、按 ID 跟踪状态）</span>
     </div>
+    <div id="skill-params" style="margin-bottom:10px"></div>
     <div id="skill-run-result"></div>
     <div id="skill-wrap">
       <div id="skill-left"></div>
@@ -291,11 +292,8 @@ th{background:var(--card);color:var(--muted)}
 
   <!-- Tab 7 编排器 -->
   <div class="tabpane" id="pane-composer">
-    <h3 class="sec">能力编排器 <span class="muted" style="font-weight:400;font-size:12px">— 自己挑 tool 拼成 Pipeline：更省、更灵活，精度自负（对比「场景方案」里运营商优化好的成套套餐）</span></h3>
-    <div class="banner" style="display:block">
-      <b style="font-size:13px">快速订阅套餐</b>
-      <div id="composer-quick-pkgs" style="margin-top:8px"></div>
-    </div>
+    <h3 class="sec">能力编排器 <span class="muted" style="font-weight:400;font-size:12px">— 自己挑已订阅的 tool 拼成 Pipeline，一次跑完</span></h3>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">想用更多能力？去「能力超市」订阅，订阅后会出现在下方能力池。</div>
     <div id="composer-wrap">
       <div>
         <label>能力池（已订阅，拖拽到下方 Pipeline）</label>
@@ -321,25 +319,25 @@ th{background:var(--card);color:var(--muted)}
   <!-- Tab 8 AF 注册 -->
   <div class="tabpane" id="pane-afreg">
     <h3 class="sec">AF 能力注册 · 双向开放</h3>
-    <p class="muted" style="max-width:760px;margin-bottom:14px">NEF 不仅将网络能力对外开放，外部 AF 也可以把自己的能力（AI 模型 / 工具 / 数据源）注册进网络。注册后能力上架能力超市，被网络内部 Agent <b>发现并反向调用</b> —— 调用经过 NEF 出向网关完成鉴权、计费与审计。</p>
+    <p class="muted" style="max-width:820px;margin-bottom:14px">NEF 不仅把网络能力对外开放，外部 AF 也能把自己的能力（主要以 <b>tool</b> 形式）注册进网络。注册后能力上架能力超市、同时进内网发现目录（<code>GET /internal/v1/third-party-capabilities</code>），被网络内部 Agent <b>发现并反向调用</b> —— 反向调用统一经 NEF 出向网关做鉴权、计费、审计：内网 Agent 调用走信任域内身份（免 AF Key），跨 AF 调用走正常北向订阅鉴权。</p>
     <div class="afflow" id="af-flow">
-      <span class="afnode af-end" data-fn="0">AF 能力</span>
+      <span class="afnode af-end" data-fn="0">AF 能力<small>注册为 tool</small></span>
       <span class="afarrow">─注册─▶</span>
-      <span class="afnode nef" data-fn="1">NEF 能力超市</span>
-      <span class="afarrow">─发现─▶</span>
-      <span class="afnode" data-fn="2">Network Agent</span>
-      <span class="afarrow">─编排─▶</span>
-      <span class="afnode nef" data-fn="3">NEF 出向网关<small>鉴权·计费·审计</small></span>
+      <span class="afnode nef" data-fn="1">NEF 上架<small>能力超市 + 内网目录</small></span>
+      <span class="afarrow">─内网发现─▶</span>
+      <span class="afnode nef" data-fn="2">NEF 出向网关<small>鉴权·计费·审计</small></span>
       <span class="afarrow" style="color:var(--green)">─反向调用─▶</span>
-      <span class="afnode af-end" data-fn="4">AF Endpoint</span>
+      <span class="afnode af-end" data-fn="3">AF Endpoint</span>
     </div>
     <div style="display:grid;grid-template-columns:380px 1fr;gap:16px">
       <div>
         <h3 class="sec" style="margin-top:0">① 注册我的能力</h3>
         <label>能力名称</label><input id="af-name" placeholder="如：工业缺陷识别模型">
-        <label>类型</label>
-        <select id="af-type"><option value="ai_model">ai_model — AI 模型</option><option value="tool">tool — 工具</option><option value="data_source">data_source — 数据源</option></select>
         <label>描述</label><textarea id="af-desc" rows="2" placeholder="能力说明"></textarea>
+        <details style="margin:4px 0"><summary class="muted" style="cursor:pointer;font-size:12px">类型（可选，默认 tool）</summary>
+          <select id="af-type" style="margin-top:6px"><option value="tool">tool — 工具（默认）</option><option value="ai_model">ai_model — AI 模型</option><option value="data_source">data_source — 数据源</option></select>
+          <div class="muted" style="font-size:11px;margin-top:4px">类型只影响内网把它归到哪个承接 Agent，不影响 AF 使用，一般保持 tool 即可。</div>
+        </details>
         <label>定价（其他 AF 订阅/网络调用按此计费分成）</label><input id="af-price" placeholder="如：0.5/次" value="0.5/次">
         <label>端点 URL</label><input id="af-endpoint" placeholder="https://your-af.example.com/api/capability">
         <button class="primary" id="af-submit" style="margin-top:14px;width:100%">注册到 NEF</button>
@@ -416,21 +414,31 @@ $('#btn-register-acct').onclick = async () => {
   saveAccounts(); renderAccounts(); refreshAll();
 };
 
-/* ============ Tab 切换 ============ */
-$$('#tabs button').forEach(b => b.onclick = () => {
+/* ============ Tab 切换（支持 #hash 深链接，外部网站可直接跳到指定页） ============ */
+function activateTab(name, updateHash){
+  const btn = $('#tabs button[data-tab="'+name+'"]');
+  if(!btn) return false;
   $$('#tabs button').forEach(x=>x.classList.remove('active'));
   $$('.tabpane').forEach(x=>x.classList.remove('active'));
-  b.classList.add('active');
-  $('#pane-'+b.dataset.tab).classList.add('active');
+  btn.classList.add('active');
+  $('#pane-'+name).classList.add('active');
   if(afPollTimer){ clearInterval(afPollTimer); afPollTimer = null; }
-  if(b.dataset.tab==='subs') renderSubs();
-  if(b.dataset.tab==='api') renderApiTab();
-  if(b.dataset.tab==='mcp') renderMcpTab();
-  if(b.dataset.tab==='composer') renderComposer();
-  if(b.dataset.tab==='skill') loadSkill();
-  if(b.dataset.tab==='afreg'){ loadAfBoard(); afPollTimer = setInterval(loadAfBoard, 3000); }
-  if(b.dataset.tab==='term') initTerm();
-});
+  if(name==='subs') renderSubs();
+  if(name==='api') renderApiTab();
+  if(name==='mcp') renderMcpTab();
+  if(name==='composer') renderComposer();
+  if(name==='skill') loadSkill();
+  if(name==='afreg'){ loadAfBoard(); afPollTimer = setInterval(loadAfBoard, 3000); }
+  if(name==='term') initTerm();
+  if(updateHash && location.hash.slice(1) !== name){ history.replaceState(null, '', '#'+name); }
+  return true;
+}
+window.activateTab = activateTab;
+$$('#tabs button').forEach(b => b.onclick = () => activateTab(b.dataset.tab, true));
+// 外部链接 / 浏览器前进后退切换页签
+window.addEventListener('hashchange', () => activateTab(location.hash.slice(1)));
+// 首屏：若 URL 带 #tab 则直达对应页（如 http://主机:8000/#afreg 跳到「双向开放·AF」）
+(function(){ const h = location.hash.slice(1); if(h) activateTab(h, false); })();
 
 /* ============ 弹窗 ============ */
 function showModal(html){ $('#modal').innerHTML = html; $('#modal-bg').classList.add('show'); }
@@ -449,16 +457,18 @@ async function loadMarket(){
       <div class="hero-title">一张网络，无限调用</div>
       <div class="hero-sub">6G NEF 能力开放平台 —— 网络能力即服务，双向开放生态</div>
       <div style="margin-top:10px">
+        <span class="muted" style="font-size:11px;margin-right:4px">三种调用方式</span>
         <span class="method-chip">REST API</span>
         <span class="method-chip">MCP Tool</span>
         <span class="method-chip">Intent 意图</span>
-        <span class="method-chip">Pipeline 编排</span>
-        <span class="method-chip">↩ AF 反向开放</span>
+        <span class="muted" style="font-size:11px;margin:0 4px 0 12px">另：编排与开放</span>
+        <span class="method-chip" style="opacity:.75">Pipeline 自助编排</span>
+        <span class="method-chip" style="opacity:.75">↩ AF 反向开放</span>
       </div>
     </div>
     <div class="stat"><b>${CAPS.filter(c=>c.status==='available').length}</b><span>项可用能力</span></div>
     <div class="stat"><b>${CAPS.filter(c=>c.status==='planned').length}</b><span>项规划中</span></div>
-    <div class="stat"><b>5</b><span>种调用与开放方式</span></div>
+    <div class="stat"><b>3</b><span>种调用方式</span></div>
     <div class="stat"><b>${PKGS.length}</b><span>个场景套餐</span></div>
     <div class="stat"><span>API Key 状态</span><b style="font-size:13px" class="${apiKey()?'ok':'muted'}">${apiKey()?'已激活':'未订阅'}</b></div>`;
   $('#pkg-row').innerHTML = PKGS.map(p =>
@@ -492,7 +502,7 @@ window.showCap = async id => {
     <h2>${c.icon||''} <span class="cat-dot" style="background:${CATS[c.category].color}"></span>${esc(c.name)} <span class="tier ${c.tier}">${c.tier}</span></h2>
     <p class="muted">${esc(c.description)}</p>
     <div class="kv"><b>REST</b><code>${esc(c.rest_endpoint)}</code></div>
-    <div class="kv"><b>MCP Tool</b><code>${c.id}</code> · <b>内部 Agent</b>${esc(c.internal_agent)} · <b>价格</b><span class="price">${esc(c.unit_price)}</span></div>
+    <div class="kv"><b>MCP Tool</b><code>${c.id}</code> · <b>价格</b><span class="price">${esc(c.unit_price)}</span></div>
     <table><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr>${rows||'<tr><td colspan=4>无参数</td></tr>'}</table>
     <label>示例请求 JSON</label><pre>${esc(jfmt(example))}</pre>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
@@ -573,18 +583,14 @@ async function renderSubs(){
         </div>
       </div>
       <div class="agent-block" style="border-left-color:var(--green)">
-        <b class="ok">🔐 NEF 鉴权流水线（每次调用都会逐级执行）</b>
-        <div id="subs-pipeline" style="margin-top:6px"></div>
         <b class="ok" style="font-size:12px">API Key 权限范围（scope）</b>
         <div style="margin-top:5px">${info.authentication.scopes.map(s=>`<span class="pill" style="cursor:default">${esc(s)}</span>`).join('')}</div>
+        <div class="muted" style="font-size:11px;margin-top:6px">🔐 鉴权流水线在每次调用（API 直调 / MCP / 场景运行 / 意图）时逐级展示，这里不重复。</div>
       </div>
       ${info.packages.length?`<h3 class="sec">已订阅套餐</h3><div>${info.packages.map(p=>{const pk=PKGS.find(x=>x.id===p);return `<span class="pkg-chip" style="display:inline-block;margin:4px"><b>${esc(pk.name)}</b><span class="pprice">${esc(pk.price)}</span></span>`}).join('')}</div>`:''}
       <h3 class="sec">已订阅能力（${info.subscribed_capabilities.length}）</h3>
       ${info.subscribed_capabilities.length?'':'<p class="muted" style="font-size:12px">还没有订阅——你已持有 API Key，可直接按次付费调用任何可用能力（API/MCP 调用时会收到价格提醒），高频使用建议包月订阅。</p>'}
       <div class="grid">${capCards}</div>`;
-    const a = info.authentication;
-    if(a && a.pipeline) renderAuthPipeline($('#subs-pipeline'),
-      {request_id:a.request_id, decision:a.decision, quota:a.quota, stages:a.pipeline}, null);
   }catch(e){
     if(e && e.status === 401){
       el.innerHTML = `<div class="agent-block" style="border-left-color:var(--red)">
@@ -603,6 +609,16 @@ async function changePlan(pl){
   catch(e){ toast('切换失败', false); }
 }
 window.changePlan = changePlan;
+async function internalCatalog(){
+  const el = $('#internal-cat');
+  try{
+    const cat = await fetch('/internal/v1/third-party-capabilities').then(r=>r.json());
+    if(!cat.capabilities.length){ el.innerHTML = '内网发现目录：暂无第三方能力'; return; }
+    el.innerHTML = `Network Agent → <code>GET /internal/v1/third-party-capabilities</code>：发现 ${cat.count} 个第三方能力<br>`
+      + cat.capabilities.map(c=>`· <b>${esc(c.name)}</b> <span class="muted">(${esc(c.id)})</span> · 提供方 ${esc(c.owner)} · ${esc(c.unit_price)} · 承接 <span style="color:${esc(c.agent_color)}">${esc(c.internal_agent)}</span> · endpoint ${esc(c.endpoint||'-')}`).join('<br>');
+  }catch(e){ el.innerHTML = '<span class="err">发现失败</span>'; }
+}
+window.internalCatalog = internalCatalog;
 async function internalDiscover(){
   const el = $('#internal-disc');
   try{
@@ -622,14 +638,57 @@ async function internalDiscover(){
 window.internalDiscover = internalDiscover;
 
 /* ============ 参数表单生成 ============ */
+// 逼真示例默认值（与后端 _DEMO_BY_NAME 对齐），让表单/一键运行带着像样的参数
+const DEMO_BY_NAME = {
+  area:'园区A-东门', fence_area:'园区A-北围栏', coverage_area:'园区A',
+  device_id:'imsi-460001234567890', target_id:'tgt-7788', task_id:'job-9001',
+  target_group:'commuter-group-01', subject:'af-agent-01', input_ref:'stream://cam-01',
+  scene_ref:'scene://xr-room-1', model_ref:'model://fl-base', agent_image:'af/agent:latest',
+  twin_id:'twin-campus-01'
+};
+function demoVal(p){
+  if(p.default!==undefined&&p.default!==null) return typeof p.default==='object'?JSON.stringify(p.default):p.default;
+  if(p.enum) return p.enum[0];
+  if(DEMO_BY_NAME[p.name]) return DEMO_BY_NAME[p.name];
+  return {integer:1,number:1}[p.type]!==undefined?{integer:1,number:1}[p.type]:'';
+}
 function paramForm(cap, prefix){
   return cap.params.map(p=>{
     const id = prefix + '-' + p.name;
     let input;
-    if(p.enum) input = `<select id="${id}">${p.enum.map(v=>`<option ${v===p.default?'selected':''}>${v}</option>`).join('')}</select>`;
-    else input = `<input id="${id}" value="${p.default!==undefined&&p.default!==null?esc(JSON.stringify(p.default)===String(p.default)?p.default:(typeof p.default==='object'?JSON.stringify(p.default):p.default)):''}" placeholder="${p.type}">`;
+    if(p.enum) input = `<select id="${id}">${p.enum.map(v=>`<option ${v===(p.default||p.enum[0])?'selected':''}>${v}</option>`).join('')}</select>`;
+    else input = `<input id="${id}" value="${esc(String(demoVal(p)))}" placeholder="${p.type}">`;
     return `<label>${p.name} <span class="muted">(${p.type}${p.required?' · 必填':''})</span> — ${esc(p.description)}</label>${input}`;
   }).join('');
+}
+// 一组能力的参数并集（去重）——给场景/Pipeline 拼出一份可编辑参数表单
+function unionParams(capList){
+  const seen = {}, out = [];
+  capList.forEach(c=>(c.params||[]).forEach(p=>{ if(!seen[p.name]){ seen[p.name]=1; out.push(p); } }));
+  return out;
+}
+function paramFormFromList(params, prefix){
+  if(!params.length) return '<p class="muted" style="font-size:12px">本调用无需参数。</p>';
+  return params.map(p=>{
+    const id = prefix + '-' + p.name;
+    let input;
+    if(p.enum) input = `<select id="${id}">${p.enum.map(v=>`<option ${v===(p.default||p.enum[0])?'selected':''}>${v}</option>`).join('')}</select>`;
+    else input = `<input id="${id}" value="${esc(String(demoVal(p)))}" placeholder="${p.type}">`;
+    return `<label>${p.name} <span class="muted">(${p.type}${p.required?' · 必填':''})</span> — ${esc(p.description)}</label>${input}`;
+  }).join('');
+}
+function collectParamList(params, prefix){
+  const out = {};
+  params.forEach(p=>{
+    let v = $('#'+prefix+'-'+p.name)?.value;
+    if(v===''||v===undefined) return;
+    if(p.type==='integer') v = parseInt(v)||0;
+    else if(p.type==='number') v = parseFloat(v)||0;
+    else if(p.type==='array'){ try{ v=JSON.parse(v); }catch(_){ v=v.split(',').map(s=>s.trim()); } }
+    else if(p.type==='object'){ try{ v=JSON.parse(v); }catch(_){ } }
+    out[p.name]=v;
+  });
+  return out;
 }
 function collectParams(cap, prefix){
   const out = {};
@@ -670,8 +729,8 @@ function renderAuthPipeline(el, pipeline, routing, onDone){
       if(routing){
         routeEl.classList.add(routing.target==='backend'?'backend':'ref','show');
         routeEl.innerHTML = routing.target==='backend'
-          ? `🧭 <b>路由判定</b>：命中后台 <b>service_id「${esc(routing.service_id)}」</b>（${esc(routing.backend_name||'')}）→ NEF 出向转发，回传业务结果`
-          : `🧭 <b>路由判定</b>：${esc(routing.note||'NEF 参考回显')}`;
+          ? `🧭 <b>调用去向</b>：转发后台 <b>service_id「${esc(routing.service_id)}」</b>（${esc(routing.backend_name||'')}）→ NEF 出向网关转发并回传业务结果`
+          : `🧭 <b>调用去向</b>：由 NEF 网元直接执行（参考实现；真实业务按契约接入即替换）`;
       }
       if(onDone) onDone(); return;
     }
@@ -759,6 +818,7 @@ $('#api-send').onclick = ()=>sendApi(false);
 window.sendApi = sendApi;
 
 /* ============ MCP ============ */
+let mcpParamList = [];
 async function renderMcpTab(){
   const sel = $('#mcp-tool-select');
   if(!apiKey()){ sel.innerHTML = '<option value="">（请先在顶栏注册账号）</option>'; $('#mcp-params').innerHTML=''; return; }
@@ -773,9 +833,22 @@ async function renderMcpTab(){
     + myPipes.map(pp=>`<option value="pipeline_${pp.id}">pipeline_${pp.id} — ⛓️ ${esc(pp.name)}</option>`).join('')
     + ids.map(id=>{ const c=CAPS.find(x=>x.id===id); const sub=entitled.includes(id)||c.source==='third_party'; return c?`<option value="${id}">${sub?'✓':'💳'} ${c.id} — ${esc(c.name)}${sub?'':'（未授权·可按次）'}</option>`:''; }).join('');
   sel.onchange = ()=>{
-    if(sel.value.startsWith('scenario_')){ $('#mcp-params').innerHTML = '<p class="muted" style="font-size:12px">场景级 Tool 无需参数：一次调用即由网络内部 Agent 编排执行整个场景并回传执行轨迹。</p>'; return; }
-    if(sel.value.startsWith('pipeline_')){ $('#mcp-params').innerHTML = '<p class="muted" style="font-size:12px">Pipeline Tool 无需参数：按你编排的顺序一次执行全部步骤。</p>'; return; }
-    const c=CAPS.find(x=>x.id===sel.value); if(c) $('#mcp-params').innerHTML = paramForm(c,'mcpp');
+    const v = sel.value;
+    if(v.startsWith('scenario_')){
+      const p = PKGS.find(x=>x.id===v.slice('scenario_'.length));
+      const caps = (p?p.capabilities:[]).map(cid=>CAPS.find(x=>x.id===cid)).filter(Boolean);
+      mcpParamList = unionParams(caps);
+      $('#mcp-params').innerHTML = `<label>场景参数 <span class="muted" style="font-weight:400">（已预填，可改）</span></label>${paramFormFromList(mcpParamList,'mcpp')}`;
+      return;
+    }
+    if(v.startsWith('pipeline_')){
+      const pp = myPipes.find(x=>'pipeline_'+x.id===v);
+      const caps = (pp?pp.steps:[]).map(cid=>CAPS.find(x=>x.id===cid)).filter(Boolean);
+      mcpParamList = unionParams(caps);
+      $('#mcp-params').innerHTML = `<label>Pipeline 参数 <span class="muted" style="font-weight:400">（已预填，可改）</span></label>${paramFormFromList(mcpParamList,'mcpp')}`;
+      return;
+    }
+    const c=CAPS.find(x=>x.id===v); mcpParamList = c?c.params:[]; if(c) $('#mcp-params').innerHTML = paramForm(c,'mcpp');
   };
   sel.onchange();
 }
@@ -790,16 +863,24 @@ $('#mcp-list-btn').onclick = async ()=>{
 $('#mcp-call').onclick = async ()=>{
   const id = $('#mcp-tool-select').value; if(!id) return toast('请先在顶栏注册账号', false);
   const c = CAPS.find(x=>x.id===id);
-  const req = {jsonrpc:'2.0', id:2, method:'tools/call', params:{name:id, arguments:(id.startsWith('scenario_')||id.startsWith('pipeline_')||!c)?{}:collectParams(c,'mcpp')}};
+  const isCombo = id.startsWith('scenario_')||id.startsWith('pipeline_');
+  const args = isCombo ? collectParamList(mcpParamList,'mcpp') : (c?collectParams(c,'mcpp'):{});
+  const req = {jsonrpc:'2.0', id:2, method:'tools/call', params:{name:id, arguments:args}};
   $('#mcp-req').textContent = jfmt(req);
   $('#mcp-pipeline').innerHTML = '';
   try{
     const res = await api('/api/v1/mcp/tools/call',{method:'POST',body:JSON.stringify(req)});
-    $('#mcp-resp').textContent = jfmt(res);
-    try{
-      const inner = JSON.parse(res.result.content[0].text);
+    let inner=null; try{ inner = JSON.parse(res.result.content[0].text); }catch(_){}
+    if(inner){
       renderAuthPipeline($('#mcp-pipeline'), inner.nef_auth||inner.auth, inner.routing||inner.dispatch);
-    }catch(_){}
+      const biz = inner.result!==undefined ? inner.result : (inner.results!==undefined?inner.results:inner);
+      $('#mcp-resp').innerHTML = `<span class="ok">JSON-RPC 200 · id ${res.id} · isError ${res.result.isError}</span>\n`
+        + (inner.summary?`<span style="color:var(--green)">✓ ${esc(inner.summary)}</span>\n`:'')
+        + `<span class="muted" style="font-size:12px">业务结果（content[0].text 解析后）：</span>\n${esc(jfmt(biz))}\n`
+        + `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:12px">完整 JSON-RPC 响应（原文）</summary>${esc(jfmt(res))}</details>`;
+    }else{
+      $('#mcp-resp').textContent = jfmt(res);
+    }
   }catch(e){ $('#mcp-resp').textContent = jfmt(e.data||{detail:'需要 API Key（请先在顶栏注册账号）'}); }
 };
 
@@ -849,7 +930,7 @@ function renderIntentResult(res){
       <div class="kv"><b>网络任务状态地址</b><code>${esc(res.handoff.status_endpoint)}</code></div>
       <p class="muted" style="margin-top:8px">${esc(res.handoff.message)}</p>
     </div>
-    <h3 class="sec">第二道 · 网络侧 Planning Agent 逐能力鉴权 <span class="muted" style="font-weight:400;font-size:12px">— 在执行过程中进行，状态逐步回传</span></h3>
+    <h3 class="sec">第二道 · 网络侧 Planning Agent 逐能力鉴权 <span class="muted" style="font-weight:400;font-size:12px">— 在执行过程中进行，状态逐步回传（PA 待对接，当前为 NEF 模拟）</span></h3>
     <div id="intent-track"><p class="muted">查询中…</p></div>`;
     pollIntentStatus(res.intent_id);
   };
@@ -879,6 +960,14 @@ function renderIntentTrack(st){
   let html = `<div class="stage-flow">` + st.stages.map(s=>`<span class="st ${s.state}">${s.state==='done'?'✓ ':''}${esc(s.label.split(' ·')[0])}</span>`).join('<span class="arrow muted">→</span>') + `</div>`;
   html += `<div class="pbar"><i style="width:${st.progress}%"></i></div>`;
   html += `<div class="muted" style="font-size:12px;margin-bottom:8px">状态：<b class="${st.status==='completed'?'ok':''}">${esc(st.status)}</b> · ${esc(st.status_label)}${st.summary?` · ${esc(st.summary)}`:''}</div>`;
+  if(st.pa){
+    html += `<div class="agent-block" style="border-left-color:var(--orange);border-style:dashed">
+      <b style="color:var(--orange)">🧩 ${esc(st.pa.engine)}</b>
+      <span class="muted" style="font-size:11px;margin-left:6px">${esc(st.pa.note)}</span>
+      <div style="font-size:12px;margin-top:5px">PA 解析场景：<b>${esc(st.pa.parsed_scenario||'（无匹配场景，按单能力执行）')}</b></div>
+      <div style="margin-top:4px">${st.pa.selected.map(s=>`<div style="font-size:12px;margin:2px 0"><b>${esc(s.name)}</b> <span class="mono muted" style="font-size:11px">${esc(s.capability)}</span> → ${esc(s.agent)}${s.nf_tool?` · 选用 NF Tool <span class="mono" style="font-size:11px">${esc(s.nf_tool)}</span>`:''}</div>`).join('')}</div>
+    </div>`;
+  }
   if(st.network_authz){
     const na = st.network_authz;
     html += `<div class="agent-block" style="border-left-color:${na.denied_count?'var(--orange)':'var(--green)'}">
@@ -909,9 +998,15 @@ async function loadSkill(){
   sel.onchange = fetchSkill;
   if(!skillData) await fetchSkill();
 }
+let skillParams = [];
 async function fetchSkill(){
   const id = $('#skill-pkg-select').value || PKGS[0].id;
   skillData = await fetch(`/api/v1/packages/${id}/skill`).then(r=>r.json());
+  // 场景参数：取本场景各能力参数并集，预填逼真默认值，可编辑
+  const caps = (skillData.package.capabilities||[]).map(cid=>CAPS.find(x=>x.id===cid)).filter(Boolean);
+  skillParams = unionParams(caps);
+  $('#skill-params').innerHTML = `<label>场景参数 <span class="muted" style="font-weight:400">（已按主用例预填，可改；留空用默认）</span></label>
+    <div class="param-grid">${paramFormFromList(skillParams,'skillp')}</div>`;
   renderSkill();
 }
 $('#skill-run').onclick = async ()=>{
@@ -919,7 +1014,8 @@ $('#skill-run').onclick = async ()=>{
   if(!apiKey()) return toast('一键运行需要 API Key，请先注册账号', false);
   $('#skill-run-result').innerHTML = '<p class="muted">NEF 鉴权中，正在转交网络内部 Agent 执行场景…</p>';
   try{
-    const res = await api(`/api/v1/scenarios/${id}/run`, {method:'POST'});
+    const params = collectParamList(skillParams, 'skillp');
+    const res = await api(`/api/v1/scenarios/${id}/run`, {method:'POST', body:JSON.stringify({params})});
     renderScenarioRun(res);
   }catch(e){ $('#skill-run-result').innerHTML = `<p class="err">${esc((e.data&&e.data.detail)||jfmt(e.data||{}))}</p>`; }
 };
@@ -986,13 +1082,17 @@ function renderSkill(){
   $('#skill-md').innerHTML = mdToHtml(skillView==='ext' ? skillData.external_markdown : skillData.internal_markdown);
   const left = $('#skill-left');
   if(skillView==='ext'){
-    left.innerHTML = `<label>AF 调用步骤（外部视图）</label>` + skillData.steps.map(s=>`
-      <div class="step-card" style="border-left-color:${s.agent_color}">
-        <b>Step ${s.step} · ${esc(s.name)}</b> <span class="mono muted" style="font-size:11px">${s.capability}</span>
-        <div class="kv"><b>REST</b><code style="font-size:11px">${esc(s.rest_endpoint)}</code></div>
-        <div class="kv"><b>MCP Tool</b><code>${s.mcp_tool}</code></div>
-        <div class="kv"><b>参数</b>${s.params.map(p=>`<code style="font-size:11px">${p.name}${p.required?'*':''}</code>`).join(' ')}</div>
-      </div>`).join('');
+    // 对 AF：套餐是运营商编排好的成套方案，不暴露内部分步；只给"怎么用"的 Skill 文档 + 一键运行
+    const pk = skillData.package;
+    left.innerHTML = `<label>外部视图（AF）</label>
+      <div class="step-card" style="border-left-color:var(--green)">
+        <b>${esc(pk.name)}</b> <span class="price">${esc(pk.price)}</span>
+        <div class="muted" style="font-size:12px;margin:6px 0">${esc(pk.description)}</div>
+        <div class="muted" style="font-size:12px">场景：${esc(pk.scenario)}</div>
+        <div class="muted" style="font-size:12px;margin-top:8px">这是运营商<b>编排好的成套方案</b>——AF 无需关心内部怎么串、调了哪些网元，
+        只需：① 订阅 → ② 一键运行（或 MCP <code>scenario_${pk.id}</code> / REST 场景接口）→ ③ 拿回执。右侧 Skill 文档讲清怎么用。</div>
+        <div class="muted" style="font-size:11px;margin-top:8px">（内部如何分步编排、由哪些 Agent/网元承接，见上方「网络内部 Agent 视图」——那是运营商侧视角，不对 AF 暴露。）</div>
+      </div>`;
   }else{
     const flow = skillData.agent_flow;
     left.innerHTML = `<label>Agent 调度流程（网络内部视图）</label>
@@ -1011,8 +1111,6 @@ function renderSkill(){
 
 /* ============ 能力编排器 ============ */
 async function renderComposer(){
-  $('#composer-quick-pkgs').innerHTML = PKGS.map(p=>
-    `<button style="margin:3px" onclick="confirmSubscribe('pkg','${p.id}','${esc(p.name)}','${esc(p.price)}')">${esc(p.name)} ${esc(p.price)}</button>`).join('');
   const subs = await myEntitledCaps();   // 订阅 ∪ 账号等级覆盖（套餐内能力也在其中）
   const pool = $('#cap-pool');
   if(!subs.length){ pool.innerHTML = '<span class="muted">暂无可编排能力：订阅能力/套餐，或升级账号等级（PRO/MAX）</span>'; }
@@ -1086,12 +1184,38 @@ async function loadPipeList(){
   }catch(e){ $('#pipe-list').innerHTML='<span class="muted">--</span>'; }
 }
 window.runPipe = async id=>{
-  $('#pipe-run-result').textContent = '执行中…';
+  const box = $('#pipe-run-result');
+  box.innerHTML = '<span class="muted">提交执行请求…</span>';
   try{
     const res = await api(`/api/v1/pipelines/${id}/run`,{method:'POST'});
-    $('#pipe-run-result').textContent = jfmt(res);
-    toast(`Pipeline 执行成功（${res.steps_executed} 步）`);
-  }catch(e){ $('#pipe-run-result').textContent = jfmt(e.data||{}); }
+    // 逐步"执行"动画：每步带耗时与参数，跑完再给整体结论
+    box.innerHTML = `<div class="muted" style="font-size:12px;margin-bottom:6px">Pipeline「${esc(res.name)}」按序执行 ${res.steps_executed} 步：</div><div id="pipe-anim"></div>`;
+    const host = $('#pipe-anim');
+    let i = 0;
+    const tick = ()=>{
+      if(i>=res.results.length){
+        const tail = document.createElement('div');
+        tail.className = 'ok'; tail.style.marginTop='8px';
+        tail.innerHTML = `✓ 全部 ${res.steps_executed} 步执行成功`
+          + `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:12px">原始响应 JSON</summary><pre>${esc(jfmt(res))}</pre></details>`;
+        host.appendChild(tail);
+        toast(`Pipeline 执行成功（${res.steps_executed} 步）`);
+        return;
+      }
+      const s = res.results[i];
+      const row = document.createElement('div');
+      row.className = 'pl-stage'; row.style.opacity = 0;
+      const pstr = Object.entries(s.params||{}).map(([k,v])=>`${k}=${typeof v==='object'?JSON.stringify(v):v}`).join(' · ');
+      row.innerHTML = `<span class="pl-ic run">◌</span><span class="pl-body"><b>Step ${s.step} · ${esc(s.capability_name)}</b>`
+        + `<span class="mono muted" style="font-size:11px;margin-left:6px">${esc(s.capability)}</span>`
+        + (pstr?`<span class="pl-detail">参数：${esc(pstr)}</span>`:'') + `</span>`;
+      host.appendChild(row);
+      requestAnimationFrame(()=>{ row.style.transition='opacity .2s'; row.style.opacity=1; });
+      const ic = row.querySelector('.pl-ic');
+      setTimeout(()=>{ ic.classList.remove('run'); ic.classList.add('passed'); ic.textContent='✓'; i++; tick(); }, 360+Math.random()*260);
+    };
+    tick();
+  }catch(e){ box.innerHTML = `<pre class="err">${esc(jfmt(e.data||{}))}</pre>`; }
 };
 
 /* ============ AF 注册 · 反向调用 ============ */
@@ -1125,9 +1249,11 @@ async function loadAfBoard(){
     const bill = res.billing||{};
     const agentView = `<div class="agent-block" style="border-left-color:var(--purple)">
       <b style="color:var(--purple)">🛰️ 网络内部 Agent 视角</b>
-      <span class="muted" style="font-size:12px;margin-left:6px">内部发现端点 <code>POST /internal/mcp</code>（信任域内，免 AF 鉴权）：网络 Agent / 网元经它发现并调用第三方工具</span>
+      <span class="muted" style="font-size:12px;margin-left:6px">信任域内（免 AF 鉴权）：注册成功后内网即可<b>发现</b> <code>GET /internal/v1/third-party-capabilities</code> 并<b>反向调用</b> <code>POST /internal/mcp</code></span>
       <div style="margin-top:5px">${res.capabilities.map(c=>`<span class="pill" style="cursor:default">🔧 ${esc(c.id)} · ${esc(c.name)}</span>`).join('')}
+        <button style="font-size:11px;padding:2px 10px" onclick="internalCatalog()">📡 内网发现目录</button>
         <button style="font-size:11px;padding:2px 10px" onclick="internalDiscover()">🔭 模拟内部 Agent 发现并调用</button></div>
+      <div id="internal-cat" class="muted" style="font-size:11px;margin-top:5px"></div>
       <div id="internal-disc" class="muted" style="font-size:11px;margin-top:5px"></div>
     </div>`;
     el.innerHTML = agentView + (bill.total_calls?`<div class="agent-block" style="border-left-color:var(--orange);display:flex;gap:24px;flex-wrap:wrap">
@@ -1184,7 +1310,7 @@ loadMarket();
 
 /* ============ 终端 · AF · NEF 全链路 ============ */
 let termInit = false, termPayResolver = null;
-const TERM_EXAMPLES = ['当前有多少 tool','帮我检测仓库里有没有异常物体','把我的直播流转码卸载到边缘节点','帮我预测早高峰的车流量','追踪这架无人机的位置'];
+const TERM_EXAMPLES = ['帮我检测仓库里有没有异常物体','把我的直播流转码卸载到边缘节点','帮我预测早高峰的车流量','追踪这架无人机的位置','机器狗巡检，雾天也要看得清'];
 function tprint(html, cls){ const sc=$('#term-screen'); const d=document.createElement('div'); if(cls)d.className=cls; d.innerHTML=html; sc.appendChild(d); sc.scrollTop=sc.scrollHeight; return d; }
 const tTerm = t=>tprint('📱 <b>[终端]</b> '+t, 'tl-user');
 const tAf   = t=>tprint('🤖 <b>[AF Agent]</b> '+t, 'tl-agent');

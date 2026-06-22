@@ -126,7 +126,7 @@ CAPABILITIES = [
         id="traffic_flow_sensing", name="车流量感知", category="isac", tier="advanced", icon="🚗",
         description="基于通感一体对城市道路进行车流量实时检测，输出车流密度、车速与拥堵状态",
         params=[
-            CapParam("road_id", "string", "道路标识", required=True),
+            CapParam("area", "string", "检测区域/路段（区域标识或坐标范围）", required=True),
             CapParam("direction", "string", "检测方向", default="both", enum=["both", "inbound", "outbound"]),
             CapParam("interval_min", "integer", "统计间隔（分钟）", default=5),
         ],
@@ -329,7 +329,7 @@ CAPABILITIES = [
         id="traffic_forecast", name="车流量预测分析", category="data", tier="premium", icon="🚦",
         description="基于历史与实时车流感知数据，预测未来时段道路车流量与拥堵概率",
         params=[
-            CapParam("road_id", "string", "道路标识", required=True),
+            CapParam("area", "string", "预测区域/路段（区域标识或坐标范围）", required=True),
             CapParam("horizon_min", "integer", "预测时长（分钟）", default=30),
         ],
         intent_keywords=["车流量预测", "预测", "车流", "早高峰", "晚高峰"],

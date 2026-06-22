@@ -85,8 +85,10 @@ pytest -q
 
 - **注册即签发 Key**：`POST /api/v1/register` 立即返回 API Key；订阅只记录权益（entitlement）。
 - **认证 ≠ 授权**：未订阅 / 等级不足时身份认证通过但授权失败，返回 402（可订阅 / 升级 / 按次支付三条合法化路径）。
-- **CAPIF 鉴权流水线**：每次 API/MCP/意图/场景调用都逐级执行 7 级鉴权（依据 3GPP CAPIF，AEF 对 API Invoker 鉴权），前端逐级点亮，未授权时在「授权判定」级变红。
-- **路由分发表**（`GET /api/v1/dispatch-table`）：化解「NEF 是 tool 粒度、后台只实现到场景粒度」的错配——NEF 只把后台声明过的 `service_id` 转发出去（带显式请求信封），没实现的 tool 由 NEF 参考回显兜底，后台不会收到看不懂的请求。
+- **CAPIF 鉴权流水线**：每次 API/MCP/意图/场景调用都逐级执行 6 步鉴权（取出凭证→校验密钥→识别身份→检查接口权限→判定能力授权→记录审计；依据 3GPP CAPIF，AEF 对 API Invoker 鉴权），前端逐级点亮，未授权时在「授权判定」步变红。鉴权只在调用发生时展示，不在订阅页常驻。
+- **调用去向**（路由判定，后端 `GET /api/v1/dispatch-table`）：化解「NEF 是 tool 粒度、后台只实现到场景粒度」的错配——命中后台声明过的 `service_id` 才经 NEF 出向网关转发（带显式请求信封），其余由 NEF 网元直接执行（参考实现），后台不会收到看不懂的请求。每次调用的鉴权回执末尾内联展示这一行。
+- **两道意图鉴权**：第一道在 NEF 受理时按套餐/等级判定「意图受理资格」（免费裸账号不能发起意图——一条意图会触发网络侧多步编排，开销大）；第二道（逐能力鉴权）由网络侧 Planning Agent 在执行过程中进行（**当前为 NEF 模拟占位，待网络侧 PA 接入后替换**）。
+- **场景/Pipeline 参数**：场景套餐与自助 Pipeline 一键运行时按主用例**预填逼真默认参数**（如 `area`），可在表单中修改；留空则用默认，调用始终带着像样的参数转发。
 - **标准结果信封**：每次调用返回 `summary`（一行业务结论）+ `metrics`（关键指标）+ `result`（原始数据）+ `nef_auth`（鉴权回执）+ `billing`（按需）。
 - **两个 MCP Server**：`/mcp`（对外，AF 的 AI Agent，Bearer 鉴权）与 `/internal/mcp`（对内，网络 Agent/网元，信任域内免 AF 鉴权，用于发现并反向调用第三方能力）。
 - **能力分层**：`tier` = basic / advanced / premium；账号等级 `PLAN_TIERS` 决定免订阅可用的层级。
@@ -97,6 +99,28 @@ pytest -q
 claude mcp add --transport http nef http://localhost:8000/mcp \
   --header "Authorization: Bearer <你的 api_key>"
 ```
+
+### AF Agent 如何把用户的话变成 NEF 调用（规则 / 可选 LLM）
+
+「AF 智能终端」演示的是这条链路：**终端用户**用自然语言找 AF 办事 → AF 的 AI Agent 理解意图 → 以 **tool 调用**方式调 NEF 能力 → 把结果答复用户。AF Agent 只负责「理解意图 + 选对工具」，它**不**自己实现网络能力。
+
+规划端点 `POST /api/v1/af-agent/plan` 有两档实现，默认规则、可选 LLM：
+
+1. **规则规划（默认，零依赖）**：按能力的 `intent_keywords` 做关键词匹配选工具，演示稳定、不依赖外网。
+2. **LLM 规划（可选）**：配置环境变量后启用，把 NEF 的 `tools/list`（每个工具的 `name` + `description` + `inputSchema`）作为 **function-calling 的函数清单**喂给模型，由模型决定调哪个工具、填什么参数——这正是「让 LLM 理解并适配」的标准做法：模型不需要懂网络，只需读懂工具描述与入参 schema。
+
+启用 LLM 规划：
+
+```bash
+pip install anthropic
+# Windows PowerShell：
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+# 然后正常启动 server.py
+```
+
+未安装 `anthropic` 或未设 `ANTHROPIC_API_KEY` 时自动回落到规则规划（演示不会因缺 Key 而失败）。响应里的 `mode` 字段标明本次走的是 `rule` / `llm` / `meta`（元查询，如「有哪些能力」直接作答）。
+
+> 真实对接网络侧时，意图的语义解析与工具编排由**网络侧 Planning Agent**负责（见上文「两道意图鉴权」）；本仓库的 AF Agent 规划是 **AF 侧**把用户话术映射到 NEF 工具的轻量实现，二者分属 AF 域与网络域。
 
 ---
 

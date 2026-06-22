@@ -387,10 +387,11 @@ def list_packages():
 
 
 # ===== 场景级一键调用（一个请求跑完整场景，网络内部 Agent 编排并回传执行轨迹） =====
-def _scenario_run(pkg, key, rec, channel: str):
+def _scenario_run(pkg, key, rec, channel: str, params: dict | None = None):
     pipeline = _capif_pipeline(key, rec, scope="capabilities:invoke", entitled=True, cap=None)
     request_id = pipeline["request_id"]
-    dispatch = _dispatch("scenario", pkg["id"], {}, request_id)
+    run_params = _fill_demo_params(pkg["capabilities"], params)
+    dispatch = _dispatch("scenario", pkg["id"], run_params, request_id)
     auth = _nef_auth(key, rec, "capabilities:invoke", pipeline, dispatch)
     task_id = "partner_task_" + uuid.uuid4().hex[:12]
     steps, n = [], 0
@@ -416,7 +417,7 @@ def _scenario_run(pkg, key, rec, channel: str):
          "detail": f"CAPIF 流水线 7 级通过，账号 {rec['account']} 已订阅场景「{pkg['name']}」"},
         {"stage": "nef_accept", "label": "NEF 受理",
          "detail": f"场景调用（{channel}）已受理，审计请求 ID {request_id}"},
-        {"stage": "partner_route", "label": "路由判定 · 转交网络 Agent",
+        {"stage": "partner_route", "label": "调用去向 · 转交网络 Agent",
          "detail": route_detail},
         {"stage": "partner_execute", "label": "网络内部编排执行",
          "detail": f"网络内部 Network Agent 按场景 Skill 编排 {len(steps)} 个步骤并执行"},
@@ -425,7 +426,7 @@ def _scenario_run(pkg, key, rec, channel: str):
     ]
     return {
         "scenario_id": pkg["id"], "scenario": pkg["name"],
-        "status": "completed", "task_id": task_id,
+        "status": "completed", "task_id": task_id, "params": run_params,
         "partner_agent": "网络内部 Network Agent",
         "auth": auth, "dispatch": dispatch, "pipeline": biz_pipeline,
         "execution_trace": steps,
@@ -435,14 +436,19 @@ def _scenario_run(pkg, key, rec, channel: str):
 
 
 @app.post("/api/v1/scenarios/{pkg_id}/run")
-def run_scenario(pkg_id: str, authorization: str = Header(None)):
+async def run_scenario(pkg_id: str, request: Request, authorization: str = Header(None)):
     key, rec = _auth(authorization, required_scope="capabilities:invoke")
     pkg = PKG_INDEX.get(pkg_id)
     if not pkg:
         raise HTTPException(404, f"场景 {pkg_id} 不存在")
     if pkg_id not in rec["packages"]:
         raise HTTPException(403, f"账号 {rec['account']} 未订阅场景套餐 {pkg_id}")
-    return _scenario_run(pkg, key, rec, channel="REST")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    params = body.get("params", body) if isinstance(body, dict) else {}
+    return _scenario_run(pkg, key, rec, channel="REST", params=params)
 
 
 @app.get("/api/v1/packages/{pkg_id}/skill")
@@ -568,10 +574,11 @@ def intent(req: IntentReq, authorization: str = Header(None)):
                   or bool(rec["subscriptions"]) or bool(rec["packages"]))
     pipeline = _capif_pipeline(
         key, rec, scope="intent:submit", entitled=can_submit, cap=None,
-        authz_label="受理鉴权",
-        authz_pass_detail="账号具备意图编排权限，准许发起；具体能力由网络侧 Planning Agent 在执行中逐项鉴权",
-        authz_deny_detail="免费套餐不支持意图编排（意图触发网络侧多步编排，开销较大）。"
-                          "请升级 PRO/MAX 或订阅能力/套餐；也可改用 API/MCP 单能力直调")
+        authz_label="意图受理资格",
+        authz_pass_detail="账号具备意图受理资格（PRO/MAX 或已订阅能力/套餐），准许发起；"
+                          "具体能用哪些能力，由网络侧 Planning Agent 在执行中逐项鉴权",
+        authz_deny_detail="免费裸账号不能发起意图：一条意图会触发网络侧多步编排，开销较大。"
+                          "请升级 PRO/MAX 或先订阅任意能力/套餐；也可改用 API/MCP 单能力直调")
     request_id = pipeline["request_id"]
     auth = _auth_evidence(key, rec, "intent:submit", request_id)
     auth["pipeline"] = pipeline["stages"]
@@ -582,10 +589,10 @@ def intent(req: IntentReq, authorization: str = Header(None)):
             "submitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "auth": auth,
             "pipeline": [{"stage": "auth_verify", "label": "NEF 受理鉴权（第一道）",
-                          "detail": "免费套餐不支持意图编排，NEF 未受理"}],
+                          "detail": "免费裸账号无意图受理资格，NEF 未受理"}],
             "handoff": {"status": "rejected", "partner_agent": "网络内部 Network Agent",
                         "task_id": None, "status_owner": "nef", "status_endpoint": None,
-                        "message": "免费套餐不支持意图编排，请升级 PRO/MAX 或订阅能力/套餐后重试；"
+                        "message": "免费裸账号不能发起意图，请升级 PRO/MAX 或先订阅任意能力/套餐后重试；"
                                    "也可改用 API 直调 / MCP 单能力调用。"},
         }
     entitled = {c.id for c in CAPABILITIES if c.status == "available" and _entitled(rec, c)}
@@ -733,34 +740,90 @@ def list_pipelines(authorization: str = Header(None)):
     return {"count": len(mine), "pipelines": mine}
 
 
-def _exec_pipeline(pipe):
+def _exec_pipeline(pipe, provided: dict | None = None):
+    provided = provided or {}
     results = []
     for i, cid in enumerate(pipe["steps"], 1):
         cap = CAP_INDEX[cid]
-        params = {p.name: (p.default if p.default is not None else _demo_value(p))
-                  for p in cap.params}
+        params = {p.name: provided.get(p.name, _demo_value(p)) for p in cap.params}
         akey, agent = agent_for_capability(cid)
         results.append({"step": i, "capability": cid, "capability_name": cap.name,
                         "agent": agent["name"], "params": params,
                         "result": invoke_stub(cid, params)})
-    return {"pipeline_id": pipe["id"], "name": pipe["name"],
+    return {"pipeline_id": pipe["id"], "name": pipe["name"], "params": provided,
             "status": "success", "steps_executed": len(results), "results": results}
 
 
 @app.post("/api/v1/pipelines/{pipe_id}/run")
-def run_pipeline(pipe_id: str, authorization: str = Header(None)):
+async def run_pipeline(pipe_id: str, request: Request, authorization: str = Header(None)):
     key, rec = _auth(authorization, required_scope="pipeline:manage")
     pipe = PIPELINES.get(pipe_id)
     if not pipe:
         raise HTTPException(404, f"Pipeline {pipe_id} 不存在")
-    return _exec_pipeline(pipe)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    params = body.get("params", body) if isinstance(body, dict) else {}
+    return _exec_pipeline(pipe, params)
+
+
+# 演示用的逼真默认值（按参数名）——让"一键运行"也带着像样的参数，而非空跑
+_DEMO_BY_NAME = {
+    "area": "园区A-东门", "fence_area": "园区A-北围栏", "coverage_area": "园区A",
+    "device_id": "imsi-460001234567890", "target_id": "tgt-7788", "task_id": "job-9001",
+    "target_group": "commuter-group-01", "subject": "af-agent-01",
+    "input_ref": "stream://cam-01", "scene_ref": "scene://xr-room-1",
+    "model_ref": "model://fl-base", "agent_image": "af/agent:latest",
+    "twin_id": "twin-campus-01", "cap_name": "我的能力",
+    "endpoint": "https://my-af.example.com/api",
+}
 
 
 def _demo_value(p: CapParam):
+    if p.default is not None:
+        return p.default
     if p.enum:
         return p.enum[0]
+    if p.name in _DEMO_BY_NAME:
+        return _DEMO_BY_NAME[p.name]
     return {"string": "demo_" + p.name, "integer": 1, "number": 1.0,
             "array": [], "boolean": True}.get(p.type, "demo")
+
+
+def _fill_demo_params(cap_ids, provided: dict | None) -> dict:
+    """为一组能力收齐参数：按参数名取并集，已传的优先，缺的用逼真默认值补上。"""
+    provided = provided or {}
+    out = {}
+    for cid in cap_ids:
+        cap = CAP_INDEX.get(cid)
+        if not cap:
+            continue
+        for p in cap.params:
+            if p.name in out:
+                continue
+            out[p.name] = provided.get(p.name, _demo_value(p))
+    return out
+
+
+def _union_input_schema(cap_ids) -> dict:
+    """把一组能力的参数取并集，生成带逼真默认值的 JSON Schema（场景/Pipeline 用）。"""
+    props, required, seen = {}, [], set()
+    for cid in cap_ids:
+        cap = CAP_INDEX.get(cid)
+        if not cap:
+            continue
+        for p in cap.params:
+            if p.name in seen:
+                continue
+            seen.add(p.name)
+            schema = {"type": p.type, "description": p.description, "default": _demo_value(p)}
+            if p.enum:
+                schema["enum"] = p.enum
+            props[p.name] = schema
+            if p.required:
+                required.append(p.name)
+    return {"type": "object", "properties": props, "required": required}
 
 
 # ===== MCP 模拟 =====
@@ -783,13 +846,13 @@ def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
         pkg = PKG_INDEX[pid]
         tools.append({"name": f"scenario_{pid}",
                       "description": f"一键运行场景「{pkg['name']}」：{pkg['description']}（网络内部 Agent 编排执行并回传执行轨迹）",
-                      "inputSchema": {"type": "object", "properties": {}, "required": []},
+                      "inputSchema": _union_input_schema(pkg["capabilities"]),
                       "subscribed": True})
     for pipe in PIPELINES.values():
         if pipe["owner"] == rec["account"]:
             tools.append({"name": f"pipeline_{pipe['id']}",
                           "description": f"运行自助编排 Pipeline「{pipe['name']}」：按序执行 {' → '.join(pipe['steps'])}",
-                          "inputSchema": {"type": "object", "properties": {}, "required": []},
+                          "inputSchema": _union_input_schema(pipe["steps"]),
                           "subscribed": True})
     return {"jsonrpc": "2.0", "id": (req.id if req else 1), "result": {"tools": tools}}
 
@@ -805,7 +868,7 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
         if not pipe or pipe["owner"] != rec["account"]:
             return {"jsonrpc": "2.0", "id": req.id,
                     "error": {"code": -32001, "message": f"Pipeline 不存在或不属于当前账号: {name}"}}
-        result = _exec_pipeline(pipe)
+        result = _exec_pipeline(pipe, args)
         result["nef_auth"] = _auth_stamp(key, rec, "mcp:tools")
         return {"jsonrpc": "2.0", "id": req.id,
                 "result": {"content": [{"type": "text",
@@ -817,7 +880,7 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
         if not pkg or pid not in rec["packages"]:
             return {"jsonrpc": "2.0", "id": req.id,
                     "error": {"code": -32001, "message": f"未订阅场景 Tool: {name}"}}
-        result = _scenario_run(pkg, key, rec, channel="MCP")
+        result = _scenario_run(pkg, key, rec, channel="MCP", params=args)
         return {"jsonrpc": "2.0", "id": req.id,
                 "result": {"content": [{"type": "text",
                                         "text": _json.dumps(result, ensure_ascii=False, indent=2)}],
@@ -873,7 +936,10 @@ def register_af(req: RegisterAfReq, authorization: str = Header(None)):
     return {"registration_id": cap_id, "name": req.name, "cap_type": req.cap_type,
             "endpoint": req.endpoint, "registered_by": rec["account"],
             "intent_keywords": keywords, "state": "registered",
-            "message": "能力已注册，已出现在能力超市（third_party 标记），可被网络 Agent 发现和调用"}
+            "registered_ts": THIRD_PARTY_META[cap_id]["registered_ts"],
+            "internal_discovery": "GET /internal/v1/third-party-capabilities",
+            "message": "能力已注册，已出现在能力超市（third_party 标记）；"
+                       "内网可经 /internal/v1/third-party-capabilities 发现、经 /internal/mcp 反向调用"}
 
 
 @app.post("/api/v1/third-party/{cap_id}/simulate-call")
@@ -922,6 +988,35 @@ def my_reverse_calls(authorization: str = Header(None)):
 
 
 # ===== 内部发现端点（面向网络内部 Agent / 网元，信任域内免 AF 鉴权） =====
+@app.get("/internal/v1/third-party-capabilities")
+def internal_third_party_catalog(since: float = 0.0):
+    """内网第三方能力发现接口（信任域内，免 AF 鉴权）。
+
+    AF 经 /api/v1/register-af 注册后，NEF 立即在此汇聚其能力，供网络内部
+    Agent / 网元发现：含提供方、端点、定价、注册时间与对应内部承接 Agent。
+    传 since=<unix 秒> 可增量拉取「该时刻之后新注册」的能力（轮询/对账用）。
+    真正调用走 POST /internal/mcp 的 tools/call（经 NEF 出向网关鉴权·计费·审计）。"""
+    items = []
+    for c in THIRD_PARTY:
+        meta = THIRD_PARTY_META.get(c.id, {})
+        ts = meta.get("registered_ts", 0)
+        if ts < since:
+            continue
+        agent_name, agent_color = caller_agent_for(c.id)
+        items.append({
+            "id": c.id, "name": c.name, "description": c.description,
+            "cap_type": meta.get("cap_type"), "owner": meta.get("owner"),
+            "endpoint": meta.get("endpoint"), "unit_price": c.unit_price,
+            "intent_keywords": c.intent_keywords, "registered_ts": ts,
+            "internal_agent": agent_name, "agent_color": agent_color,
+            "invoke_via": "POST /internal/mcp · tools/call",
+        })
+    items.sort(key=lambda x: x["registered_ts"] or 0, reverse=True)
+    return {"server": "6g-nef-internal-discovery", "trust_domain": True,
+            "since": since, "count": len(items), "capabilities": items}
+
+
+
 @app.post("/internal/mcp")
 async def internal_mcp(request: Request):
     """网络内部 Agent 的能力发现与调用入口（第二个 MCP Server，对内）。

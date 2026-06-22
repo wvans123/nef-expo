@@ -57,6 +57,42 @@ def test_subscriber_intent_authorized_per_capability_at_runtime():
     assert st["network_authz"]["authorized_count"] >= 1
 
 
+def test_scenario_run_accepts_params_and_fills_defaults():
+    r = client.post("/api/v1/subscribe", json={"account": "scn_param",
+                                               "capability_ids": [], "package_ids": ["robot_patrol"]})
+    h = {"Authorization": "Bearer " + r.json()["api_key"]}
+    # 传入 area，其余由后端用逼真默认值补齐
+    res = client.post("/api/v1/scenarios/robot_patrol/run",
+                      json={"params": {"area": "变电站-3号院"}}, headers=h).json()
+    assert res["params"]["area"] == "变电站-3号院"
+    assert res["dispatch"]["envelope"]["params"]["area"] == "变电站-3号院"
+    # 未传的必填项被默认值补上，而非缺失
+    assert res["params"].get("input_ref")  # ai_inference 的必填项有默认
+
+
+def test_mcp_scenario_tool_exposes_param_schema():
+    r = client.post("/api/v1/subscribe", json={"account": "scn_sch",
+                                               "capability_ids": [], "package_ids": ["robot_patrol"]})
+    h = {"Authorization": "Bearer " + r.json()["api_key"]}
+    tools = client.post("/api/v1/mcp/tools/list", json={"jsonrpc": "2.0", "id": 1,
+                                                        "method": "tools/list", "params": {}},
+                        headers=h).json()["result"]["tools"]
+    scen = next(t for t in tools if t["name"] == "scenario_robot_patrol")
+    props = scen["inputSchema"]["properties"]
+    assert "area" in props and props["area"].get("default")  # 预填默认值
+
+
+def test_intent_status_carries_pa_placeholder():
+    r = client.post("/api/v1/subscribe", json={"account": "pa_ph",
+                                               "capability_ids": [], "package_ids": ["robot_patrol"]})
+    h = {"Authorization": "Bearer " + r.json()["api_key"]}
+    sub = client.post("/api/v1/intent", json={"text": "机器狗巡检，雾天也要看得清"}, headers=h).json()
+    INTENTS[sub["intent_id"]]["submitted_ts"] -= 6  # 推进到 orchestrating 之后
+    st = client.get(f"/api/v1/intent/{sub['intent_id']}", headers=h).json()
+    assert st["pa"]["integrated"] is False  # 网络侧 PA 尚未对接，当前为模拟占位
+    assert any(s.get("nf_tool") for s in st["pa"]["selected"])  # 标注各 Agent 选用的 NF Tool
+
+
 def test_pipeline_exposed_and_callable_via_mcp():
     r = client.post("/api/v1/subscribe", json={"account": "pipe_af",
                                                "capability_ids": ["target_detection", "ai_inference"],

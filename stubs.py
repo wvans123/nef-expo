@@ -245,7 +245,7 @@ def _sensing_fusion(p):
 
 
 def _traffic_flow_sensing(p):
-    return {"sensing_id": _id("tfs"), "road_id": p.get("road_id", "road_001"),
+    return {"sensing_id": _id("tfs"), "area": p.get("area", "城东快速路-K12"),
             "direction": p.get("direction", "both"),
             "vehicle_count_per_min": random.randint(20, 180),
             "avg_speed_kmh": random.randint(15, 80),
@@ -279,7 +279,7 @@ def _geofencing(p):
 
 def _traffic_forecast(p):
     base = random.randint(60, 150)
-    return {"forecast_id": _id("tfc"), "road_id": p.get("road_id", "road_001"),
+    return {"forecast_id": _id("tfc"), "area": p.get("area", "城东快速路-K12"),
             "horizon_min": p.get("horizon_min", 30),
             "predicted_flow": [{"t_offset_min": i * 10, "vehicles_per_min": base + random.randint(-20, 40)}
                                for i in range(1, (int(p.get("horizon_min", 30) or 30) // 10) + 1)],

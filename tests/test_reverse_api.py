@@ -102,6 +102,30 @@ def test_my_calls_summary():
     assert c["recent_calls"][0]["ts"] >= c["recent_calls"][1]["ts"]
 
 
+def test_internal_rest_discovery_lists_registered_capability():
+    key = _key()
+    cap_id = _register(key, name="路面缺陷识别", keywords=["路面"])
+    cat = client.get("/internal/v1/third-party-capabilities").json()
+    assert cat["server"] == "6g-nef-internal-discovery" and cat["trust_domain"] is True
+    mine = next(c for c in cat["capabilities"] if c["id"] == cap_id)
+    assert mine["owner"] == "af_tester"
+    assert mine["endpoint"] == "https://my-af.com/api/detect"
+    assert mine["internal_agent"]  # 内部承接 Agent 已映射
+    assert mine["invoke_via"].endswith("tools/call")
+
+
+def test_internal_rest_discovery_since_incremental():
+    key = _key()
+    old = _register(key, name="旧能力")
+    cutoff = next(c["registered_ts"] for c in
+                  client.get("/internal/v1/third-party-capabilities").json()["capabilities"]
+                  if c["id"] == old) + 0.001
+    new = _register(key, name="新能力")
+    inc = client.get("/internal/v1/third-party-capabilities", params={"since": cutoff}).json()
+    ids = [c["id"] for c in inc["capabilities"]]
+    assert new in ids and old not in ids
+
+
 def test_intent_is_authenticated_and_handed_to_partner_agent():
     key = _key()   # 已订阅 network_diagnosis
     # 用账号已授权的能力对应的意图，第二道鉴权才会放行转发
