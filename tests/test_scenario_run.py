@@ -17,7 +17,7 @@ def test_packages_featured_first():
     pkgs = client.get("/api/v1/packages").json()["packages"]
     featured = [p["id"] for p in pkgs if p.get("featured")]
     assert featured == [p["id"] for p in pkgs[:len(featured)]]
-    assert len(featured) == 3
+    assert len(featured) == 2  # uav_track 已去主推（无人机改为后续 AF 增值接入）
 
 
 def test_scenario_run_returns_trace_and_auth():

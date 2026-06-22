@@ -65,7 +65,7 @@ def test_simulate_call_creates_ledger_record():
     assert r.status_code == 200
     body = r.json()
     assert body["record"]["trigger"] == "manual"
-    assert body["record"]["caller_agent"] == "Computing Agent"  # ai_model → Computing
+    assert body["record"]["caller_agent"] == "网络侧 Network Agent"  # 统一网络侧 Agent
     assert body["response_payload"]["result"]["provided_by"] == "third_party_af"
 
 
@@ -128,6 +128,7 @@ def test_internal_rest_discovery_since_incremental():
 
 def test_intent_is_authenticated_and_handed_to_partner_agent():
     key = _key()   # 已订阅 network_diagnosis
+    client.post("/api/v1/account/plan", json={"plan": "pro"}, headers=_hdr(key))  # 仅 PRO/MAX 可发意图
     # 用账号已授权的能力对应的意图，第二道鉴权才会放行转发
     r = client.post("/api/v1/intent", json={"text": "帮我诊断一下网络"}, headers=_hdr(key))
     assert r.status_code == 200
@@ -155,6 +156,23 @@ def test_intent_does_not_match_or_execute_local_capabilities():
     # 关键不变量：意图链路绝不直接反向调用第三方能力（无论受理或拒绝）
     assert body["status"] in ("dispatched", "rejected")
     assert cap_id not in registry.REVERSE_CALLS
+
+
+def test_subscriber_of_third_party_has_working_auth_info_and_composer():
+    # 回归：A 注册第三方能力，B 订阅后 auth/info 不再 500，且第三方能力进入可编排池
+    owner = _key("tp_owner_x")
+    cap_id = _register(owner, name="摄像头数据采集", keywords=["摄像头"])
+    r = client.post("/api/v1/subscribe", json={"account": "tp_buyer_x",
+                                               "capability_ids": [cap_id], "package_ids": []})
+    kb = {"Authorization": "Bearer " + r.json()["api_key"]}
+    info = client.get("/api/v1/auth/info", headers=kb)
+    assert info.status_code == 200
+    assert cap_id in info.json()["entitled_capabilities"]  # 可在自助编排中使用
+    # 第三方能力可被编排进 Pipeline 并执行
+    pid = client.post("/api/v1/compose", json={"name": "cam", "steps": [cap_id]},
+                      headers=kb).json()["id"]
+    run = client.post(f"/api/v1/pipelines/{pid}/run", headers=kb).json()
+    assert run["steps_executed"] == 1
 
 
 def test_register_af_blank_name_422():
@@ -188,6 +206,7 @@ def test_mcp_list_marks_subscription():
 
 def test_intent_pipeline_baseline_stages():
     key = _key()   # 订阅 network_diagnosis；"诊断"意图命中它 → 第二道放行
+    client.post("/api/v1/account/plan", json={"plan": "pro"}, headers=_hdr(key))  # 仅 PRO/MAX 可发意图
     r = client.post("/api/v1/intent", json={"text": "帮我诊断一下网络"}, headers=_hdr(key))
     stages = [s["stage"] for s in r.json()["pipeline"]]
     # 第一道在受理时鉴权；第二道（逐能力）改由网络侧 Planning Agent 运行时进行，不在提交流水线里

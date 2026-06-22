@@ -71,13 +71,21 @@ class McpCallReq(BaseModel):
     params: dict = {}
 
 
+class AfParam(BaseModel):
+    name: str
+    type: str = "string"        # string / integer / number / array / object / boolean
+    description: str = ""
+    required: bool = False
+
+
 class RegisterAfReq(BaseModel):
     name: str
-    cap_type: str               # ai_model / tool / data_source
+    cap_type: str = "tool"      # 默认 tool；ai_model / data_source 可选
     description: str = ""
     endpoint: str
     intent_keywords: list[str] = []
     price: str = "0.5/次"
+    params: list[AfParam] = []  # AF 声明自己能力的入参（可选）
 
 
 # ===== 鉴权 =====
@@ -129,12 +137,15 @@ def _auth_stamp(key: str, rec: dict, scope: str) -> dict:
 
 
 def _per_call_price(cap) -> float:
-    """按次价格：从月价推一个演示用单次价"""
+    """按次价格：第三方多为「X/次」直接取单价；网络能力为月价 → 估一个演示用单次价。"""
+    s = str(cap.unit_price)
     try:
-        monthly = float(str(cap.unit_price).split("/")[0])
-        return max(0.5, round(monthly / 20, 1))
+        amt = float(s.split("/")[0].replace("¥", "").strip())
     except ValueError:
         return 0.5
+    if "次" in s:                       # 已是按次价（第三方能力）
+        return round(amt, 2)
+    return max(0.5, round(amt / 20, 1))  # 月价 → 估算按次价
 
 
 def _payment_required_payload(cap, channel: str, pipeline: dict | None = None) -> dict:
@@ -188,6 +199,11 @@ def _result_envelope(cap, payload: dict) -> dict:
     return payload
 
 
+def _any_cap(cid):
+    """跨网络能力与第三方能力查找（第三方在 THIRD_PARTY，不在 CAP_INDEX）。"""
+    return CAP_INDEX.get(cid) or next((c for c in THIRD_PARTY if c.id == cid), None)
+
+
 def _subscribed_caps(rec) -> set:
     caps = set(rec["subscriptions"])
     for pid in rec["packages"]:
@@ -195,13 +211,32 @@ def _subscribed_caps(rec) -> set:
     return caps
 
 
+def _tp_billing_mode(cap) -> str:
+    """第三方能力的计费方式：'monthly'（包月，需订阅）或 'per_call'（按次，随调随付）。
+    由注册时的价格单位推断（X/月 → 包月；X/次 → 按次）。"""
+    meta = THIRD_PARTY_META.get(cap.id, {})
+    if meta.get("billing_mode"):
+        return meta["billing_mode"]
+    return "monthly" if "/月" in str(cap.unit_price) else "per_call"
+
+
 def _entitled(rec, cap) -> bool:
-    """授权判定：已订阅，或账号等级（pro/max）覆盖该能力层级，或第三方能力"""
+    """授权判定：已订阅，或账号等级（pro/max）覆盖该能力层级，或第三方按次能力（随调随付）"""
     if cap.source == "third_party":
-        return True
+        # 按次：随调随付，无需预订阅；包月：需先订阅
+        if _tp_billing_mode(cap) == "per_call":
+            return True
+        return cap.id in _subscribed_caps(rec)
     if cap.id in _subscribed_caps(rec):
         return True
     return cap.tier in PLAN_TIERS.get(rec.get("plan", "free"), set())
+
+
+def _intent_eligible(rec) -> bool:
+    """意图受理资格（authorize 级，区别于 intent:submit 这个接口级 scope）：
+    仅 PRO/MAX 账号可发起意图——一条意图会触发网络侧多步编排，属高价值/高开销特性，
+    不随小额单能力订阅解锁。单能力可走 API/MCP 直调。intent 第一道闸与本判定同源。"""
+    return rec.get("plan", "free") in ("pro", "max")
 
 
 # ===== 路由分发：化解 tool 粒度 ↔ 后台场景粒度 的错配 =====
@@ -210,32 +245,53 @@ def _entitled(rec, cap) -> bool:
 # 后台只会收到自己注册过的 service_id，靠它无歧义分发，不会收到"看不懂的 tool 请求"。
 BACKEND_SERVICES = {
     "robot_patrol": "机器狗巡检-感知融合",
-    "traffic_forecast_pkg": "城市车流量预测",
-    "uav_track": "无人机识别追踪",
+    "traffic_forecast_pkg": "城市车流量测量",
+    "uav_track": "目标识别与跟踪",
 }
+
+
+def _sbi_target_for(cap_id: str) -> dict | None:
+    """tool 级调用的落地去向：网络能力 → 承接 Agent + 其经由的 SBI 接口；
+    第三方能力 → NEF 出向网关反向调用 AF 端点。供前端「调用去向」展示。"""
+    cap = _any_cap(cap_id)
+    if not cap:
+        return None
+    if cap.source == "third_party":
+        ep = THIRD_PARTY_META.get(cap_id, {}).get("endpoint", "(AF endpoint)")
+        return {"kind": "af_endpoint", "interfaces": [ep],
+                "note": "第三方能力：NEF 经出向网关反向调用 AF 端点"}
+    _, agent = agent_for_capability(cap_id)
+    # 单 tool 直调：NEF 直接经标准 3GPP SBI 接口调用对应网络功能(NF)，无中间转交
+    sbi = sorted({t["sbi"] for t in agent["nf_tools"]})
+    return {"kind": "sbi", "interfaces": sbi[:3],
+            "note": "NEF 鉴权后直接经标准 SBI 接口调用对应网络功能(NF)"}
 
 
 def _dispatch(kind: str, ident: str, params: dict | None = None, request_id: str = "") -> dict:
     """NEF 分发判定。kind: 'tool' | 'scenario'。
     返回落地目标 + 转发请求信封（后台靠 service_id 分发，无歧义）。"""
     if kind == "scenario" and ident in BACKEND_SERVICES:
-        return {
+        out = {
             "target": "backend", "service_id": ident, "tool_id": None,
             "backend_name": BACKEND_SERVICES[ident],
             "note": f"命中后台 service_id「{ident}」→ NEF 出向转发并回传业务结果",
             "envelope": {"request_id": request_id, "service_id": ident,
                          "tool_id": None, "params": params or {}},
         }
-    return {
-        "target": "nef-ref",
-        "service_id": ident if kind == "scenario" else None,
-        "tool_id": ident if kind == "tool" else None,
-        "backend_name": None,
-        "note": "后台未声明实现 → NEF 参考回显（mock）；真实业务按契约接入即替换",
-        "envelope": {"request_id": request_id,
-                     "service_id": ident if kind == "scenario" else None,
-                     "tool_id": ident if kind == "tool" else None, "params": params or {}},
-    }
+    else:
+        out = {
+            "target": "nef-ref",
+            "service_id": ident if kind == "scenario" else None,
+            "tool_id": ident if kind == "tool" else None,
+            "backend_name": None,
+            "note": "后台未声明实现 → NEF 参考回显（mock）；真实业务按契约接入即替换",
+            "envelope": {"request_id": request_id,
+                         "service_id": ident if kind == "scenario" else None,
+                         "tool_id": ident if kind == "tool" else None, "params": params or {}},
+        }
+    if kind == "tool":
+        out["sbi_target"] = _sbi_target_for(ident)
+    return out
 
 
 # ===== NEF 鉴权流水线（每次调用都逐级执行；用大白话讲得清） =====
@@ -283,13 +339,13 @@ def _capif_pipeline(key, rec, *, scope, scope_ok=True, entitled=True, paid=False
 
 
 def _nef_auth(key, rec, scope, pipeline, dispatch=None) -> dict:
-    """挂在调用结果上的 NEF 鉴权回执：精简 stamp + 流水线 + 配额 + 路由（保留旧字段兼容）。"""
+    """挂在调用结果上的 NEF 鉴权回执：精简 stamp + 流水线 + （tool 级）SBI 落地去向。
+    对 AF 只暴露「鉴权 + 落到哪个 SBI 接口」，不暴露后台 service_id / mock 回显等内部编排细节。"""
     out = {**_auth_stamp(key, rec, scope),
            "request_id": pipeline["request_id"], "decision": pipeline["decision"],
            "pipeline": pipeline["stages"]}
-    if dispatch:
-        out["dispatch"] = {"target": dispatch["target"], "service_id": dispatch["service_id"],
-                           "backend_name": dispatch.get("backend_name"), "note": dispatch["note"]}
+    if dispatch and dispatch.get("sbi_target"):
+        out["sbi_target"] = dispatch["sbi_target"]
     return out
 
 
@@ -367,10 +423,15 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
     dispatch = _dispatch("tool", cap_id, params, request_id)
     result = _result_envelope(cap, invoke_stub(cap_id, params))
     # 调用成功后才计费（按次）
-    if not entitled and confirm_pay:
+    if cap.source == "third_party" and _tp_billing_mode(cap) == "per_call":
+        # 第三方按次能力：每次调用都向调用方计费，并给提供方记一笔分成收益（包月已订阅则不按次扣）
+        per_call_fee = _bill_per_call(rec, cap, request_id)
+        record_reverse_call(cap.id, trigger="north_invoke",
+                            trigger_detail=f"北向调用 · 账号 {rec['account']}",
+                            caller=f"AF {rec['account']}", fee=per_call_fee)
+    elif not entitled and confirm_pay:
         per_call_fee = _bill_per_call(rec, cap, request_id)
     result["nef_auth"] = _nef_auth(key, rec, "capabilities:invoke", pipeline, dispatch)
-    result["routing"] = dispatch
     if per_call_fee is not None:
         result["billing"] = {"mode": "per_call", "charged": per_call_fee,
                              "message": f"按次计费 ¥{per_call_fee}，已记入账号 {rec['account']} 账单"}
@@ -533,7 +594,10 @@ def auth_info(authorization: str = Header(None)):
     caps = sorted(_subscribed_caps(rec))
     est = 0.0
     for cid in rec["subscriptions"]:
-        price = CAP_INDEX[cid].unit_price
+        cap = _any_cap(cid)
+        if not cap:
+            continue
+        price = cap.unit_price
         if "/月" in price:
             try:
                 est += float(price.split("/")[0])
@@ -548,8 +612,10 @@ def auth_info(authorization: str = Header(None)):
             "estimated_monthly_cost": round(est, 1),
             "plan": rec.get("plan", "free"),
             "plan_included_tiers": sorted(PLAN_TIERS.get(rec.get("plan", "free"), set())),
-            "entitled_capabilities": sorted([c.id for c in CAPABILITIES
-                                             if c.status == "available" and _entitled(rec, c)]),
+            "intent_eligible": _intent_eligible(rec),
+            "entitled_capabilities": sorted(
+                [c.id for c in CAPABILITIES if c.status == "available" and _entitled(rec, c)]
+                + [c.id for c in THIRD_PARTY if c.id in rec["subscriptions"]]),
             "per_call_charges": {
                 "count": len(PER_CALL_BILLS.get(rec["account"], [])),
                 "total": round(sum(b["price"] for b in PER_CALL_BILLS.get(rec["account"], [])), 2),
@@ -570,15 +636,14 @@ def intent(req: IntentReq, authorization: str = Header(None)):
     # 免费且无任何订阅的账号不支持意图编排（会触发网络侧多步编排，开销大）；
     # PRO/MAX 或已订阅能力/套餐的账号可发起。具体能用哪些 tool 留给第二道——
     # 由网络侧 Planning Agent 在执行过程中逐能力鉴权并反馈。
-    can_submit = (rec.get("plan", "free") in ("pro", "max")
-                  or bool(rec["subscriptions"]) or bool(rec["packages"]))
+    can_submit = _intent_eligible(rec)
     pipeline = _capif_pipeline(
         key, rec, scope="intent:submit", entitled=can_submit, cap=None,
         authz_label="意图受理资格",
-        authz_pass_detail="账号具备意图受理资格（PRO/MAX 或已订阅能力/套餐），准许发起；"
+        authz_pass_detail="账号为 PRO/MAX，具备意图受理资格，准许发起；"
                           "具体能用哪些能力，由网络侧 Planning Agent 在执行中逐项鉴权",
-        authz_deny_detail="免费裸账号不能发起意图：一条意图会触发网络侧多步编排，开销较大。"
-                          "请升级 PRO/MAX 或先订阅任意能力/套餐；也可改用 API/MCP 单能力直调")
+        authz_deny_detail="仅 PRO/MAX 可发起意图：一条意图会触发网络侧多步编排，属高开销特性。"
+                          "请升级 PRO/MAX；单个能力可改用 API/MCP 直调")
     request_id = pipeline["request_id"]
     auth = _auth_evidence(key, rec, "intent:submit", request_id)
     auth["pipeline"] = pipeline["stages"]
@@ -589,11 +654,11 @@ def intent(req: IntentReq, authorization: str = Header(None)):
             "submitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "auth": auth,
             "pipeline": [{"stage": "auth_verify", "label": "NEF 受理鉴权（第一道）",
-                          "detail": "免费裸账号无意图受理资格，NEF 未受理"}],
+                          "detail": "仅 PRO/MAX 具备意图受理资格，当前账号未受理"}],
             "handoff": {"status": "rejected", "partner_agent": "网络内部 Network Agent",
                         "task_id": None, "status_owner": "nef", "status_endpoint": None,
-                        "message": "免费裸账号不能发起意图，请升级 PRO/MAX 或先订阅任意能力/套餐后重试；"
-                                   "也可改用 API 直调 / MCP 单能力调用。"},
+                        "message": "仅 PRO/MAX 可发起意图，请升级账号等级后重试；"
+                                   "单个能力可改用 API 直调 / MCP 调用。"},
         }
     entitled = {c.id for c in CAPABILITIES if c.status == "available" and _entitled(rec, c)}
     entitled |= {c.id for c in THIRD_PARTY}
@@ -720,10 +785,10 @@ def af_agent_plan(req: AfPlanReq, authorization: str = Header(None)):
 @app.post("/api/v1/compose")
 def compose(req: ComposeReq, authorization: str = Header(None)):
     key, rec = _auth(authorization, required_scope="pipeline:manage")
-    bad = [s for s in req.steps if s not in CAP_INDEX]
+    bad = [s for s in req.steps if _any_cap(s) is None]
     if bad:
         raise HTTPException(404, f"能力不存在: {', '.join(bad)}")
-    unauth = [c for c in req.steps if not _entitled(rec, CAP_INDEX[c])]
+    unauth = [c for c in req.steps if not _entitled(rec, _any_cap(c))]
     if unauth:
         raise HTTPException(403, f"未授权能力（未订阅且等级不足）: {', '.join(unauth)}")
     pid = "pipe_" + uuid.uuid4().hex[:8]
@@ -744,11 +809,15 @@ def _exec_pipeline(pipe, provided: dict | None = None):
     provided = provided or {}
     results = []
     for i, cid in enumerate(pipe["steps"], 1):
-        cap = CAP_INDEX[cid]
+        cap = _any_cap(cid)
         params = {p.name: provided.get(p.name, _demo_value(p)) for p in cap.params}
-        akey, agent = agent_for_capability(cid)
+        if cap.source == "third_party":
+            agent_name = "第三方 AF 能力"
+        else:
+            _, agent = agent_for_capability(cid)
+            agent_name = agent["name"]
         results.append({"step": i, "capability": cid, "capability_name": cap.name,
-                        "agent": agent["name"], "params": params,
+                        "agent": agent_name, "params": params,
                         "result": invoke_stub(cid, params)})
     return {"pipeline_id": pipe["id"], "name": pipe["name"], "params": provided,
             "status": "success", "steps_executed": len(results), "results": results}
@@ -765,7 +834,13 @@ async def run_pipeline(pipe_id: str, request: Request, authorization: str = Head
     except Exception:
         body = {}
     params = body.get("params", body) if isinstance(body, dict) else {}
-    return _exec_pipeline(pipe, params)
+    # 与单能力调用一致：先过 CAPIF 鉴权流水线，再执行，并把鉴权回执挂上（供前端「调用去向」展示）
+    pipeline = _capif_pipeline(key, rec, scope="pipeline:manage", entitled=True, cap=None,
+                               authz_label="判定 Pipeline 授权",
+                               authz_pass_detail=f"账号已获 Pipeline「{pipe['name']}」全部步骤授权（创建时已逐能力校验）")
+    result = _exec_pipeline(pipe, params)
+    result["nef_auth"] = _nef_auth(key, rec, "pipeline:manage", pipeline)
+    return result
 
 
 # 演示用的逼真默认值（按参数名）——让"一键运行"也带着像样的参数，而非空跑
@@ -903,10 +978,14 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
                            "isError": False, "payment_required": True}}
     dispatch = _dispatch("tool", name, args, request_id)
     result = _result_envelope(cap, invoke_stub(name, args))
-    if not entitled and confirm_pay:   # 调用成功后才计费
+    if cap.source == "third_party" and _tp_billing_mode(cap) == "per_call":   # 第三方按次计费 + 提供方分成
+        per_call_fee = _bill_per_call(rec, cap, request_id)
+        record_reverse_call(cap.id, trigger="north_invoke",
+                            trigger_detail=f"北向调用(MCP) · 账号 {rec['account']}",
+                            caller=f"AF {rec['account']}", fee=per_call_fee)
+    elif not entitled and confirm_pay:   # 调用成功后才计费
         per_call_fee = _bill_per_call(rec, cap, request_id)
     result["nef_auth"] = _nef_auth(key, rec, "mcp:tools", pipeline, dispatch)
-    result["routing"] = dispatch
     if per_call_fee is not None:
         result["billing"] = {"mode": "per_call", "charged": per_call_fee,
                              "message": f"按次计费 ¥{per_call_fee}，已记入账号 {rec['account']} 账单"}
@@ -924,21 +1003,33 @@ def register_af(req: RegisterAfReq, authorization: str = Header(None)):
         raise HTTPException(422, "能力名称不能为空")
     cap_id = "tp_" + uuid.uuid4().hex[:8]
     keywords = [k.strip() for k in req.intent_keywords if k.strip()] or [req.name.strip()]
+    # AF 声明的入参（可选）；未声明则给一个透传 payload 兜底
+    if req.params:
+        cap_params = [CapParam(p.name.strip(), p.type or "string",
+                               p.description or p.name.strip(), required=bool(p.required))
+                      for p in req.params if p.name.strip()]
+    else:
+        cap_params = [CapParam("payload", "object", "透传给第三方端点的参数")]
     cap = Capability(
         id=cap_id, name=req.name, description=req.description or f"第三方能力（{req.cap_type}）",
-        category="ecosystem", tier="basic",
-        params=[CapParam("payload", "object", "透传给第三方端点的参数")],
+        category="ecosystem", tier="basic", params=cap_params,
         intent_keywords=keywords, unit_price=(req.price.strip() or "0.5/次"), source="third_party",
     )
+    billing_mode = "monthly" if "/月" in (req.price or "") else "per_call"
     THIRD_PARTY.append(cap)
     THIRD_PARTY_META[cap_id] = {"cap_type": req.cap_type, "endpoint": req.endpoint,
-                                "owner": rec["account"], "registered_ts": time.time()}
+                                "owner": rec["account"], "registered_ts": time.time(),
+                                "billing_mode": billing_mode}
+    bill_txt = ("包月订阅（其他 AF 需先订阅，按月计费）" if billing_mode == "monthly"
+                else "按次订阅（其他 AF 随调随付，按次计费并与你分成）")
     return {"registration_id": cap_id, "name": req.name, "cap_type": req.cap_type,
             "endpoint": req.endpoint, "registered_by": rec["account"],
+            "params": [p.to_dict() for p in cap_params],
+            "price": cap.unit_price, "billing_mode": billing_mode,
             "intent_keywords": keywords, "state": "registered",
             "registered_ts": THIRD_PARTY_META[cap_id]["registered_ts"],
             "internal_discovery": "GET /internal/v1/third-party-capabilities",
-            "message": "能力已注册，已出现在能力超市（third_party 标记）；"
+            "message": f"能力已注册（{bill_txt}），已出现在能力超市（third_party 标记）；"
                        "内网可经 /internal/v1/third-party-capabilities 发现、经 /internal/mcp 反向调用"}
 
 
@@ -1049,13 +1140,13 @@ async def internal_mcp(request: Request):
     if method == "tools/call":
         params = body.get("params", {})
         name, args = params.get("name"), params.get("arguments", {})
-        caller = args.pop("_caller", "Network Agent")
+        caller = args.pop("_caller", "网络侧 Network Agent")
         meta = THIRD_PARTY_META.get(name)
         if not meta:
             return {"jsonrpc": "2.0", "id": rid,
                     "error": {"code": -32602, "message": f"第三方能力不存在: {name}"}}
         record = record_reverse_call(name, trigger="internal_mcp",
-                                     trigger_detail=f"内部发现调用 · {caller}")
+                                     trigger_detail=f"内部发现调用 · {caller}", caller=caller)
         result = invoke_stub(name, args)
         result["reverse_call"] = {"via": "NEF 出向网关", "caller_agent": record["caller_agent"],
                                   "latency_ms": record["latency_ms"], "fee": record["fee"]}

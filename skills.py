@@ -69,10 +69,12 @@ class Capability:
 
 CATEGORIES = {
     "isac": {"name": "通感一体 ISAC", "color": "#ff9e3d"},
+    "ai": {"name": "AI 服务 AIaaS", "color": "#d264ff"},
     "computing": {"name": "通算一体 Computing", "color": "#bc8cff"},
     "connectivity": {"name": "连接服务 Connectivity", "color": "#58a6ff"},
     "location": {"name": "定位服务 Location", "color": "#39d2c0"},
     "data": {"name": "数据服务 Data", "color": "#3fb950"},
+    "security": {"name": "安全·身份 Security", "color": "#f7768e"},
     "ecosystem": {"name": "生态服务 Ecosystem", "color": "#6e7bf2"},
 }
 
@@ -115,8 +117,10 @@ CAPABILITIES = [
         id="sensing_fusion", name="多源感知融合", category="isac", tier="premium", icon="🌐",
         description="将 3GPP 无线感知与非 3GPP 数据（摄像头/激光雷达/红外）融合处理，输出全天候高置信感知结果",
         params=[
-            CapParam("area", "string", "融合感知区域", required=True),
-            CapParam("sources", "array", "数据源列表", default=["3gpp_radio", "camera", "lidar"]),
+            CapParam("area", "string", "融合感知区域（区域标识或坐标范围）", required=True),
+            CapParam("data_sources", "array",
+                     "参与融合的数据源列表，每项 {type, data_id}：type 可为 camera / sensing / 其他，data_id 标识具体数据流（可来自 AF 注册的第三方数据能力）。默认仅 camera，可叠加 sensing 等",
+                     default=[{"type": "camera", "data_id": "cam-default"}]),
             CapParam("fusion_mode", "string", "融合模式", default="realtime", enum=["realtime", "batch"]),
         ],
         intent_keywords=["感知融合", "融合", "雾天", "看得清", "机器狗", "非3gpp", "全天候"],
@@ -143,6 +147,18 @@ CAPABILITIES = [
                description="无线感知驱动的手势与人体姿态识别（规划中）",
                params=[CapParam("area", "string", "识别区域", required=True)],
                intent_keywords=["手势", "姿态识别"]),
+    Capability(
+        id="sensing_fence", name="感知虚拟围栏", category="isac", tier="advanced", icon="🚧",
+        description="基于无线感知的虚拟周界：无需终端配合，对设定区域内任意闯入目标（人/车/无人机）实时检测并告警",
+        params=[
+            CapParam("area", "string", "围栏区域（区域标识或坐标范围）", required=True),
+            CapParam("object_types", "array", "关注目标类型", default=["person", "vehicle", "uav"]),
+            CapParam("sensitivity", "string", "检测灵敏度", default="medium", enum=["low", "medium", "high"]),
+        ],
+        intent_keywords=["虚拟围栏", "周界", "闯入", "入侵检测", "无设备围栏", "电子围栏"],
+        unit_price="39.9/月",
+    ),
+    # ===== AI 服务 AIaaS（6G AI 原生：模型推理 / 联邦学习 / 智能体托管 / 网络智能分析）=====
     # ===== 通算一体 Computing =====
     Capability(
         id="compute_offload", name="计算卸载", category="computing", tier="basic", icon="⚡",
@@ -157,14 +173,14 @@ CAPABILITIES = [
         unit_price="29.9/月",
     ),
     Capability(
-        id="ai_inference", name="AI推理服务", category="computing", tier="advanced", icon="🧠",
-        description="调用网络侧已部署的AI模型进行实时推理",
+        id="ai_inference", name="AI推理服务", category="ai", tier="advanced", icon="🧠",
+        description="调用网络侧已部署的通用AI模型进行实时推理（行业专用模型可由 AF 经双向开放注册）",
         params=[
-            CapParam("model", "string", "模型名称", required=True, enum=["yolo-v9-edge", "defect-detect-v2", "llm-7b-net", "asr-stream"]),
+            CapParam("model", "string", "模型名称", required=True, enum=["yolo-v9-edge", "resnet50-classify", "llm-7b-net", "asr-stream"]),
             CapParam("input_ref", "string", "输入数据引用（URL 或数据流 ID）", required=True),
             CapParam("max_latency_ms", "integer", "最大可接受推理时延", default=100),
         ],
-        intent_keywords=["推理", "AI", "模型", "智能分析", "图像识别", "缺陷", "质检"],
+        intent_keywords=["推理", "AI", "模型", "智能分析", "图像识别"],
         unit_price="49.9/月",
     ),
     Capability(
@@ -190,12 +206,12 @@ CAPABILITIES = [
         intent_keywords=["算力QoS", "算力保障", "卡顿", "计算保障", "算力优先级", "不卡"],
         unit_price="39.9/月",
     ),
-    Capability(id="edge_agent_hosting", name="边缘智能体托管", category="computing", tier="premium", icon="🤖",
+    Capability(id="edge_agent_hosting", name="边缘智能体托管", category="ai", tier="premium", icon="🤖",
                status="planned", unit_price="规划中",
                description="将 AF 的 AI Agent 托管到网络边缘运行，贴近数据与用户（规划中）",
                params=[CapParam("agent_image", "string", "Agent 镜像引用", required=True)],
                intent_keywords=["托管", "智能体托管"]),
-    Capability(id="federated_learning", name="联邦学习编排", category="computing", tier="premium", icon="🤝",
+    Capability(id="federated_learning", name="联邦学习编排", category="ai", tier="premium", icon="🤝",
                status="planned", unit_price="规划中",
                description="跨终端/边缘节点的联邦学习任务编排与聚合（规划中）",
                params=[CapParam("model_ref", "string", "模型引用", required=True)],
@@ -316,7 +332,7 @@ CAPABILITIES = [
         unit_price="9.9/月",
     ),
     Capability(
-        id="network_analytics", name="网络分析", category="data", tier="premium", icon="📈",
+        id="network_analytics", name="网络智能分析", category="ai", tier="premium", icon="📈",
         description="AI 驱动的网络智能分析（异常检测、容量预测等）",
         params=[
             CapParam("analytics_type", "string", "分析类型", required=True, enum=["anomaly_detection", "capacity_forecast", "ue_behavior", "service_experience"]),
@@ -326,7 +342,7 @@ CAPABILITIES = [
         unit_price="79.9/月",
     ),
     Capability(
-        id="traffic_forecast", name="车流量预测分析", category="data", tier="premium", icon="🚦",
+        id="traffic_forecast", name="车流量预测分析", category="isac", tier="premium", icon="🚦",
         description="基于历史与实时车流感知数据，预测未来时段道路车流量与拥堵概率",
         params=[
             CapParam("area", "string", "预测区域/路段（区域标识或坐标范围）", required=True),
@@ -340,17 +356,30 @@ CAPABILITIES = [
                description="向城市/园区数字孪生平台持续供给网络感知数据（规划中）",
                params=[CapParam("twin_id", "string", "孪生体标识", required=True)],
                intent_keywords=["数字孪生底座"]),
-    # ===== 生态服务 Ecosystem =====
+    # ===== 安全·身份 Security（应用/Agent 级身份与安全态势）=====
     Capability(
-        id="security_check", name="安全检查", category="ecosystem", tier="basic", icon="🛡️",
-        description="对设备/连接进行安全状态检查",
+        id="identity_service", name="应用身份服务", category="security", tier="advanced", icon="🪪",
+        description="为 AF 应用/Agent 颁发网络级数字身份与应用密钥（对应 5G AKMA TS 33.535 与 CAPIF API Invoker onboarding），用于跨域互认与安全调用",
         params=[
-            CapParam("target_id", "string", "检查对象（设备/连接 ID）", required=True),
-            CapParam("check_level", "string", "检查级别", default="standard", enum=["quick", "standard", "deep"]),
+            CapParam("subject", "string", "申请主体（Agent/应用名称）", required=True),
+            CapParam("key_lifetime_h", "integer", "应用密钥有效期（小时）", default=24),
+            CapParam("validity_days", "integer", "身份凭证有效期（天）", default=365),
         ],
-        intent_keywords=["安全", "风险", "漏洞", "检查", "合规"],
+        intent_keywords=["身份", "凭证", "认证", "数字身份", "Agent身份", "AKMA", "应用密钥"],
+        unit_price="19.9/月",
+    ),
+    Capability(
+        id="security_posture", name="连接安全态势", category="security", tier="basic", icon="🛡️",
+        description="基于网络侧异常行为分析（NWDAF Abnormal behaviour，TS 23.288）评估设备/连接的安全态势，输出风险评分与处置建议",
+        params=[
+            CapParam("target_id", "string", "评估对象（设备/连接 ID）", required=True),
+            CapParam("window_h", "integer", "分析时间窗口（小时）", default=24),
+            CapParam("depth", "string", "评估深度", default="standard", enum=["quick", "standard", "deep"]),
+        ],
+        intent_keywords=["安全", "风险", "异常", "态势", "可信", "合规"],
         unit_price="免费",
     ),
+    # ===== 生态服务 Ecosystem（双向开放的平台经济：注册 + 分账结算）=====
     Capability(
         id="capability_register", name="能力注册", category="ecosystem", tier="premium", icon="🔗",
         description="将第三方能力注册到网络（双向开放）",
@@ -361,16 +390,6 @@ CAPABILITIES = [
         ],
         intent_keywords=["注册", "接入", "开放", "我的能力", "第三方"],
         unit_price="企业专属",
-    ),
-    Capability(
-        id="identity_service", name="身份服务", category="ecosystem", tier="advanced", icon="🪪",
-        description="为 Agent/应用颁发网络数字身份",
-        params=[
-            CapParam("subject", "string", "申请主体（Agent/应用名称）", required=True),
-            CapParam("validity_days", "integer", "有效期（天）", default=365),
-        ],
-        intent_keywords=["身份", "凭证", "认证", "数字身份", "Agent身份"],
-        unit_price="19.9/月",
     ),
     Capability(id="revenue_share", name="生态收益结算", category="ecosystem", tier="advanced", icon="💰",
                status="planned", unit_price="规划中",
@@ -403,7 +422,9 @@ PACKAGES = [
     },
     {
         "id": "embodied_agents", "name": "多智能体具身交互套餐", "price": "129/月",
-        "description": "AR 眼镜与机器狗多智能体协同，渲染与算力卸载到网络边缘",
+        "description": "AR 眼镜画面经云渲染卸载到边缘 GPU（render_offload，按帧率/分辨率回传渲染流）；"
+                       "机器狗侧的感知/模型推理等通用计算经计算卸载到边缘节点（compute_offload，按 CPU/内存调度）——"
+                       "二者分工互补，再配精准定位与 QoS 保障实现多智能体协同",
         "capabilities": ["render_offload", "compute_offload", "precision_location", "qos_guarantee"],
         "scenario": "AR 眼镜 × 机器狗具身智能",
         "story_steps": [
@@ -421,15 +442,15 @@ PACKAGES = [
     },
     {
         "id": "robot_patrol", "name": "机器狗巡检套餐", "price": "89/月", "featured": True,
-        "description": "3GPP 无线感知与摄像头/激光雷达数据融合，让机器狗在雾天黑夜也看得清",
-        "capabilities": ["sensing_fusion", "target_detection", "ai_inference", "precision_location", "event_subscription"],
+        "description": "通感一体把摄像头数据（可来自 AF 注册的第三方数据能力）与 3GPP 无线感知融合，让机器狗在雾天黑夜也看得清并精准定位目标",
+        "capabilities": ["target_detection", "sensing_fusion", "precision_location"],
         "scenario": "园区/变电站全天候巡检",
     },
     {
-        "id": "traffic_forecast_pkg", "name": "城市车流量预测套餐", "price": "59/月", "featured": True,
-        "description": "道路车流量检测触发，感知数据驱动的车流预测",
-        "capabilities": ["traffic_flow_sensing", "traffic_forecast", "data_query"],
-        "scenario": "智慧交通 · 城市道路",
+        "id": "traffic_forecast_pkg", "name": "城市车流量测量套餐", "price": "59/月", "featured": True,
+        "description": "以摄像头数据为主、可叠加通感(sensing)数据融合，对道路历史时段车流量进行测量（不含未来预测）；通常由意图触发",
+        "capabilities": ["sensing_fusion", "traffic_flow_sensing", "data_query"],
+        "scenario": "智慧交通 · 历史车流量测量",
     },
     {
         "id": "xr_render", "name": "XR 渲染卸载套餐", "price": "119/月",
@@ -438,16 +459,10 @@ PACKAGES = [
         "scenario": "XR/元宇宙 · 通算一体",
     },
     {
-        "id": "uav_track", "name": "无人机识别追踪套餐", "price": "79/月", "featured": True,
-        "description": "弱算力无人机将识别计算卸载到网络，结合通感实现持续追踪",
-        "capabilities": ["target_detection", "target_tracking", "ai_inference", "compute_offload", "precision_location"],
-        "scenario": "低空经济 · 无人机监管",
-    },
-    {
-        "id": "smart_factory", "name": "智能工厂套餐", "price": "89/月",
-        "description": "面向工厂园区的检测+质检+算力+网络保障一站式方案",
-        "capabilities": ["target_detection", "ai_inference", "compute_offload", "qos_guarantee"],
-        "scenario": "工厂产线视觉质检与园区安防",
+        "id": "uav_track", "name": "目标识别与跟踪套餐", "price": "49/月",
+        "description": "6G 网络以通感一体(ISAC)对目标进行识别并持续跟踪：目标检测确定有什么、在哪，目标追踪持续回传其轨迹/速度/航向。识别与追踪均由网络完成，终端无需具备感知能力",
+        "capabilities": ["target_detection", "target_tracking"],
+        "scenario": "低空经济 / 安防 · ISAC 目标识别与跟踪",
     },
 ]
 
@@ -470,18 +485,27 @@ AGENTS = {
     },
     "computing": {
         "name": "Computing Agent", "color": "#bc8cff",
-        "capabilities": ["compute_offload", "ai_inference",
-                         "render_offload", "compute_qos", "edge_agent_hosting", "federated_learning"],
+        "capabilities": ["compute_offload", "render_offload", "compute_qos"],
         "nf_tools": [
             {"tool": "eees_app_deploy", "sbi": "EEES AppContext"},
             {"tool": "compute_offload_submit", "sbi": "Edge Computing API"},
             {"tool": "resource_monitor", "sbi": "OAM/Analytics"},
         ],
     },
+    "ai": {
+        "name": "AI Agent", "color": "#d264ff",
+        "capabilities": ["ai_inference", "edge_agent_hosting", "federated_learning", "network_analytics"],
+        "nf_tools": [
+            {"tool": "aiml_inference_serve", "sbi": "AIML Inference API"},
+            {"tool": "nwdaf_mlmodel_provision", "sbi": "Nnwdaf_MLModelProvision"},
+            {"tool": "nwdaf_analytics_query", "sbi": "Nnwdaf_AnalyticsInfo"},
+        ],
+    },
     "sensing": {
         "name": "Sensing Agent", "color": "#ff9e3d",
         "capabilities": ["target_detection", "target_tracking", "environment_recon",
-                         "sensing_fusion", "traffic_flow_sensing", "vital_sign_detection", "gesture_recognition"],
+                         "sensing_fusion", "traffic_flow_sensing", "traffic_forecast",
+                         "sensing_fence", "vital_sign_detection", "gesture_recognition"],
         "nf_tools": [
             {"tool": "sensing_session_create", "sbi": "Nsensf_Sensing"},
             {"tool": "sensing_result_fetch", "sbi": "Nsensf_SensingData"},
@@ -490,13 +514,20 @@ AGENTS = {
     },
     "data": {
         "name": "Data Agent", "color": "#3fb950",
-        "capabilities": ["data_query", "network_analytics", "security_check",
-                         "capability_register", "identity_service",
-                         "traffic_forecast", "digital_twin_feed", "revenue_share"],
+        "capabilities": ["data_query", "capability_register",
+                         "digital_twin_feed", "revenue_share"],
         "nf_tools": [
-            {"tool": "nwdaf_analytics_query", "sbi": "Nnwdaf_AnalyticsInfo"},
             {"tool": "dccf_data_subscribe", "sbi": "Ndccf_DataManagement"},
             {"tool": "adrf_dataset_fetch", "sbi": "Nadrf_DataManagement"},
+        ],
+    },
+    "security": {
+        "name": "Security Agent", "color": "#f7768e",
+        "capabilities": ["identity_service", "security_posture"],
+        "nf_tools": [
+            {"tool": "ausf_ue_authentication", "sbi": "Nausf_UEAuthentication"},
+            {"tool": "aanf_akma_key", "sbi": "Nnef_AKMA / AAnF"},
+            {"tool": "capif_invoker_onboard", "sbi": "CAPIF API Provider Mgmt"},
         ],
     },
     "location": {

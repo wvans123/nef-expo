@@ -18,6 +18,7 @@ def test_intent_status_progresses_to_completed():
     rr = client.post("/api/v1/subscribe", json={"account": "trk_done",
                                                 "capability_ids": [], "package_ids": ["robot_patrol"]})
     h = {"Authorization": "Bearer " + rr.json()["api_key"]}
+    client.post("/api/v1/account/plan", json={"plan": "pro"}, headers=h)  # 仅 PRO/MAX 可发意图
     r = client.post("/api/v1/intent", json={"text": "机器狗巡检，雾天也要看得清"}, headers=h)
     assert r.json()["status"] == "dispatched"
     iid = r.json()["intent_id"]
@@ -34,6 +35,7 @@ def test_intent_status_progresses_to_completed():
 
 def test_intent_status_owner_and_missing():
     h = _key()
+    client.post("/api/v1/account/plan", json={"plan": "pro"}, headers=h)  # 仅 PRO/MAX 可发意图
     iid = client.post("/api/v1/intent", json={"text": "test"}, headers=h).json()["intent_id"]
     other = _key("trk_other")
     assert client.get(f"/api/v1/intent/{iid}", headers=other).status_code == 403

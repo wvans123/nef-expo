@@ -13,32 +13,34 @@ THIRD_PARTY_META = {}   # cap_id -> {"cap_type", "endpoint", "owner", "registere
 REVERSE_CALLS = {}      # cap_id -> [record]
 INTENTS = {}            # intent_id -> 受理登记（供状态查询，演示用内存态）
 
-# 反向调用时由哪个域 Agent 出面调用（按能力类型映射）
-_CAP_TYPE_AGENT = {"ai_model": "computing", "tool": "data", "data_source": "data"}
+# 第三方能力的反向调用统一由"网络侧 Agent"经内部 MCP（模仿网元 tools/call）发起，
+# 不再按 cap_type 武断映射到某个域 Agent（cap_type 只用于内部归类，不决定谁来调）。
+NETWORK_CALLER = ("网络侧 Network Agent", "#bc8cff")
 
 REVERSE_FEE = 0.05      # 每次反向调用的模拟计费（元）
 
 
 def caller_agent_for(cap_id: str):
-    """返回 (agent_name, agent_color)"""
-    meta = THIRD_PARTY_META.get(cap_id, {})
-    akey = _CAP_TYPE_AGENT.get(meta.get("cap_type"), "data")
-    ag = AGENTS[akey]
-    return ag["name"], ag["color"]
+    """返回反向调用方 (agent_name, agent_color)：统一为网络侧 Agent（经内部 MCP）。"""
+    return NETWORK_CALLER
 
 
-def record_reverse_call(cap_id: str, trigger: str, trigger_detail: str) -> dict:
-    """写入一条反向调用台账并返回该记录。trigger: 'manual' | 'intent'"""
-    agent_name, color = caller_agent_for(cap_id)
+def record_reverse_call(cap_id: str, trigger: str, trigger_detail: str,
+                        caller: str = None, fee: float = None) -> dict:
+    """写入一条反向调用台账并返回该记录。
+    trigger: 'manual' | 'intent' | 'internal_mcp' | 'north_invoke'；caller 为发起方
+    （默认网络侧 Agent）；fee 为本次计费（默认 REVERSE_FEE，北向按次调用按实际单价计）。"""
+    agent_name, color = (caller or NETWORK_CALLER[0]), NETWORK_CALLER[1]
     rec = {
         "ts": time.time(),
         "caller_agent": agent_name,
         "agent_color": color,
+        "via": "内部 MCP · JSON-RPC tools/call（经 NEF 出向网关）",
         "trigger": trigger,
         "trigger_detail": trigger_detail,
         "latency_ms": random.randint(20, 80),
         "status": "success",
-        "fee": REVERSE_FEE,
+        "fee": REVERSE_FEE if fee is None else round(fee, 2),
     }
     calls = REVERSE_CALLS.setdefault(cap_id, [])
     calls.append(rec)

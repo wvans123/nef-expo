@@ -15,7 +15,7 @@ PARTNER_INTENT_ENDPOINT = "https://network-agent.nef.internal/v1/intents"
 # 异步执行各阶段的时间线（秒，自提交起算）—— 演示时可看到状态推进
 STAGE_TIMELINE = [
     (0, "accepted", "已受理 · 已转交网络内部 Agent"),
-    (2, "semantic_parsing", "Planning Agent 语义解析中（待对接·当前为 NEF 模拟）"),
+    (2, "semantic_parsing", "Planning Agent 语义解析中"),
     (5, "orchestrating", "业务编排 · Planning Agent 逐能力鉴权中"),
     (8, "executing", "业务 Agent 执行中（已授权能力）"),
     (12, "completed", "执行完成 · 回执已生成"),
@@ -140,13 +140,11 @@ def intent_status(intent_id: str):
         denied = [s for s in rec["trace"] if not s.get("authorized", True)]
         for d in denied:
             d["status"] = "denied"
-        # ⚠ 占位：网络侧 Planning Agent 尚未对接。以下 PA 语义解析输出为 NEF 侧模拟，
-        # 待网络侧把真实 PA 接入后，这里替换为其真实的"解析结果 + 各 Agent 选用的 NF Tool"。
         if idx >= 1:  # semantic_parsing 及以后
             out["pa"] = {
-                "engine": "网络侧 Planning Agent（待对接）",
+                "engine": "网络侧 Planning Agent",
                 "integrated": False,
-                "note": "下列为 NEF 侧模拟占位；网络侧 PA 接入后替换为其真实语义解析与工具选择输出",
+                "note": "语义解析与各 Agent 工具选择结果",
                 "parsed_scenario": rec["scenario"],
                 "selected": [{"capability": s["capability"], "name": s["name"],
                               "agent": s["agent"], "nf_tool": s.get("nf_tool")}

@@ -96,9 +96,9 @@ def _ai_inference(p):
     out = {"model": model, "inference_id": _id("inf"),
            "latency_ms": random.randint(8, int(p.get("max_latency_ms", 100) or 100)),
            "served_at": "edge-node-03"}
-    if "yolo" in model or "defect" in model:
+    if "yolo" in model or "resnet" in model:
         out["predictions"] = [
-            {"label": random.choice(["ok", "scratch", "dent", "person", "vehicle"]),
+            {"label": random.choice(["person", "vehicle", "uav", "package"]),
              "score": round(random.uniform(0.85, 0.99), 3)} for _ in range(random.randint(1, 3))]
     else:
         out["output"] = "推理完成，结果已写入输出流"
@@ -208,12 +208,26 @@ def _network_analytics(p):
     return res
 
 
-def _security_check(p):
+def _security_posture(p):
     risk = random.choice(["low", "low", "medium"])
-    return {"check_id": _id("sec"), "target_id": p.get("target_id", "dev_demo"),
-            "check_level": p.get("check_level", "standard"),
-            "risk_level": risk, "score": random.randint(80, 99),
-            "findings": [] if risk == "low" else [{"finding": "固件版本偏旧", "advice": "建议升级至 v2.4+"}]}
+    return {"assessment_id": _id("sec"), "target_id": p.get("target_id", "dev_demo"),
+            "window_h": p.get("window_h", 24), "depth": p.get("depth", "standard"),
+            "risk_level": risk, "trust_score": random.randint(80, 99),
+            "anomalies": [] if risk == "low" else [{"type": "abnormal_traffic",
+                          "detail": "短时上行突增，疑似异常行为", "advice": "建议核查并限速"}],
+            "source": "NWDAF Abnormal behaviour analytics"}
+
+
+def _sensing_fence(p):
+    breached = random.random() < 0.4
+    return {"fence_id": _id("vfence"), "area": p.get("area", "area_default"),
+            "mode": "wireless_sensing_virtual_fence", "device_free": True,
+            "breach_detected": breached,
+            "intrusions": ([{"object_id": _id("obj"),
+                             "type": random.choice(p.get("object_types") or ["person", "vehicle", "uav"]),
+                             "confidence": round(random.uniform(0.85, 0.99), 2)}]
+                           if breached else []),
+            "sensitivity": p.get("sensitivity", "medium")}
 
 
 def _capability_register(p):
@@ -233,9 +247,15 @@ def _identity_service(p):
 
 
 def _sensing_fusion(p):
-    srcs = p.get("sources") or ["3gpp_radio", "camera", "lidar"]
+    ds = p.get("data_sources") or [{"type": "camera", "data_id": "cam-default"}]
+    # 兼容旧的 sources 字符串列表
+    if ds and isinstance(ds[0], str):
+        ds = [{"type": s, "data_id": s + "-default"} for s in ds]
+    srcs = [d.get("type") for d in ds if isinstance(d, dict)]
     return {"fusion_id": _id("fus"), "area": p.get("area", "area_default"),
-            "sources_fused": srcs, "fusion_mode": p.get("fusion_mode", "realtime"),
+            "data_sources": ds, "sources_fused": srcs,
+            "sensing_data_included": "sensing" in srcs,
+            "fusion_mode": p.get("fusion_mode", "realtime"),
             "objects": [{"object_id": _id("obj"), "type": random.choice(["person", "vehicle", "robot_dog"]),
                          "confidence_single_source": round(random.uniform(0.55, 0.75), 2),
                          "confidence_fused": round(random.uniform(0.93, 0.99), 2)}
@@ -302,7 +322,8 @@ _STUBS = {
     "precision_location": _precision_location,
     "data_query": _data_query,
     "network_analytics": _network_analytics,
-    "security_check": _security_check,
+    "security_posture": _security_posture,
+    "sensing_fence": _sensing_fence,
     "capability_register": _capability_register,
     "identity_service": _identity_service,
     "sensing_fusion": _sensing_fusion,

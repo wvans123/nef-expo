@@ -46,9 +46,13 @@ def test_pay_per_call_passes_authz_and_routes_nef_ref():
     r = client.post("/api/v1/capabilities/target_detection/invoke",
                     json={"area": "A", "_confirm_pay": True}, headers=h)
     assert r.status_code == 200
-    assert r.json()["nef_auth"]["decision"] == "allow"
-    assert r.json()["routing"]["target"] == "nef-ref"
-    assert r.json()["routing"]["tool_id"] == "target_detection"
+    body = r.json()
+    assert body["nef_auth"]["decision"] == "allow"
+    # 对 AF 不再暴露内部路由表；只在鉴权回执给出落到的 SBI 接口
+    assert "routing" not in body
+    assert body["nef_auth"]["sbi_target"]["kind"] == "sbi"
+    # 内部路由表仍可经 dispatch-table 查询（运营商侧视角）
+    assert client.get("/api/v1/dispatch-table").json()["summary"]["tools_nef_ref"] >= 1
 
 
 def test_dispatch_table_tool_vs_backend_scenario():
