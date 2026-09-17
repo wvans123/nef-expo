@@ -504,8 +504,9 @@ def subscribe_scene(service_id: str, req: SceneSubscribeReq | None = None, autho
     _, rec = _auth(authorization)
     if service_id not in SCENES:
         raise HTTPException(404, "场景服务不存在")
-    selected = req.network_capability_ids if req else []
     allowed = {item["capability_id"] for item in SCENES[service_id]["provenance"]["components"]}
+    selected = (req.network_capability_ids if req and "network_capability_ids" in req.model_fields_set
+                else [item["capability_id"] for item in SCENES[service_id]["provenance"]["components"]])
     subscription_notifications.validate_capabilities(selected, allowed)
     rec.setdefault("scene_subscriptions", set()).add(service_id)
     return {"service_id": service_id, "subscribed": True, "account": rec["account"], "billing": "demo_entitlement",
@@ -725,10 +726,10 @@ def subscribe(req: SubscribeReq):
             "packages": sorted(rec["packages"]),
             "message": "订阅成功，权益已记录到账号（API Key 不变）",
             "notification": _notify_subscriptions(req.account, {("capability_package", pid) for pid in req.package_ids},
-                                                 req.network_capability_ids)}
+                                                 req.network_capability_ids if "network_capability_ids" in req.model_fields_set else None)}
 
 
-def _notify_subscriptions(account, selections, network_capability_ids=()):
+def _notify_subscriptions(account, selections, network_capability_ids=None):
     snapshot = SubscriptionSnapshot(**integration_subscriptions(Response(), account)).model_dump()
     return subscription_notifications.notify(snapshot, selections, network_capability_ids)
 
@@ -885,15 +886,12 @@ def auth_info(authorization: str = Header(None)):
 def intent(req: IntentReq, authorization: str = Header(None), x_nef_execution: str = Header(None)):
     key, rec = _auth(authorization, required_scope="intent:submit")
     if exhibition.live_requested(x_nef_execution):
-        pipeline = _capif_pipeline(key, rec, scope="intent:submit", entitled=_intent_eligible(rec),
-            cap=None, authz_label="Intent 接入权益", authz_pass_detail="当前账号已开通 Intent 接入",
-            authz_deny_detail="当前账号尚未开通 Intent 接入权益")
+        pipeline = _capif_pipeline(key, rec, scope="intent:submit", entitled=True,
+            cap=None, authz_label="通用 Intent 接入", authz_pass_detail="账号和意图接口权限已通过；不限定场景")
         auth = _auth_evidence(key, rec, "intent:submit", pipeline["request_id"])
         auth["pipeline"] = pipeline["stages"]
-        if not _intent_eligible(rec):
-            raise HTTPException(403, {"message": "请先开通 Intent 接入权益", "nef_auth": auth})
-        if not req.text.strip():
-            raise HTTPException(422, "Intent 不能为空")
+        if not req.text.strip() or len(req.text) > 16000:
+            raise HTTPException(422, "Intent 需要 1 到 16000 字符")
         try:
             result = exhibition.forward("intent", {"text": req.text, "request_id": pipeline["request_id"], "account": rec["account"]})
         except HTTPException as exc:

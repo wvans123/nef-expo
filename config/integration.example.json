@@ -1,0 +1,43 @@
+{
+  "bridge": {
+    "intent": null,
+    "package_invoke": null,
+    "capabilities": {},
+    "scenes": {
+      "robot_patrol": {
+        "intent": {
+          "url": "",
+          "method": "POST",
+          "body": {"intent": "$text"},
+          "timeout_seconds": 8
+        }
+      },
+      "traffic_flow_detection": {
+        "intent": {
+          "url": "http://10.70.113.122:5432/car/start",
+          "method": "POST",
+          "body": {"user_request": "$text"},
+          "timeout_seconds": 8
+        }
+      }
+    }
+  },
+  "registry": {
+    "catalog_url": null,
+    "publish_url": null,
+    "token_env": null,
+    "nef_base_url": null,
+    "mcp_servers": {},
+    "network_clients": {}
+  },
+  "subscriptions": {
+    "callback_url": null,
+    "token_env": null,
+    "account_ids": ["1", "2", "3"],
+    "plan_prices": {
+      "scene:robot_patrol": null,
+      "scene:traffic_flow_detection": null,
+      "scene:collaborative_tracking": null
+    }
+  }
+}

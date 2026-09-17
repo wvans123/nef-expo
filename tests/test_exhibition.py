@@ -81,12 +81,13 @@ def test_api_and_mcp_share_real_mapping(upstream):
     assert [r["body"] for r in upstream] == [{"input": {"area": "A"}}, {"input": {"area": "B"}}]
 
 
-def test_no_subscription_or_intent_permission_does_not_forward(upstream):
+def test_generic_intent_does_not_require_scene_but_atomic_calls_require_entitlement(upstream):
     h = headers("free")
     r = client.post("/api/v1/capabilities/target_detection/invoke", headers=h, json={"area": "A"})
     assert r.status_code == 402
     r = client.post("/api/v1/intent", headers=h, json={"text": "巡检"})
-    assert r.status_code == 403 and not upstream
+    assert r.status_code == 200 and len(upstream) == 1
+    assert upstream[0]["body"] == {"utterance": "巡检"}
 
 
 def test_unconfigured_never_falls_back_to_mock():
@@ -196,6 +197,6 @@ def test_intent_entry_receipt_does_not_claim_scene_authorization():
     assert r.status_code == 503
     evidence = r.json()["detail"]["nef_auth"]
     assert evidence["implementation"]["scene_policy"] == "not_implemented"
-    denied = client.post("/api/v1/intent",headers=headers("free"),json={"text":"巡检"})
-    assert denied.status_code == 403
-    assert any(s["code"]=="authorize" and s["status"]=="denied" for s in denied.json()["detail"]["nef_auth"]["pipeline"])
+    unconfigured = client.post("/api/v1/intent",headers=headers("free"),json={"text":"巡检"})
+    assert unconfigured.status_code == 503
+    assert any(s["code"]=="authorize" and s["status"]=="passed" for s in unconfigured.json()["detail"]["nef_auth"]["pipeline"])

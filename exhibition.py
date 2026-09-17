@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
+from integration_config import section as integration_section
 from fastapi import Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
@@ -27,10 +28,8 @@ MEDIA_TYPES = {"image/png", "image/jpeg", "image/webp", "video/mp4", "video/webm
 
 def config():
     path = os.environ.get("NEF_BRIDGE_CONFIG")
-    if not path:
-        return {"capabilities": {}}
     try:
-        cfg = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+        cfg = json.loads(Path(path).read_text(encoding="utf-8-sig")) if path else integration_section("bridge")
         if not isinstance(cfg, dict) or not isinstance(cfg.get("capabilities", {}), dict) or not isinstance(cfg.get("scenes", {}), dict):
             raise ValueError()
         return cfg
@@ -65,7 +64,7 @@ def forward(kind, context):
             raise HTTPException(503, "场景接口配置不完整")
         route = routes.get("intent" if kind == "scene_intent" else "invoke")
     else:
-        route = cfg.get("intent") if kind == "intent" else cfg.get("capabilities", {}).get(context["capability_id"])
+        route = cfg.get(kind) if kind in ("intent", "package_invoke") else cfg.get("capabilities", {}).get(context["capability_id"])
     if not route:
         raise HTTPException(503, {"status": "not_configured", "message": "内部接口待对接，未发送请求"})
     try:
@@ -163,8 +162,9 @@ def save_event(channel, event):
     if not isinstance(event, dict) or event.get("kind") not in ("status", "data", "image", "video"):
         raise HTTPException(422, "kind 需为 status / data / image / video")
     for field in ("title", "text", "source", "request_id"):
-        if field in event and (not isinstance(event[field], str) or len(event[field]) > 1000):
-            raise HTTPException(422, f"{field} 需要长度不超过 1000 的字符串")
+        maximum = 16000 if field == "text" else 1000
+        if field in event and (not isinstance(event[field], str) or len(event[field]) > maximum):
+            raise HTTPException(422, f"{field} 需要长度不超过 {maximum} 的字符串")
     if "data" in event and not isinstance(event["data"], (dict, list)):
         raise HTTPException(422, "data 需要对象或数组")
     with LOCK:
@@ -309,6 +309,12 @@ def mount_routes(app, auth):
             raise HTTPException(422, "X-NEF-Request-ID 需要 1 到 1000 字符")
         if mime == "application/json":
             event = await read_event(request)
+            if isinstance(event, dict) and "final_result" in event:
+                result = event["final_result"]
+                if set(event) - {"final_result", "request_id"} or not isinstance(result, str) or not result.strip():
+                    raise HTTPException(422, "final_result 需为非空文字结果")
+                event = {"kind": "status", "text": result,
+                         **({"request_id": event["request_id"]} if "request_id" in event else {})}
             if request_id is not None and isinstance(event, dict):
                 if "request_id" in event and event["request_id"] != request_id:
                     raise HTTPException(422, "请求头与正文 request_id 不一致")

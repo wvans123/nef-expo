@@ -4,7 +4,7 @@
 
 用途：将 NEF 能力超市中明确选中的本地原子能力或场景元数据交给网络目录。它与农场 MCP 登记、账号订购通知是三个不同方向；本接口不发布账号购买信息，也不调用 PA/CA 执行业务。
 
-**状态：代码与本地模拟 HTTP 对端测试已完成，当前 8069 进程尚未加载。真实 ARF/NRF 的地址、字段及接收规则待同事确认。** 此处是本项目契约，不是 3GPP NRF NFRegister 的实现，不能直接假设 NRF 会接受。
+**状态：代码与本地模拟 HTTP 对端测试已完成，真实 ARF/NRF 的地址、字段及接收规则待同事确认。上传不会更新已有进程，新机器按 README 启动后验收。** 此处是本项目契约，不是 3GPP NRF NFRegister 的实现，不能直接假设 NRF 会接受。
 
 ## 请求
 
@@ -24,7 +24,7 @@
 
 带 `Authorization: Bearer <NEF账号Key>`，要求 `af:register` scope；公网另需 Access 凭据。只选能力或只选场景均可，但不能全空。能力最多 64 项，场景最多 16 项；重复、未知、规划中能力或额外字段返回 422。无 Key 为 401，scope 不足为 403。
 
-请求体不能传接收地址、凭据或任意元数据。配置沿用 `NEF_REGISTRY_CONFIG`：`nef_base_url` 指向网络可访问的 NEF 地址，`publish_url` 是目录接收地址，`token_env` 仅引用服务端凭据变量。预览也要求有效 `nef_base_url`；缺失返回 503 `gateway_not_configured`。
+请求体不能传接收地址、凭据或任意元数据。新部署配置在 `config/integration.local.json` 的 `registry` 中；旧 `NEF_REGISTRY_CONFIG` 显式覆盖仍兼容。`nef_base_url` 指向网络可访问的 NEF 地址，例如 `http://<NEF电脑IP>:8069`，`publish_url` 是目录接收地址，`token_env` 仅引用服务端凭据变量。预览也要求有效 `nef_base_url`；缺失返回 503 `gateway_not_configured`。
 
 ## 发布正文
 

@@ -53,7 +53,10 @@ def test_purchase_posts_exact_partner_fields_and_stable_uuid(client, peer, monke
     assert set(body) == {"subscriberId", "servicePlan"}
     assert body["subscriberId"] == "1"
     plan = body["servicePlan"]
-    assert set(plan) == {"planId", "showName", "description", "price"}
+    assert set(plan) == {"planId", "showName", "description", "price", "networkCapabilities"}
+    assert [cap["capabilityName"] for cap in plan["networkCapabilities"]] == [
+        item["capability_id"] for item in server.SCENES["robot_patrol"]["provenance"]["components"]
+    ]
     assert UUID(plan["planId"]).version == 5
     assert plan["showName"] == server.SCENES["robot_patrol"]["name"]
     assert plan["price"] == 19.9 and isinstance(plan["price"], float)

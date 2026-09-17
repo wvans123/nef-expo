@@ -6,6 +6,37 @@
 
 **你们提供执行接口，我们把调用发过去；我们提供回传地址，你们把状态、数据和画面发回来。**
 
+## 车流量联调
+
+换电脑运行 `python start.py`，启动与统一配置见 [README](../../README.md#二换电脑启动与配置)。页面选“车流量检测”，开通后输入意图，点击发送。
+
+**NEF 发给车流量服务：**
+
+```http
+POST http://10.70.113.122:5432/car/start
+Content-Type: application/json
+```
+
+```json
+{"user_request":"今天下午3点，十字路口东南侧的车流量情况怎么样"}
+```
+
+地址在 `config/integration.local.json` 的 `bridge.scenes.traffic_flow_detection.intent.url`；请求字段在同一对象的 `body` 中，`"$text"` 替换成用户原文。默认等待 8 秒；长任务请及时返回受理回执，完成后异步回传，不自动重试执行请求。
+
+**车流量服务回给 NEF：**
+
+```http
+POST http://<NEF电脑IP>:8069/api/v1/scene-feedback
+Authorization: Bearer <页面“接口信息”中的场景Key>
+Content-Type: application/json
+```
+
+```json
+{"final_result":"今天下午3点十字路口东南侧的车流量处于中等水平xxxxxx"}
+```
+
+正文只需要 `final_result`，非空字符串且最多 16000 字符。Key 放请求头，不加到 JSON；成功返回 `{"received":true,"event_id":1}`。先在调用页获取接口信息，重启后重新提供 Key。多个账号通过各自 Key 隔离；不带 request_id 时按场景展示，不推断属于哪一次请求。内网直连无需旧域名或 Cloudflare 头。
+
 ## 一、把结果回传给我们
 
 我们会提供**完整回传地址和场景专用 Key**，不需要你们创建通道、调用点或填写场景 ID。同一场景在本次服务中复用同一份对接信息，重启后我们重新提供 Key。
@@ -14,7 +45,7 @@
 
 所有请求都带：`Authorization: Bearer <场景Key>`
 
-**公网回传地址：`https://nef.2012wtlab.com/api/v1/scene-feedback`。** 公网接入还需带上我们单独提供的两个请求头，状态、数据、文件上传均相同；本地或内网直连不需要：
+**内网回传地址：`http://<NEF电脑IP>:8069/api/v1/scene-feedback`；旧公网回传地址：`https://nef.2012wtlab.com/api/v1/scene-feedback`。** 仅公网接入还需带上我们单独提供的两个请求头，状态、数据、文件上传均相同；本地或内网直连不需要：
 
 ```http
 CF-Access-Client-Id: <我们提供的Client ID>
@@ -88,7 +119,7 @@ Authorization: Bearer <NEF账号Key>
 
 `after` 是非负事件序号，返回严格大于该值的事件；`request_id` 可省略。响应新增 `next_cursor`（通道当前序号，即使筛选结果为空也推进）、`reset_required`（请求游标大于当前序号）和 `history_truncated`（需要的早期事件已超出保留范围）。每通道只保留最后 100 条事件，不能依赖它补齐全部历史。换 request_id 过滤条件时重新从 after=0 读取；通道不存在返回 404，服务重启后需重新获取接口信息和 Key。
 
-请求关联是回传方提供的标签，NEF 不验证其是否确属先前某次执行，不将匹配 ID 当成业务完成证明。**JSON 请求头关联和增量读取已实现、测试通过，但当前 8069 进程尚未加载这次后端更新**；不要在现网验收前假设新增参数已生效。
+请求关联是回传方提供的标签，NEF 不验证其是否确属先前某次执行，不将匹配 ID 当成业务完成证明。新代码已支持 JSON 请求头关联和增量读取；上传 GitHub 不会更新已有运行进程，部署后需验收接口版本。
 
 ## 二、请提供你们的执行接口
 
@@ -110,6 +141,25 @@ Authorization: Bearer <NEF账号Key>
 ```
 
 意图由你们的场景服务或内部 Agent 处理，不要求新增 Intent ID 或任务状态查询接口。可以在执行接口响应中直接返回 `{"text":"业务结果摘要"}`；耗时较长时先返回受理回执，完成后通过上面的统一接口发送文字结果。数据和画面按需附加。
+
+#### 机器狗与车流接口分别配置
+
+使用 `python start.py` 启动时，若本地文件不存在，会从 `config/integration.example.json` 生成 `config/integration.local.json`；已有文件不会被覆盖。机器狗配置在 `bridge.scenes.robot_patrol.intent`，车流配置在 `bridge.scenes.traffic_flow_detection.intent`，互不共用执行地址。
+
+机器狗模板如下，`url` 留空时拒绝发送；填入同事提供的完整地址后才可调用：
+
+```json
+{
+  "url": "",
+  "method": "POST",
+  "body": {"intent": "$text"},
+  "timeout_seconds": 8
+}
+```
+
+`intent` 只是待确认的参数名，不是已约定契约；若对方叫 `prompt`，改为 `"body": {"prompt": "$text"}`。`$text` 替换成页面输入的完整意图，保留原文。已有本地文件缺少 `robot_patrol` 时，仅补入这个场景配置，不覆盖车流或其他配置。未设置旧版 `NEF_BRIDGE_CONFIG` 覆盖项时，保存统一配置后下一次调用读取新值；改配置不需要重启。
+
+响应格式待确认，不预设任务 ID、进度或完成字段。当前转发将 2xx 响应的 JSON 值或 UTF-8 文本保存在 `upstream.body`，HTTP 状态保存在 `upstream.http_status`；页面展开“接口原始回执”可查看，未知字段不要求先写解析代码。非 2xx 当前返回上游错误状态，不透传其响应正文；响应超过 1 MiB 会拒绝。收到 200/202 不等于巡检完成，后续异步结果仍可使用第一节的统一回传接口。真实机器狗地址、参数名、鉴权与完成判据均待同事确认；模板及本地测试不代表已接通机器狗。
 
 ### 2. 可选的 API / Tool：接收业务参数
 

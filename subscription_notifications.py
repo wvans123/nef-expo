@@ -15,6 +15,7 @@ from uuid import NAMESPACE_URL, uuid5
 import httpx
 from fastapi import HTTPException
 from skills import CAP_INDEX
+from integration_config import local_path, section as integration_section
 
 EVENTS = {}
 LOCK = threading.RLock()
@@ -24,7 +25,9 @@ MAX_EVENTS = 1000
 def _config(account):
     path = os.getenv("NEF_SUBSCRIPTION_CONFIG") or Path(__file__).parent / "config" / "subscription.local.json"
     try:
-        cfg = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+        cfg = (integration_section("subscriptions")
+               if not os.getenv("NEF_SUBSCRIPTION_CONFIG") and local_path().exists()
+               else json.loads(Path(path).read_text(encoding="utf-8-sig")))
     except FileNotFoundError:
         return None, "not_configured"
     except (OSError, ValueError):
@@ -79,7 +82,7 @@ def validate_capabilities(selected, allowed):
         raise HTTPException(422, "网络能力须从当前套餐的可用能力中选择，不能重复")
 
 
-def notify(snapshot, selections, network_capability_ids=()):
+def notify(snapshot, selections, network_capability_ids=None):
     account = snapshot["account_id"]
     results = []
     for plan in snapshot["purchased_packages"]:
@@ -93,6 +96,10 @@ def notify(snapshot, selections, network_capability_ids=()):
 
 
 def _notify_plan(account, plan, network_capability_ids):
+    if network_capability_ids is None:
+        network_capability_ids = [item["capability_id"] for item in plan["components"]
+                                  if item["capability_id"] in CAP_INDEX
+                                  and CAP_INDEX[item["capability_id"]].status == "available"]
     with LOCK:
         event_id = "sub_" + secrets.token_hex(12)
         plan_id = str(uuid5(NAMESPACE_URL, "urn:nef:service-plan:" + plan["kind"] + ":" + plan["id"]))

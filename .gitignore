@@ -12,3 +12,10 @@ config/bridge.local.json
 config/composer.local.json
 config/subscription.local.json
 config/registry.local.json
+config/integration.local.json
+config/*.local.json
+.venv/
+venv/
+.env
+.env.*
+!.env.example

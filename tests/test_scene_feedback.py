@@ -53,6 +53,20 @@ def test_json_routes_by_key_not_caller_scene_or_channel():
     assert client.get(b["events_endpoint"], headers=owner_a).status_code == 404
 
 
+def test_traffic_final_result_uses_existing_authenticated_feedback_endpoint():
+    owner, channel, writer = provision("traffic_flow_detection")
+    text = "Traffic result " + "x" * 1100
+    response = client.post(URL, headers=writer, json={"final_result": text})
+    assert response.status_code == 200 and response.json()["received"] is True
+    saved = events(owner, channel)
+    assert len(saved) == 1 and saved[0]["text"] == text and saved[0]["kind"] == "status"
+    for invalid in ("", " ", None, 12, "x" * 16001):
+        assert client.post(URL, headers=writer, json={"final_result": invalid}).status_code == 422
+    assert client.post(URL, headers=writer, json={"final_result": "ok", "extra": True}).status_code == 422
+    assert client.post(URL, json={"final_result": "ok"}).status_code == 401
+    assert len(events(owner, channel)) == 1
+
+
 def test_raw_image_upload_automatically_publishes_and_remains_owner_only():
     owner, channel, writer = provision()
     response = client.post(URL, headers={**writer, "Content-Type": "image/png", "X-NEF-Request-ID": "optional-image-id"}, content=PNG)

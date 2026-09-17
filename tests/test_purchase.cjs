@@ -10,8 +10,8 @@ const ctx={URLSearchParams,current:'old',accounts:{old:{api_key:'old-key'}},loca
 vm.createContext(ctx);vm.runInContext(fs.readFileSync('static/purchase.js','utf8'),ctx);
 (async()=>{
   const selector=ctx.purchaseCapabilitySelector(['target_detection','planned','unknown']);
-  assert.match(selector,/type="checkbox" value="target_detection"/);
-  assert.doesNotMatch(selector,/checked|Later|unknown/);
+  assert.match(selector,/type="checkbox" value="target_detection" checked/);
+  assert.doesNotMatch(selector,/Later|unknown/);
   assert.deepEqual(Array.from(ctx.purchaseCapabilityIds()),['target_detection']);
   await ctx.purchaseBootstrap();
   assert.equal(ctx.current,'1');assert.equal(ctx.accounts['1'].api_key,'new-key');

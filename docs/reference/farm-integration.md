@@ -13,7 +13,7 @@
 调用：网络客户端 --> NEF 代理入口 --> 农场 MCP --> 原路返回结果
 ```
 
-当天使用内存测试数据，重启后重新准备账号、订阅和 MCP 登记。本轮不重启正在联调的服务；检查时账号 `1` 已开通机器狗巡检，`2`、`3` 为空，不将其当作固定数据。公网入口为 `https://nef.2012wtlab.com`，查询本机已验证，跨机有效 Access 凭据仍待验收。新增订购通知后端仍未加载，实际回调地址和价格待提供。
+当天使用内存测试数据，重启后重新准备账号、订阅和 MCP 登记。换电脑首选 `python start.py`，地址为 `http://<NEF电脑IP>:8069`，无需旧域名或 Cloudflare 头；步骤见 [README](../../README.md#二换电脑启动与配置)。旧 Tunnel 部署仍可使用 `https://nef.2012wtlab.com` 和 Access。上传不会重启已有服务；真实农场回调地址和价格待提供。
 
 真实农场 MCP 地址、鉴权和网络目录发布地址尚未提供。现有自动测试通过真实本地 TCP 验证完整流程，但农场和目录都是模拟对端，不代表生产网络已经接通。
 
@@ -53,7 +53,7 @@ CF-Access-Client-Secret: <NEF单独提供>
 
 ## 4. 第一条链路：订购通知与查询
 
-农场按钮导航到 `https://nef.2012wtlab.com/?account_id=1`，浏览器通过已有 Access 登录后选择套餐。订购通知结构为 `subscriberId` + `servicePlan`，套餐包含 UUID、名称、描述和显式价格；只在用户勾选时附加 `networkCapabilities`。网络 PA/CA 在所选范围内决策；未勾选则省略该字段，交给 PA 自主编排，NEF 不实现这部分逻辑。四字段平铺旧格式不再使用。
+农场按钮导航到 `http://<NEF电脑IP>:8069/?account_id=1`；使用旧公网域名时需通过 Access 登录。订购通知结构为 `subscriberId` + `servicePlan`，套餐包含 UUID、名称、描述和显式价格；默认勾选全部可用组成能力并附加 `networkCapabilities`。用户可缩小范围，全部取消才省略该字段并交给 PA 自主编排。NEF 不实现 PA/CA 决策，四字段平铺旧格式不再使用。
 
 字段、选能力/不选能力两种完整示例、价格配置与重试见[套餐订购通知](subscription-query.md#10-跳转订购与套餐通知)。接收方需保留 subscriberId 归属并按事件头去重；HTTP 2xx 仅表示通知送达，业务入库响应待确认。浏览器跳转不要携带机器 Secret。
 
@@ -86,7 +86,7 @@ CF-Access-Client-Secret: <Client Secret>
 
 ## 5. NEF 运维配置
 
-配置通过 `NEF_REGISTRY_CONFIG` 指定 JSON 文件绝对路径，或直接指定 JSON 字符串。下面是**待替换示例，不是现有有效配置**：
+新部署在 `config/integration.local.json` 的 **`registry` 对象内**填写下面字段，不要覆盖整个统一配置。旧部署仍可用 `NEF_REGISTRY_CONFIG` 显式指定独立文件或 JSON 字符串，该变量优先。下面是**待替换示例，不是现有有效配置**；内网部署的 `nef_base_url` 使用 `http://<NEF电脑IP>:8069`：
 
 ```json
 {
@@ -113,7 +113,7 @@ CF-Access-Client-Secret: <Client Secret>
 | 字段 | 说明 |
 |---|---|
 | `catalog_url` | 网络能力目录拉取地址；本次只登记农场 MCP 时可为 null |
-| `publish_url` | 网络目录接收登记的完整 POST 地址，不是农场 MCP 地址 |
+| `publish_url` | ARF/TRF 接收登记的完整 POST 地址，不是农场 MCP 地址；目前只支持一个接收端，不自动双发 |
 | `token_env` | NEF 向目录发送 Bearer Key 所用环境变量名 |
 | `nef_base_url` | 网络客户端能访问的 NEF 地址，发布时由此生成代理 URL |
 | `mcp_servers` | 精确匹配登记 URL 的允许列表；页面登记不会自动加入允许列表 |

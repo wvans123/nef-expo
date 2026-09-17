@@ -2,7 +2,7 @@
 function purchaseCapabilitySelector(ids){
   const caps=ids.map(id=>CAPS.find(c=>c.id===id&&c.status==='available')).filter(Boolean);
   if(!caps.length)return '';
-  return '<fieldset id="purchase-capabilities"><legend>网络能力范围（可选）</legend>'+caps.map(c=>`<label><input type="checkbox" value="${esc(c.id)}"><span>${esc(c.name)}</span></label>`).join('')+'</fieldset>';
+  return '<fieldset id="purchase-capabilities"><legend>网络能力组合</legend>'+caps.map(c=>`<label><input type="checkbox" value="${esc(c.id)}" checked><span>${esc(c.name)}</span></label>`).join('')+'</fieldset>';
 }
 function purchaseCapabilityIds(){
   return Array.from(document.querySelectorAll('#purchase-capabilities input:checked'),input=>input.value);

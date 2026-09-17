@@ -20,8 +20,8 @@
 - **双向开放**通过名称、URL、说明组成的 JSON 注册 MCP Server；经运维批准的地址可真实连接并发现工具，再同步至 TRF / ARF。登记、发现、发布确认分别显示；后端记录 `source: AF` 与认证账号，随发布报文传给网络，能力超市同时展示 AF 来源及同步状态。
 - **网络经 NEF 调用 AF**：ARF / TRF 是网络内部目录，接收 AF 工具声明与 NEF MCP 入口，而不是可绕过 NEF 的 AF 原始 URL。内部网元以独立凭证访问 NEF，NEF 按 AF 账号授权范围与 URL 允许列表校验、验证工具参数，再向 AF 真实发送 `tools/call`，保持实际 `CallToolResult` 与 `isError`。页面可查看发布报文和最近网络调用状态。
 - **调用与鉴权**展示实际身份、入口权限和订阅校验回执；文字业务结果优先，图片 / 视频按需展开。场景回传仍只在具体调用页出现。
-- **显式 demo / live**：三个场景默认演示；真实模式原文转发，缺少接口配置时失败关闭。HTTP 受理不等于业务完成。
-- **简化回传**：选择真实调用时自动准备并复用当前场景接口，不再创建或选择调用点；“接口信息”可查看对接资料。同事只接收一个 `/api/v1/scene-feedback` 地址与场景 Key；文字、数据、图片、视频都一次提交，无需 channel_id。
+- **真实调用**：活动页面直接发送 live 请求，移除执行方式和示例意图；Intent 可选“不指定场景”，走单独配置的通用接收地址。未配置返回待对接，不回落到模拟结果。旧后端 demo 契约仅保留兼容，HTTP 受理不等于业务完成。
+- **简化回传**：自动准备并复用当前场景接口；“接口信息”可查看对接资料。同事只接收一个 `/api/v1/scene-feedback` 地址与场景 Key；车流量支持 `{"final_result":"文字结果"}`，其他文字、数据、图片、视频也通过同一接口提交。
 - **目录展示**：主页不再强调 Intent 标签，场景卡展示可点击的基础能力组合与套餐设计来源；网络导入和自助编排定义分别标明来源。浏览器进入目录页、以及停留超市 / 双向开放时每 30 秒自动同步，不再提供手动同步网络目录按钮。
 - **边界**：当前目录契约是本项目的对接约定，不是 TRF / ARF 标准协议。生产网络接口仍待同事提供；本地账号、权益、登记与回传保存在内存。mTLS / OAuth、资源级策略、生产持久化未接入。
 - **本期隐藏**：对外 Skill / 场景方案、AF 智能终端不进入展示动线。对应页签隐藏，旧后端接口保留兼容但不进入本期演示。
@@ -40,48 +40,58 @@
 
 ---
 
-## 二、本地搭建
+## 二、换电脑启动与配置
 
-### 1. 克隆仓库
+### 1. 下载、启动
 
-```bash
-git clone <你的仓库地址>.git
-cd nef-expo
-```
-
-### 2. 创建虚拟环境（推荐）
-
-**Windows / PowerShell：**
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-**macOS / Linux：**
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### 3. 安装依赖
+安装 Python 3.11+。在 [GitHub 仓库](https://github.com/wvans123/nef-expo) 点击 **Code → Download ZIP** 并解压，进入含 `start.py` 的目录，在终端执行：
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+python start.py
 ```
 
-### 4. 启动服务
+本机打开 `http://127.0.0.1:8069/`；同事打开 `http://<这台电脑的IP>:8069/`。默认监听 `0.0.0.0:8069`，无需原域名、Tunnel、Node 或前端构建。`0.0.0.0` 不能填成同事的访问地址。端口占用时用 `python start.py --port 8070`，不要强杀未知进程。
 
-```bash
-python server.py
-```
+首次启动自动创建 `config/integration.local.json` 和 `config/composer.local.json`，已有文件不会覆盖。暂不使用智能推荐时无需模型 Key；使用时在启动终端设置 `NEF_COMPOSER_API_KEY`，远程模型地址已在模板中填写。
 
-启动后访问 **http://localhost:8000** 。
-> 跨机器联调使用 `python -m uvicorn server:app --host 0.0.0.0 --port 8069`，其他机器访问本机网卡 IP。不要仅凭端口强杀未知进程；先核对进程身份。详见演示手册。
-> Cloudflare Tunnel 部署与启动脚本见[演示手册](docs/demo-playbook.md#cloudflare-tunnel-演示部署)。受保护的公网入口 `https://nef.2012wtlab.com` 已发布，支持单邮箱验证码登录（会话 7 天）及专用机器凭据。登录后原版页面和未授权请求拦截已验证；有效机器凭据调用及回传待验收。不使用 IP 白名单，不直接开放本机公网端口。
+仅在获准测试内网使用，不直接暴露公网；跨机不通先检查 IP、路由和 8069 入站规则，不关闭整个防火墙。此版本单进程内存保存，重启清空账号、订阅和回传 Key。GitHub 上传代码不会迁移这些数据，也不会更新另一台已运行的进程。
 
-> 公网入口已启用 HTTP → HTTPS 跳转、最低 TLS 1.2，并对 API / MCP 路径配置浏览器检查兼容规则，保留原有鉴权。客户端直接使用 HTTPS 和原有凭据，无需特殊 User-Agent；不要向 HTTP 地址发送密钥。
+### 2. POST 地址只改这一份文件
 
-### 5. 运行测试（可选）
+打开自动生成的 **`config/integration.local.json`**，修改对应字段；改地址或价格后下一次请求生效，不用重启。JSON 不支持注释，未配置项保留 `null`。
+
+| 用途 | JSON 字段 | 填什么 |
+|---|---|---|
+| 订购套餐后发给农场 | `subscriptions.callback_url` | 完整地址，例如 `http://<农场IP>:<端口>/business/v1/service-plans` |
+| 套餐价格 | `subscriptions.plan_prices` | 将对应套餐的 `null` 改为双方确认的数字；测试免费也要明确填 `0`，否则不发送通知 |
+| 外部 MCP 登记发布到 ARF/TRF | `registry.publish_url` | 对方接收登记的完整 POST 地址；当前只支持一个接收方 |
+| 对方访问本 NEF 的地址 | `registry.nef_base_url` | `http://<NEF电脑IP>:8069`，用于生成 MCP 代理入口 |
+| 允许连接的外部 MCP | `registry.mcp_servers` | 按[农场联调](docs/reference/farm-integration.md#5-nef-运维配置)填精确 URL 允许列表；只登记不代表已经发布 |
+| 车流量 Intent | `bridge.scenes.traffic_flow_detection.intent.url` | 已填 `http://10.70.113.122:5432/car/start`，按部署实际修改 |
+| 不指定场景的 Intent | `bridge.intent` | 将 `null` 改成 `{"url":"http://<接收方IP>:<端口>/<路径>","method":"POST","body":{"user_request":"$text"}}` |
+| 原子能力 API / MCP | `bridge.capabilities.<能力ID>` | route 对象，结构见 `config/bridge.example.json` |
+
+普通同日内网无鉴权测试可保留 `token_env: null`；有鉴权时这里只填凭据的环境变量名，不填 Key 本身。完整字段和回包见[套餐通知](docs/reference/subscription-query.md#10-跳转订购与套餐通知)、[车流量执行与回传](docs/reference/integration.md#车流量联调)和[农场 MCP 联调](docs/reference/farm-integration.md)。
+
+兼容旧部署：显式设置的 `NEF_BRIDGE_CONFIG` / `NEF_REGISTRY_CONFIG` / `NEF_SUBSCRIPTION_CONFIG` 优先于统一文件；换电脑不要照搬这些旧变量。仅在没有统一文件时，订购通知还会兼容读取 `config/subscription.local.json`。高级操作可用 `NEF_INTEGRATION_CONFIG` 指定统一文件位置。
+
+### 3. 对方改字段时，改哪个文件
+
+只改 IP、端口或路径时不改 Python。请求格式变化时按下表定位，改 Python 后需要重启并重新准备内存账号。
+
+| 改动 | 文件 / 位置 |
+|---|---|
+| `subscriberId`、`servicePlan`、`networkCapabilities` 等通知字段 | `subscription_notifications.py`：`_notify_plan()`、`deliver()` |
+| POST 到 ARF/TRF 的 MCP 登记正文 | `network_registry.py`：`_publication()` |
+| 选定能力或场景发布正文 | `catalog_publication.py` |
+| 车流量发送字段，例如 `user_request` | `config/integration.local.json` 的 `bridge.scenes.traffic_flow_detection.intent.body` |
+| 我方回传路径、`final_result` 接收与解析 | `exhibition.py`：`mount_routes()` 内 `/api/v1/scene-feedback` |
+| 我方订购 / 查询接口路径 | `server.py` |
+
+旧域名部署仍可按[运行手册](docs/demo-playbook.md#cloudflare-tunnel-演示部署)使用；换电脑不需要先配置 Tunnel。
+
+### 4. 运行测试（开发时可选）
 
 ```bash
 pytest -q
@@ -102,11 +112,11 @@ node tests/test_purchase.cjs
 ## 三、快速体验（5 分钟）
 
 1. 顶栏注册演示账号，能力超市查看三个场景及原有基础能力卡片；点击能力仍可查看参数、价格并订阅。
-2. 开通任一场景，进入意图受理；场景演示返回明确标注的文字结果，同时沿用原版逐级点亮的鉴权回执。
+2. 填好执行地址后开通场景，进入意图受理；查看对方的真实文字结果和鉴权回执。未配置的场景只显示待对接。
 3. 自助编排中拖入或点击能力、拖拽调整顺序。交付方式、GPU 上限及目标来源收在“可选约束”中，默认不填。可选模型推荐经采用进入草稿，填写名称并确认保存；发布按钮交付目录定义，不表示执行完成。
 4. 双向开放提交 MCP Server JSON；连接并发现工具后展开参数声明，按需同步 TRF / ARF。无配置时明确待对接。
 5. MCP 接口先连接 / 发现、再选工具；API 直调从已知能力开始。两者保留原版请求、参数、鉴权和响应两栏。
-6. 实际接口配置后切换真实调用；场景数据源仅需一个回传地址与 Key。文字优先，媒体按需展开。
+6. 实际接口配置后直接调用；场景数据源仅需一个回传地址与 Key。文字优先，媒体按需展开。
 
 ## 四、接口和执行边界
 
@@ -117,11 +127,11 @@ node tests/test_purchase.cjs
 - **双向开放**：外部 MCP Server 先登记，运维批准后才实际发现工具；发现与同步分别显示，不自动授予外部工具执行权。
 - **结果证据**：demo 明确标注；live 无配置返回 503、不回落；HTTP 受理不等于业务完成。场景级回传与某次调用不自动关联。
 
-真实执行配置：`NEF_BRIDGE_CONFIG` → `config/bridge.example.json`。网络目录 / 发布 / MCP 允许列表：`NEF_REGISTRY_CONFIG` → `config/registry.example.json`。智能推荐默认读取 `config/composer.local.json`（可由 `NEF_COMPOSER_CONFIG` 覆盖），模板为 `config/composer.example.json`；远程 Base URL `https://sub2api.2012wtlab.com/v1`、模型 `gpt-6-astra` 和 Responses 协议沿用既有远程配置，本项目推理档位已降为 `low`。模型 Key 使用 `NEF_COMPOSER_API_KEY`，不读取 Codex 密钥、不依赖本机 CPA。此前 `high` 档位通过一次真实推荐；`low` 的真实响应尚待验证。每次请求内嵌可用原子能力池与参数 schema；新代码按超时、上游错误、连接失败和响应格式错误分类，并返回排查用 request_id，不暴露密钥或上游正文。运行方法与代码加载状态见[演示运行手册](docs/demo-playbook.md#智能编排准备与现场操作)。
+对接地址统一读取 `config/integration.local.json`，字段与旧配置兼容规则见第二节。智能推荐默认读取 `config/composer.local.json`（可由 `NEF_COMPOSER_CONFIG` 覆盖），模板为 `config/composer.example.json`；远程 Base URL `https://sub2api.2012wtlab.com/v1`、模型 `gpt-6-astra`、Responses 协议及 `low` 档位已填写。模型 Key 使用 `NEF_COMPOSER_API_KEY`，不读取 Codex 密钥、不依赖本机 CPA。此前 `high` 档位通过一次真实推荐；`low` 的真实响应尚待验证。每次请求内嵌可用原子能力池与参数 schema；新代码按超时、上游错误、连接失败和响应格式错误分类，并返回排查用 request_id，不暴露密钥或上游正文。历史运行证据见[演示运行手册](docs/demo-playbook.md#智能编排准备与现场操作)。
 
 跨应用读取订阅：`GET /api/v1/integration/subscriptions?account_id=1`，其中 `1` 是在 NEF 注册的账号名，不是自动编号。1.1 响应的 `purchased_packages` 直接提供已购场景/能力套餐及详情，适合农场平台展示“已购网络套餐”；原子工具、参数 schema、权益来源等旧字段仍保留，不返回 API Key。公网仍需 Access 机器凭据，接口详细契约见[订阅查询接口](docs/reference/subscription-query.md)。农场查询套餐、MCP 注册发现、发布网络和网络回调的步骤见[农场平台联调](docs/reference/farm-integration.md)。场景开通不要求组件逐一订阅，但组件单独调用仍校验各自权益；订阅数据仍为内存态，重启后需恢复。
 
-订购主流程：农场按钮跳转 `/?account_id=1`，用户开通后由 NEF 向服务端配置的 `/business/v1/service-plans` POST `subscriberId` + `servicePlan`。套餐内含 `planId/showName/description/price`；用户明确选能力才附 `networkCapabilities`，不选则省略，交给网络 PA 自主编排。NEF 不实现 PA/CA 的决策逻辑。价格必须明确配置；失败保留订阅并支持同事件手动重试。实际地址待提供，**运行中服务尚未加载通知后端**。唯一契约见[套餐订购通知与订阅查询](docs/reference/subscription-query.md#10-跳转订购与套餐通知)，配置模板为 `config/subscription.example.json`。
+订购主流程：农场按钮跳转 `/?account_id=1`，用户开通后由 NEF 向配置的 `/business/v1/service-plans` POST `subscriberId` + `servicePlan`。套餐内含 `planId/showName/description/price`；默认发送套餐可用能力组成 `networkCapabilities`，用户全部取消勾选才省略并交给 PA 自主编排。NEF 不实现 PA/CA 决策。价格必须明确配置；失败保留订阅并支持同事件手动重试。真实农场地址及接收回执待联调；本次上传不重启已有进程。唯一契约见[套餐订购通知与订阅查询](docs/reference/subscription-query.md#10-跳转订购与套餐通知)，新部署使用统一配置模板 `config/integration.example.json`。
 
 向 ARF/NRF 提供选定的本地能力或场景元数据，使用独立的[网络目录发布接口](docs/reference/network-catalog.md)。这是待同事确认的项目契约，不是已实现标准 NRF 注册；与农场订购通知、AF MCP 注册分开。
 
@@ -131,6 +141,8 @@ node tests/test_purchase.cjs
 
 ```text
 server.py             FastAPI 路由、账号权益、API / MCP / 场景调用
+start.py              换机启动，初始化本地配置，监听 0.0.0.0:8069
+integration_config.py  统一对接配置读取
 skills.py             基础能力、标准分类、组合套餐与参考映射
 composition.py        配置冲突检查、限定目录的 LLM 推荐（不执行）
 subscription_query.py  对外订阅查询响应模型（不含凭据）
@@ -221,7 +233,9 @@ config/               内部执行、网络目录配置模板
 
 ```bash
 git status --short
+git add <已检查的变更文件>
 git diff --cached --check
+git commit -m "Update NEF integration"
 git push origin main
 ```
 

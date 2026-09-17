@@ -1,5 +1,5 @@
 /* Incremental integration for the original workbench. Native tabs, forms and drag/drop remain in index.html. */
-const wb={networkBusy:false,networkError:'',access:null,scenes:[],sceneId:'robot_patrol',catalog:[],servers:[],packages:[],networkStatus:'not_configured',epoch:0,channels:[],channel:'',mediaUrl:'',mediaId:'',feedbackKey:'',feedbackContext:'',feedbackSignature:'',feedbackBusy:false};
+const wb={networkBusy:false,networkError:'',access:null,scenes:[],sceneId:'',catalog:[],servers:[],packages:[],networkStatus:'not_configured',epoch:0,channels:[],channel:'',mediaUrl:'',mediaId:'',feedbackKey:'',feedbackContext:'',feedbackSignature:'',feedbackBusy:false};
 const wbStatus=x=>({not_configured:'待对接',not_discovered:'未发现',discovering:'发现中',discovered:'已发现',pending:'待同步',submitted:'已提交 · 待确认',synced:'已同步',syncing:'同步中',calling:'转发中',returned:'已收到 AF 回执',tool_error:'AF 返回工具错误',failed:'失败'}[x]||x||'待处理');
 function wbMessage(e){const d=e?.data?.detail??e?.detail;return typeof d==='string'?d:d?.message||e?.message||'请求未完成';}
 function wbError(e){toast(wbMessage(e),false);}
@@ -35,20 +35,19 @@ function wbOpenScene(id,owned){
   $('#wb-cancel').onclick=hideModal;$('#wb-confirm-scene').onclick=()=>wbJob($('#wb-confirm-scene'),$('#wb-sub-message'),async epoch=>{const result=await api('/api/v1/services/'+encodeURIComponent(id)+'/subscribe',{method:'POST',body:JSON.stringify({network_capability_ids:purchaseCapabilityIds()})});if(epoch!==wb.epoch)return;wb.sceneId=id;hideModal();purchaseNotice(result.notification);await wbLoadScenes();activateTab('intent',true);return '已开通';});
 }
 function wbRenderIntent(){
-  const sel=$('#wb-intent-scene');sel.innerHTML=wb.scenes.map(s=>`<option value="${esc(s.id)}" ${s.id===wb.sceneId?'selected':''}>${esc(s.name)}</option>`).join('');
-  $('#intent-input').value=wbScene()?.intent_example||'';
-  $('#intent-examples').innerHTML=wb.scenes.map(s=>`<button class="pill" data-intent-example="${esc(s.id)}">${esc(s.name)}</button>`).join('');
-  $$('#intent-examples [data-intent-example]').forEach(b=>b.onclick=()=>{wb.sceneId=b.dataset.intentExample;wb.epoch++;wbRenderIntent();wbResetResult();wbUpdateFeedback();});
+  const sel=$('#wb-intent-scene');sel.innerHTML='<option value="">不指定场景</option>'+wb.scenes.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');sel.value=wb.sceneId;
+  $('#wb-intent-subscribe').hidden=!wb.sceneId;
   $('#wb-intent-subscribe').onclick=()=>wbOpenScene(wb.sceneId,false);
   if(apiKey()){const epoch=wb.epoch;api('/api/v1/auth/info').then(info=>{if(epoch!==wb.epoch)return;const has=info.scene_subscriptions?.includes(wb.sceneId);$('#wb-intent-subscribe').disabled=!!has;$('#wb-intent-subscribe').textContent=has?'✓ 场景已授权':'开通当前场景';}).catch(()=>{});}
 }
 function wbResetResult(){$('#intent-result').innerHTML='<div class="step-card muted">提交业务目标，查看接入核验与文字结果。</div>';}
 $('#wb-intent-scene').onchange=e=>{wb.sceneId=e.target.value;wb.epoch++;wbRenderIntent();wbResetResult();wbUpdateFeedback();};
-$('#wb-intent-execution').onchange=()=>{wb.epoch++;wbResetResult();wbUpdateFeedback();};
 $('#intent-send').onclick=()=>wbJob($('#intent-send'),null,async epoch=>{
-  const text=$('#intent-input').value,scene=wbScene(),mode=$('#wb-intent-execution').value;if(!scene)throw new Error('请选择场景');if(!text.trim())throw new Error('请填写业务目标');
+  const text=$('#intent-input').value,scene=wbScene()||{id:'',name:'不指定场景'},mode='live';if(!text.trim())throw new Error('请填写业务目标');
+  await wbUpdateFeedback();if(epoch!==wb.epoch)return;
   $('#intent-result').innerHTML='<div class="agent-block"><b>◌ NEF · 可信接入</b><p class="muted">请求处理中，等待服务回执…</p></div>';
-  try{const res=await api('/api/v1/services/'+encodeURIComponent(scene.id)+'/intent',{method:'POST',headers:{'X-NEF-Execution':mode},body:JSON.stringify({text})});if(epoch!==wb.epoch)return;wbIntentResult(res,scene,mode);}
+  const endpoint=scene.id?'/api/v1/services/'+encodeURIComponent(scene.id)+'/intent':'/api/v1/intent';
+  try{const res=await api(endpoint,{method:'POST',headers:{'X-NEF-Execution':mode},body:JSON.stringify({text})});if(epoch!==wb.epoch)return;wbIntentResult(res,scene,mode);}
   catch(e){if(epoch!==wb.epoch)return;wbIntentResult(e.data||{},scene,mode,e);}
 });
 function wbIntentResult(res,scene,mode,error){
@@ -110,9 +109,8 @@ async function renderApiTab(){
   sel.innerHTML=caps.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');if(caps.some(c=>c.id===prev))sel.value=prev;
   sel.onchange=()=>{wb.epoch++;const c=wbApiCap();$('#api-params').innerHTML=c?paramForm(c,'apip'):'';$('#api-endpoint').textContent=c?.id.startsWith('scene:')?'/api/v1/services/collaborative_tracking/invoke':'/api/v1/capabilities/'+(c?.id||'')+'/invoke';$('#api-chain').innerHTML='<span class="method-chip">AF 已知接口</span> → <span class="method-chip">NEF · 权限与参数映射</span> → <span class="method-chip">网络服务</span>';$('#api-pipeline').innerHTML='';$('#api-req').textContent=$('#api-resp').textContent='--';wbUpdateFeedback();};sel.onchange();
 }
-$('#api-execution').onchange=()=>{wb.epoch++;$('#api-pipeline').innerHTML='';$('#api-resp').textContent='--';wbUpdateFeedback();};
 $('#api-send').onclick=()=>wbJob($('#api-send'),null,async epoch=>{
-  const cap=wbApiCap();if(!cap)throw new Error('请选择能力');const args=collectParams(cap,'apip');const endpoint=$('#api-endpoint').textContent;const mode=$('#api-execution').value;
+  const cap=wbApiCap();if(!cap)throw new Error('请选择能力');const args=collectParams(cap,'apip');const endpoint=$('#api-endpoint').textContent;const mode='live';
   $('#api-req').textContent=jfmt({method:'POST',url:endpoint,headers:{Authorization:'Bearer <AF Key>','X-NEF-Execution':mode},body:args});$('#api-resp').textContent='请求处理中…';$('#api-pipeline').innerHTML='';
   try{const r=await api(endpoint,{method:'POST',headers:{'X-NEF-Execution':mode},body:JSON.stringify(args)});if(epoch!==wb.epoch)return;renderAuthPipeline($('#api-pipeline'),r.nef_auth,null);$('#api-resp').textContent=NefStory.receipt(r).badge+'\n'+NefStory.businessResult(r)+'\n\n'+jfmt(r);}
   catch(e){if(epoch!==wb.epoch)return;renderAuthPipeline($('#api-pipeline'),e.data?.detail?.nef_auth,null);$('#api-resp').textContent=wbMessage(e)+'\n'+jfmt(e.data||{});}
@@ -132,15 +130,14 @@ $('#mcp-list-btn').onclick=()=>wbJob($('#mcp-list-btn'),null,async epoch=>{
 });
 $('#mcp-tool-select').onchange=()=>{wb.epoch++;const name=$('#mcp-tool-select').value;if(!name){wbMcp.state.selected=null;$('#mcp-params').innerHTML='';$('#mcp-call').disabled=true;wbUpdateFeedback();return;}wbMcp.select(name);const tool=wbMcp.state.selected;$('#mcp-pipeline').innerHTML='';$('#mcp-resp').textContent='--';if(!tool){$('#mcp-params').innerHTML='';wbUpdateFeedback();return;}
   $('#mcp-params').innerHTML='<p class="muted">参数来自发现的 inputSchema</p>'+NefMcp.fields(tool).map((f,i)=>`<label for="wb-mcp-param-${i}">${esc(f.description)} ${f.required?'*':''}</label><input id="wb-mcp-param-${i}" data-mcp-param="${esc(f.name)}" placeholder="${esc(f.type)}" value="${esc(typeof f.schema.default==='object'?jfmt(f.schema.default):(f.schema.default??''))}">`).join('');wbUpdateFeedback();};
-$('#mcp-execution').onchange=()=>{wb.epoch++;$('#mcp-pipeline').innerHTML='';$('#mcp-resp').textContent='--';wbUpdateFeedback();};
 $('#mcp-call').onclick=()=>wbJob($('#mcp-call'),null,async epoch=>{
   const tool=wbMcp.state.selected;if(!tool)throw new Error('请先发现并选择工具');const values=Object.fromEntries($$('#mcp-params [data-mcp-param]').map(el=>[el.dataset.mcpParam,el.value]));const args=NefMcp.parseArguments(tool,values);const req={jsonrpc:'2.0',id:Date.now(),method:'tools/call',params:{name:tool.name,arguments:args}};
   $('#mcp-req').textContent=jfmt(req);$('#mcp-resp').textContent='调用中…';$('#mcp-pipeline').innerHTML='';
-  try{const res=await api('/mcp',{method:'POST',headers:{'X-NEF-Execution':$('#mcp-execution').value,'MCP-Protocol-Version':NefMcp.VERSION},body:JSON.stringify(req)});if(epoch!==wb.epoch)return;if(res.error)throw new Error(res.error.message);if(res.id!==req.id)throw new Error('响应与本次请求不匹配');let inner;try{inner=JSON.parse(res.result.content.find(c=>c.type==='text').text);}catch{inner={summary:res.result?.content?.find(c=>c.type==='text')?.text};}renderAuthPipeline($('#mcp-pipeline'),inner?.nef_auth||inner?.detail?.nef_auth,null);$('#mcp-resp').textContent=(res.result?.isError?'工具执行未完成':NefStory.receipt(inner).badge)+'\n'+(res.result?.isError?wbMessage({data:{detail:inner}}):NefStory.businessResult(inner))+'\n\n'+jfmt(res);}
+  try{const res=await api('/mcp',{method:'POST',headers:{'X-NEF-Execution':'live','MCP-Protocol-Version':NefMcp.VERSION},body:JSON.stringify(req)});if(epoch!==wb.epoch)return;if(res.error)throw new Error(res.error.message);if(res.id!==req.id)throw new Error('响应与本次请求不匹配');let inner;try{inner=JSON.parse(res.result.content.find(c=>c.type==='text').text);}catch{inner={summary:res.result?.content?.find(c=>c.type==='text')?.text};}renderAuthPipeline($('#mcp-pipeline'),inner?.nef_auth||inner?.detail?.nef_auth,null);$('#mcp-resp').textContent=(res.result?.isError?'工具执行未完成':NefStory.receipt(inner).badge)+'\n'+(res.result?.isError?wbMessage({data:{detail:inner}}):NefStory.businessResult(inner))+'\n\n'+jfmt(res);}
   catch(e){if(epoch===wb.epoch)$('#mcp-resp').textContent=wbMessage(e)+'\n'+jfmt(e.data||{});}
 });
 /* One feedback address and scenario-specific Key, original invocation panes only. */
-function wbInvocation(){const tab=wbActive();if(tab==='intent')return {sceneId:wb.sceneId,mode:$('#wb-intent-execution').value};if(tab==='api')return {sceneId:$('#api-cap-select').value.startsWith('scene:')?'collaborative_tracking':'',mode:$('#api-execution').value};if(tab==='mcp'&&wbMcp.state.selected)return {sceneId:wb.scenes.find(s=>s.tool_name===wbMcp.state.selected.name)?.id||'',mode:$('#mcp-execution').value};return null;}
+function wbInvocation(){const tab=wbActive();if(tab==='intent')return {sceneId:wb.sceneId,mode:'live'};if(tab==='api')return {sceneId:$('#api-cap-select').value.startsWith('scene:')?'collaborative_tracking':'',mode:'live'};if(tab==='mcp'&&wbMcp.state.selected)return {sceneId:wb.scenes.find(s=>s.tool_name===wbMcp.state.selected.name)?.id||'',mode:'live'};return null;}
 function wbClearFeedback(){wb.feedbackSignature='';wb.mediaId='';if(wb.mediaUrl)URL.revokeObjectURL(wb.mediaUrl);wb.mediaUrl='';$('#wb-feedback-text').textContent='等待回传';$('#wb-feedback-data').textContent='—';$('#wb-feedback-media').textContent='等待媒体回传';}
 async function wbUpdateFeedback(){
   const inv=wbInvocation();$('#wb-feedback').hidden=!inv;
@@ -160,7 +157,7 @@ async function wbUpdateFeedback(){
 $('#wb-feedback-create').onclick=()=>{
   const c=wb.access;if(!c)return;
   const handoff=NefStory.feedbackHandoff(c,location.origin);
-  showModal(`<h2>${esc(c.name)} · 回传接口</h2><p class="muted">场景专用回传接口</p><label>回传地址</label><pre>POST ${esc(handoff.url)}</pre><details><summary>查看专用 Key（投屏时勿展开）</summary><pre>Authorization: Bearer ${esc(c.receiver_key)}</pre></details><label>文字结果 JSON</label><pre>${esc(jfmt({kind:'status',text:'任务完成，返回业务摘要。'}))}</pre><p class="muted">图片 / 视频也向同一地址上传原始文件字节，设置对应 Content-Type；单文件最多 16 MiB。其他机器请使用本机网卡地址。Key 在本次服务内复用，重启后需重新获取。</p><div class="wb-modal-actions"><button id="wb-source-copy">复制对接信息</button><button id="wb-source-close">关闭</button></div>`);
+  showModal(`<h2>${esc(c.name)} · 回传接口</h2><p class="muted">场景专用回传接口</p><label>回传地址</label><pre>POST ${esc(handoff.url)}</pre><details><summary>查看专用 Key（投屏时勿展开）</summary><pre>Authorization: Bearer ${esc(c.receiver_key)}</pre></details><label>文字结果 JSON</label><pre>${esc(jfmt(handoff.json_example))}</pre><p class="muted">图片 / 视频也向同一地址上传原始文件字节，设置对应 Content-Type；单文件最多 16 MiB。其他机器请使用本机网卡地址。Key 在本次服务内复用，重启后需重新获取。</p><div class="wb-modal-actions"><button id="wb-source-copy">复制对接信息</button><button id="wb-source-close">关闭</button></div>`);
   $('#wb-source-close').onclick=hideModal;
   $('#wb-source-copy').onclick=async()=>{try{await navigator.clipboard.writeText(jfmt(handoff));toast('已复制');}catch{toast('剪贴板不可用，请手动复制',false);}};
 };

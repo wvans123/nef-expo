@@ -215,7 +215,7 @@ th{background:var(--card);color:var(--muted)}
     <div class="registry-strip"><div><b>网络内部 · ARF / TRF 能力目录</b><span id="wb-catalog-status" class="muted">接入账号后自动同步</span></div></div>
     <h3 class="sec">场景套餐 <small class="muted">按业务场景开通网络能力</small></h3>
     <div id="wb-scene-market" class="wb-scene-grid"></div>
-    <details class="wb-legacy-packages"><summary>基础能力组合套餐</summary><div id="pkg-row"></div></details>
+    <details class="wb-legacy-packages" hidden><summary>基础能力组合套餐（兼容旧订阅）</summary><div id="pkg-row"></div></details>
     <div id="wb-network-market"></div>
     <div id="cap-list"></div>
   </div>
@@ -226,10 +226,10 @@ th{background:var(--card);color:var(--muted)}
   <!-- Tab 3 API 调试 -->
   <div class="tabpane" id="pane-api">
     <h3 class="sec">API 直调 <span class="muted" style="font-weight:400;font-size:12px">— 已知能力接口，传入明确业务参数</span></h3>
-    <div id="api-chain" style="margin-bottom:10px"></div><div class="wb-mode"><label for="api-execution">执行方式</label><select id="api-execution"><option value="demo">演示调用</option><option value="live">真实调用</option></select></div>
+    <div id="api-chain" style="margin-bottom:10px"></div>
     <div style="display:grid;grid-template-columns:340px 1fr;gap:16px">
       <div>
-        <label>选择已订阅的能力</label>
+        <label>选择能力或场景</label>
         <select id="api-cap-select"></select>
         <div id="api-endpoint" class="mono muted" style="font-size:12px;margin:8px 0"></div>
         <div id="api-params"></div>
@@ -251,7 +251,7 @@ th{background:var(--card);color:var(--muted)}
         <button id="mcp-list-btn" style="width:100%">连接 NEF 并发现工具</button><div id="wb-mcp-stages" class="muted" role="status"></div>
         <label style="margin-top:14px">选择 Tool（tools/call）</label>
         <select id="mcp-tool-select"></select>
-        <div id="mcp-params"></div><div class="wb-mode"><label for="mcp-execution">执行方式</label><select id="mcp-execution"><option value="demo">演示调用</option><option value="live">真实调用</option></select></div>
+        <div id="mcp-params"></div>
         <button class="primary" id="mcp-call" style="margin-top:12px;width:100%">tools/call</button>
       </div>
       <div>
@@ -266,10 +266,9 @@ th{background:var(--card);color:var(--muted)}
   <div class="tabpane" id="pane-intent">
     <h3 class="sec">Intent 安全受理与网络 Agent 转发</h3>
     <p class="muted" style="max-width:900px;margin-bottom:10px">NEF 负责鉴权、受理、审计和路由，随后将 Intent 原文转交网络侧意图接收方。目标解析与执行由网络侧承接，文字结果在这里汇聚。</p>
-    <div class="wb-intent-controls"><div><label for="wb-intent-scene">场景套餐</label><select id="wb-intent-scene"></select></div><div><label for="wb-intent-execution">执行方式</label><select id="wb-intent-execution"><option value="demo">场景演示</option><option value="live">真实调用</option></select></div><button id="wb-intent-subscribe" class="success">开通当前场景</button></div><div class="muted" style="margin-bottom:8px">示例意图（点击填入）：</div>
-    <div id="intent-examples"></div>
+    <div class="wb-intent-controls"><div><label for="wb-intent-scene">场景套餐</label><select id="wb-intent-scene"></select></div><button id="wb-intent-subscribe" class="success" hidden>开通当前场景</button></div>
     <div style="display:flex;gap:10px;margin:12px 0">
-      <input id="intent-input" placeholder="用自然语言描述你的需求，例如：帮我检测一下仓库里有没有异常物体">
+      <input id="intent-input" placeholder="输入业务意图">
       <button class="primary" id="intent-send" style="flex:0 0 auto">发送意图</button>
     </div>
     <div id="intent-result"><div class="step-card muted">提交业务目标，查看接入核验与文字结果。</div></div>

@@ -20,7 +20,7 @@
     if(result?.data_source==='demo')return result.demo_result?.text||result.summary||'已收到演示回执';
     const body=result?.data_source==='live'?result.upstream?.body:result;
     if(typeof body==='string'&&body.trim())return body;
-    const texts=[body?.text,body?.result,body?.result?.text,body?.result?.summary,body?.summary,body?.message];
+    const texts=[body?.final_result,body?.text,body?.result,body?.result?.text,body?.result?.summary,body?.summary,body?.message];
     const text=texts.find(t=>typeof t==='string'&&t.trim());
     if(text)return text;
     if(result?.data_source==='live')return '网络侧已响应，尚未返回文字业务结果。可在场景回传区接收后续反馈。';
@@ -31,7 +31,7 @@
   }
   function feedbackHandoff(channel,origin){
     return {url:origin+channel.feedback_endpoint,receiver_key:channel.receiver_key,
-      json_example:{kind:'status',text:'正在处理'},
+      json_example:channel.service_id==='traffic_flow_detection'?{final_result:'今天下午3点十字路口东南侧的车流量处于中等水平。'}:{kind:'status',text:'正在处理'},
       media:'同一地址上传文件原始字节；Content-Type 使用 image/png、image/jpeg、image/webp、video/mp4 或 video/webm'};
   }
   const api={path,receipt,businessResult,feedbackChannels,feedbackHandoff};

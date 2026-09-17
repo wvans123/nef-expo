@@ -2,7 +2,7 @@
 
 分类：接口参考。协议版本：1.1。更新：2026-09-17。
 
-交付状态：2026-09-17，8069 运行服务已加载 1.1 查询接口。本机账号 `1` 已开通 `robot_patrol`，`2`、`3` 为空；这是检查时的快照，不是预置数据。Tunnel 就绪，跨机有效 Access 凭据仍待验收。本文第 10 节的订购通知已实现并通过本地模拟对端测试，**当前运行进程尚未加载通知后端**，不能把代码完成当成通知已经送达。
+交付状态：代码包含 1.1 查询与第 10 节订购通知，通知通过本地模拟对端验证，真实农场接收仍待联调。换电脑按 [README](../../README.md#二换电脑启动与配置) 运行 `python start.py` 并填写统一配置。本次上传不重启已有进程；旧机器状态属于运行手册中的历史检查快照，不是新机器预置账号或交付保证。
 
 **当前主流程：农场页面跳转 NEF → 按约定编号订购 → NEF 服务端 POST 套餐给农场。** 跳转和通知契约见[第 10 节](#10-跳转订购与套餐通知)。下面的 GET 查询保留作首次加载、刷新与补偿查询，响应版本仍为 1.1。
 
@@ -20,13 +20,14 @@
 | 公网 Base URL | `https://nef.2012wtlab.com` |
 | 公网完整示例 | `https://nef.2012wtlab.com/api/v1/integration/subscriptions?account_id=1` |
 | 本机 Base URL | `http://127.0.0.1:8069`，仅 NEF 所在电脑可用 |
+| 内网 Base URL | `http://<NEF电脑IP>:8069`，换电脑联调首选，不依赖旧域名 |
 | 请求体 | 无 |
 | 成功响应 | HTTP 200，`application/json`，UTF-8 |
 | 缓存 | `Cache-Control: no-store` |
 | OpenAPI | `GET /openapi.json`，响应模型 `SubscriptionSnapshot`；公网同样受 Access 保护 |
 | 查询作用范围 | 当前 NEF 服务进程中的演示账号与订阅 |
 
-当前 NEF 只监听本机回环地址。另一台电脑使用公网完整地址，不要把 `127.0.0.1` 当成 NEF 地址。
+`python start.py` 默认监听 `0.0.0.0:8069`，另一台电脑填写 NEF 网卡 IP，不使用 `127.0.0.1` 或 `0.0.0.0` 作为请求地址。
 
 ## 2. 账号编号与初始化
 
@@ -55,7 +56,7 @@
 | `Accept` | 否 | 建议 `application/json` |
 | `Authorization` | 否 | 本查询接口不需要 NEF 账号 Key；不要传模型 Key 或场景回传 Key |
 
-编号只用于定位数据，不是认证凭据。公网仍由现有 Cloudflare Access 保护，不新增 NEF 业务 Key 要求。**通过这一共享入口保护的联调客户端可以查询任意已知演示编号，并非按用户隔离的生产授权接口。** 只使用测试账号与测试订阅；正式多租户接入必须另加调用方身份与账号范围校验。
+内网直连无需 Cloudflare 请求头。编号只用于定位数据，不是认证凭据；能访问内网查询接口的客户端可查询任意已知演示编号。旧公网入口仍由 Cloudflare Access 保护。**两种部署均不是按用户隔离的生产授权接口。** 只使用测试账号与测试订阅；正式多租户接入必须另加调用方身份与账号范围校验。
 
 请从对方应用后端调用，将 Access 凭据放在服务端环境变量。不要在浏览器前端嵌入机器 Secret；本次未新增跨域 CORS 放行。浏览器正常登录 NEF 后也可凭已有会话访问，但不作为后端机器调用的替代方式。
 
@@ -281,9 +282,9 @@ for tool in snapshot["tools"]:
 
 ### 10.1 跳转入口
 
-农场页面按钮直接导航至 `https://nef.2012wtlab.com/?account_id=1`。编号 `1` 可替换为约定的 `2`、`3`；此跳转只接受一项 `account_id`，值为 1–32 位数字字符串。页面接入或切换到对应演示账号，然后由用户选择套餐并点击开通，不因访问链接就自动购买。无该参数时保持原账号操作流程。
+农场页面按钮直接导航至 `http://<NEF电脑IP>:8069/?account_id=1`；旧 Tunnel 部署可用 `https://nef.2012wtlab.com/?account_id=1`。编号 `1` 可替换为约定的 `2`、`3`；此跳转只接受一项 `account_id`，值为 1–32 位数字字符串。页面接入或切换到对应演示账号，然后由用户选择套餐并点击开通，不因访问链接就自动购买。无该参数时保持原账号操作流程。
 
-跳转仍经过已有 Cloudflare Access 登录。机器 Access Secret 不能放进跳转 URL 或浏览器代码，需提前确认同事浏览器能够通过已有入口保护。本次没有放宽 Access 策略。账号编号不是身份认证，不能将这种自助演示账号用于生产。
+只有旧公网跳转经过 Cloudflare Access 登录，内网直连不需要。机器 Access Secret 不能放进跳转 URL 或浏览器代码。本次没有放宽 Access 策略。账号编号不是身份认证，不能将这种自助演示账号用于生产。
 
 回调目的地只由 NEF 服务端运维配置；URL 查询参数中的 `callback_url` 等不生效，避免浏览器把订购信息发送到任意地址。当前没有订购完成后自动跳回农场页面的约定。
 
@@ -310,7 +311,7 @@ for tool in snapshot["tools"]:
 | `servicePlan.showName` | string | 是 | 套餐名称，取 NEF 当前目录 |
 | `servicePlan.description` | string | 是 | 套餐描述，取 NEF 当前目录 |
 | `servicePlan.price` | number (float) | 是 | 显式配置的套餐价格；非负有限数值，不能为字符串或 null |
-| `servicePlan.networkCapabilities` | object[] | 否 | 用户明确选择的网络能力范围；未选择时整个字段省略，不传 null 或空数组 |
+| `servicePlan.networkCapabilities` | object[] | 否 | 默认附带套餐内全部可用能力，用户可调整；全部取消时字段省略，不传 null 或空数组 |
 
 每个 `networkCapabilities` 元素：
 
@@ -368,15 +369,15 @@ X-NEF-Event-ID: sub_<本次通知标识>
 }
 ```
 
-订购弹窗提供当前套餐内的可用网络能力复选框，默认不勾选。所选项只是交给网络侧的范围约束，不自动开通原子工具的独立调用权益，也不改变本地场景执行实现。
+订购弹窗提供当前套餐内的可用网络能力复选框，默认全部勾选，优先发送能力组合。所选项只是交给网络侧的范围约束，不自动开通原子工具的独立调用权益，也不改变本地场景执行实现。
 
-页面调用 NEF 的场景订购接口可带 `{"network_capability_ids":["target_detection"]}`；省略请求体、传 `{}` 或 `{"network_capability_ids":[]}` 均表示不限定范围。仅接受当前套餐已开放的能力 ID，重复、未知或越出套餐的能力返回 422，且不产生订购。NEF 从认证账号取 `subscriberId`，不接受场景请求体伪造订购者。
+页面调用 NEF 的场景订购接口可带 `{"network_capability_ids":["target_detection"]}`；省略请求体或传 `{}` 默认发送套餐能力组合，只有显式 `{"network_capability_ids":[]}` 表示不限定范围。仅接受当前套餐已开放的能力 ID，重复、未知或越出套餐的能力返回 422，且不产生订购。NEF 从认证账号取 `subscriberId`，不接受场景请求体伪造订购者。
 
 旧 `POST /api/v1/subscribe` 同样支持 `network_capability_ids`，但非空选择时要求 `package_ids` 只有一个套餐，避免把不同套餐的范围混在一起。旧接口的演示账号身份规则未升级为生产认证。
 
 ### 10.3 NEF 服务端配置
 
-模板为 `config/subscription.example.json`，实际配置放 Git 忽略的 `config/subscription.local.json`，或用 `NEF_SUBSCRIPTION_CONFIG` 指定文件。每次发送或重试重新读取该文件。真实 URL、价格、鉴权尚未配置，模板默认不向外发送。
+新部署只改 `config/integration.local.json` 的 `subscriptions` 对象。`start.py` 自动从 `config/integration.example.json` 创建文件；每次发送或重试重新读取。将下面对象填在 `subscriptions` 内，不要覆盖其余 `bridge` / `registry`。真实 URL、价格、鉴权需由双方填写，模板默认不发送套餐通知。
 
 ```json
 {
@@ -393,7 +394,7 @@ X-NEF-Event-ID: sub_<本次通知标识>
 
 带凭证的非回环地址必须用 HTTPS；当天获准局域网测试可配置不带凭证的 HTTP，仍会明文发送套餐和 `subscriberId`。地址不允许内嵌用户名/密码、query 或 fragment。不从浏览器传入地址或密钥，不修改现有 Tunnel。
 
-通知配置热读不等于 Python 后端热加载。当前旧服务必须安排一次加载新代码的重启，重启清空内存数据和旧 Key；不能在同事测试中途直接重启。新代码运行后修改 JSON 无需再次重启，新增凭据环境变量仍需由启动进程继承。
+兼容旧部署：`NEF_SUBSCRIPTION_CONFIG` 显式指定的独立文件优先；没有统一文件时仍读取 `config/subscription.local.json`，其结构模板为 `config/subscription.example.json`。新部署不必设置这些旧路径。修改 JSON 无需重启；更新 Python 或新增进程环境变量需安排重启，重启清空内存账号和 Key，勿在同事测试中途操作。
 
 ### 10.4 响应、失败与重试
 

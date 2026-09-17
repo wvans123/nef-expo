@@ -23,6 +23,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 import httpx
+from integration_config import section as integration_section
 from composition import check_composition, recommend, load_llm_config
 from catalog_publication import CatalogSelection, publication as catalog_publication
 from jsonschema import Draft202012Validator, SchemaError
@@ -164,11 +165,11 @@ def _valid_env_name(value: Any) -> str | None:
 
 def _load_config() -> dict[str, Any]:
     raw = os.getenv("NEF_REGISTRY_CONFIG")
-    if not raw or not raw.strip():
-        return {}
     try:
-        source = raw.strip()
-        if source.startswith("{"):
+        source = (raw or "").strip()
+        if not source:
+            data = integration_section("registry")
+        elif source.startswith("{"):
             data = json.loads(source)
         else:
             data = json.loads(Path(source).read_text(encoding="utf-8"))
