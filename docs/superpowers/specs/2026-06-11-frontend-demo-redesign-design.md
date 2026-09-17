@@ -156,7 +156,7 @@ ARF / TRF 是网络内部网元，已有网络内部工具信息。NEF 一方面
 
 ## 6. 场景 Intent、结果与鉴权
 
-农场订购交接独立于执行：跳转 `/?account_id=1`，用户开通后发送 `subscriberId` + `servicePlan` 到运维配置的 `/business/v1/service-plans`。可选 `networkCapabilities` 来自本次明确勾选，不选则省略；PA/CA 在范围内编排或 PA 自主编排均归网络侧，NEF 不实现规划器。通知失败不撤销本地权益，手动重试保留事件 ID 与正文；价格不能默认零元。唯一契约见[套餐订购通知与订阅查询](../../reference/subscription-query.md)。
+农场订购交接独立于执行：跳转 `/?account_id=1`，用户开通后发送 `subscriberId` + `servicePlan` 到运维配置的 `/business/v1/service-plans`。当前约定外发 `subscriberId` 固定为 `subscriber-001`，本地账号及通知权限仍独立；不同本地账号在对方侧属于同一个测试订购者。`networkCapabilities` 默认勾选套餐可用能力，全部取消则省略；PA/CA 编排归网络侧，NEF 不实现规划器。通知失败不撤销本地权益，手动重试保留事件 ID 与正文；价格不能默认零元。唯一契约见[套餐订购通知与订阅查询](../../reference/subscription-query.md)。
 
 `scene_services.py` 维护三个场景契约。`POST /api/v1/services/{service_id}/intent` 先校验 AF、`intent:submit` 和场景订阅，再转发原文。
 

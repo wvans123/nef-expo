@@ -93,7 +93,7 @@ try {
 
 主流程为农场页面跳转 `http://<NEF电脑IP>:8069/?account_id=1` → 用户订购 → NEF POST `subscriberId` + `servicePlan` 到农场 `/business/v1/service-plans`。默认勾选套餐全部能力并发送 `servicePlan.networkCapabilities`；全部取消才省略，PA 自主编排由网络侧实现。旧 Tunnel 部署仍可用原域名。字段、配置和重试唯一维护于[套餐订购通知与订阅查询](reference/subscription-query.md#10-跳转订购与套餐通知)。
 
-补偿查询接口仍为 `GET /api/v1/integration/subscriptions?account_id=1`。对方不需要 NEF 账号 Key，公网继续带原有 Access 机器凭据；跳转浏览器必须先能通过现有 Access 登录，不能把机器 Secret 放到链接中。
+当前联调的 POST `subscriberId` 固定为 `subscriber-001`，不随本地账号改变，不需要配置新变量。补偿查询接口仍为 `GET /api/v1/integration/subscriptions?account_id=1`，使用本地账号编号。对方不需要 NEF 账号 Key，公网继续带原有 Access 机器凭据；公网跳转浏览器必须先能通过现有 Access 登录，不能把机器 Secret 放到链接中。
 
 农场平台优先读取 1.1 的 `purchased_packages`，一次获得已购场景套餐 / 旧能力套餐的名称、说明、组成能力、支持的入口和意图示例；未购目录和编排草稿不作为已购返回。完整双向流程见[农场平台联调](reference/farm-integration.md)。查询账号编号与注册 MCP 的鉴权分开，不能用数字编号替代 MCP 登记或网内调用凭据。
 

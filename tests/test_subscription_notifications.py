@@ -51,7 +51,8 @@ def test_purchase_posts_exact_partner_fields_and_stable_uuid(client, peer, monke
     request = peer.requests[0]
     body = json.loads(request["body"])
     assert set(body) == {"subscriberId", "servicePlan"}
-    assert body["subscriberId"] == "1"
+    assert body["subscriberId"] == "subscriber-001"
+    assert response.json()["notification"]["account_id"] == "1"
     plan = body["servicePlan"]
     assert set(plan) == {"planId", "showName", "description", "price", "networkCapabilities"}
     assert [cap["capabilityName"] for cap in plan["networkCapabilities"]] == [
@@ -64,11 +65,13 @@ def test_purchase_posts_exact_partner_fields_and_stable_uuid(client, peer, monke
     assert "synthetic-callback-secret" not in response.text
     assert "nef_" not in request["body"].decode()
     assert "account_id" not in body
-    client.post("/api/v1/services/robot_patrol/subscribe", headers=account(client, "2"))
+    second_response = client.post("/api/v1/services/robot_patrol/subscribe", headers=account(client, "2"))
+    assert second_response.json()["notification"]["account_id"] == "2"
     second = json.loads(peer.requests[1]["body"])
-    assert second["subscriberId"] == "2"
+    assert second["subscriberId"] == "subscriber-001"
     assert second["servicePlan"]["planId"] == plan["planId"]
     client.post("/api/v1/subscribe", json={"account": "1", "package_ids": ["robot_patrol"]})
+    assert json.loads(peer.requests[2]["body"])["subscriberId"] == "subscriber-001"
     assert json.loads(peer.requests[2]["body"])["servicePlan"]["planId"] != plan["planId"]
     assert json.loads(peer.requests[2]["body"])["servicePlan"]["price"] == 39.9
 
@@ -91,6 +94,7 @@ def test_failure_keeps_entitlement_and_retry_uses_same_event_and_payload(client,
     peer.add("POST", "/business/v1/service-plans", lambda r: json_response({"received": True}))
     assert client.post(retry, headers=headers).json()["status"] == "delivered"
     assert peer.requests[0]["body"] == peer.requests[1]["body"]
+    assert json.loads(peer.requests[1]["body"])["subscriberId"] == "subscriber-001"
     assert peer.requests[0]["headers"]["idempotency-key"] == peer.requests[1]["headers"]["idempotency-key"]
     assert client.post(retry, headers=headers).json()["status"] == "delivered"
     assert len(peer.requests) == 2
@@ -114,7 +118,7 @@ def test_missing_callback_can_be_configured_then_retried(client, peer, monkeypat
     configure(monkeypatch, tmp_path, peer)
     result = client.post("/api/v1/integration/notifications/" + event["event_id"] + "/retry", headers=headers)
     assert result.json()["status"] == "delivered"
-    assert json.loads(peer.requests[0]["body"])["subscriberId"] == "1"
+    assert json.loads(peer.requests[0]["body"])["subscriberId"] == "subscriber-001"
 
 
 def test_unapproved_account_no_callback_and_atomic_subscription_not_a_plan(client, peer, monkeypatch, tmp_path):
@@ -158,7 +162,7 @@ def test_only_explicitly_selected_network_capabilities_are_sent(client, peer, mo
     endpoint = "/api/v1/subscribe" if legacy else "/api/v1/services/robot_patrol/subscribe"
     assert client.post(endpoint, headers=headers, json=payload).status_code == 200
     body = json.loads(peer.requests[0]["body"])
-    assert body["subscriberId"] == "1"
+    assert body["subscriberId"] == "subscriber-001"
     plan = body["servicePlan"]
     assert set(plan) == {"planId", "showName", "description", "price", "networkCapabilities"}
     expected = [

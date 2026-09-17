@@ -16,7 +16,7 @@
 - [基础能力标准复核](../README.md#六能力目录与标准复核)：逐项分类及官方依据；产品接口不能等同于标准北向 API。
 - [智能推荐配置](../config/composer.example.json)：远程服务、模型和 Responses 协议沿用既有配置，项目推理档位降为 low；Key 使用服务端环境变量。能力池提示词、可选约束、新错误分类及运行代码加载边界见[演示手册](demo-playbook.md#智能编排准备与现场操作)。
 - [场景接口对接说明](reference/integration.md)：统一回传地址、状态 / 数据 / 媒体示例、执行接口资料清单及联调顺序；包含机器狗与车流的独立配置、可改参数名及未知响应查看方式。机器狗地址、参数名及响应契约待确认，实际内部执行接口待联调。
-- [套餐订购通知与订阅查询](reference/subscription-query.md)：跳转账号、POST `subscriberId/servicePlan`、默认能力组合、显式空选择、价格、重试和 1.1 已购详情；支持内网 IP 部署，真实对端待联调。
+- [套餐订购通知与订阅查询](reference/subscription-query.md)：跳转账号、固定 `subscriberId=subscriber-001` 的套餐通知、默认能力组合、显式空选择、价格、重试和 1.1 已购详情；本地账号与查询编号不变，真实对端待联调。
 - [统一对接配置](../config/integration.example.json)：`start.py` 自动生成本地配置，集中设置订购、ARF/TRF 发布、通用 Intent 和场景执行地址；价格由双方填写，本地文件不上传。
 - [旧订购通知配置](../config/subscription.example.json)：兼容独立配置模式，新部署优先使用统一文件。
 - [选定网络目录发布](reference/network-catalog.md)：显式选择本地能力/场景，预览并发布元数据到目录；不是标准 NRF 注册，真实 ARF/NRF 接口待确认，上传不会更新已有进程。

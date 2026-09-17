@@ -55,7 +55,7 @@ CF-Access-Client-Secret: <NEF单独提供>
 
 农场按钮导航到 `http://<NEF电脑IP>:8069/?account_id=1`；使用旧公网域名时需通过 Access 登录。订购通知结构为 `subscriberId` + `servicePlan`，套餐包含 UUID、名称、描述和显式价格；默认勾选全部可用组成能力并附加 `networkCapabilities`。用户可缩小范围，全部取消才省略该字段并交给 PA 自主编排。NEF 不实现 PA/CA 决策，四字段平铺旧格式不再使用。
 
-字段、选能力/不选能力两种完整示例、价格配置与重试见[套餐订购通知](subscription-query.md#10-跳转订购与套餐通知)。接收方需保留 subscriberId 归属并按事件头去重；HTTP 2xx 仅表示通知送达，业务入库响应待确认。浏览器跳转不要携带机器 Secret。
+本次外发 `subscriberId` 固定为 `"subscriber-001"`，本地账号 `1/2/3` 和跳转链接不变；不同本地账号的通知在农场侧都属于同一个测试订购者。字段、选能力/不选能力两种完整示例、价格配置与重试见[套餐订购通知](subscription-query.md#10-跳转订购与套餐通知)。接收方按事件头去重；HTTP 2xx 仅表示通知送达，业务入库响应待确认。浏览器跳转不要携带机器 Secret。
 
 原 GET 查询保留作首次加载和失败后的补偿读取：
 

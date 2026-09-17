@@ -20,6 +20,7 @@ from integration_config import local_path, section as integration_section
 EVENTS = {}
 LOCK = threading.RLock()
 MAX_EVENTS = 1000
+SUBSCRIBER_ID = "subscriber-001"
 
 
 def _config(account):
@@ -143,7 +144,7 @@ def deliver(event_id, account):
                 event.update(status="not_configured", code="price_not_configured")
                 return _public(event)
         if payload is None:
-            payload = {"subscriberId": account, "servicePlan": {**event["definition"], "price": float(price)}}
+            payload = {"subscriberId": SUBSCRIBER_ID, "servicePlan": {**event["definition"], "price": float(price)}}
             with LOCK:
                 event["payload"] = copy.deepcopy(payload)
         token = os.getenv(cfg["token_env"]) if cfg.get("token_env") else None

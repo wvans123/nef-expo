@@ -301,11 +301,11 @@ for tool in snapshot["tools"]:
 | 鉴权 | 待确认；支持运维配置服务端 Bearer 环境变量，不复用 NEF 用户 Key 或模型 Key |
 | 重定向 | 不跟随；3xx 视作通知失败 |
 
-请求体为 `subscriberId` + `servicePlan`，不再发送旧版四字段平铺结构：
+请求体为 `subscriberId` + `servicePlan`，不再发送旧版四字段平铺结构。按本次联调约定，外发 `subscriberId` 固定为 `"subscriber-001"`；本地账号 `1/2/3`、查询参数 `account_id` 和通知访问权限保持不变，无需修改跳转链接或配置中的 `account_ids`。这意味着不同本地账号的通知在农场侧均属于同一个测试订购者，不用于验证多用户隔离。
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `subscriberId` | string | 是 | 订购账号编号，如 `"1"`；来源于 NEF 当前订购账号 |
+| `subscriberId` | string | 是 | 固定 `"subscriber-001"`，服务端设置，不取本地账号编号或浏览器传值 |
 | `servicePlan` | object | 是 | 本次订购的套餐 |
 | `servicePlan.planId` | string (UUID) | 是 | 服务套餐标识；同一套餐跨账号、跨重启稳定，不是订单 ID |
 | `servicePlan.showName` | string | 是 | 套餐名称，取 NEF 当前目录 |
@@ -336,7 +336,7 @@ X-NEF-Event-ID: sub_<本次通知标识>
 
 ```json
 {
-  "subscriberId": "1",
+  "subscriberId": "subscriber-001",
   "servicePlan": {
     "planId": "36b3d800-2774-5e2d-a647-c26194fba4ae",
     "showName": "机器狗巡检",
@@ -353,13 +353,13 @@ X-NEF-Event-ID: sub_<本次通知标识>
 }
 ```
 
-示例 UUID 对应场景 `robot_patrol`，能力描述为简写；实际正文来自目录。UUID 规则为 Python `uuid5(NAMESPACE_URL, "urn:nef:service-plan:" + kind + ":" + id)`，其中 `kind` 是查询响应中的 `scene` 或 `capability_package`。因此同名旧套餐和新场景不会撞号。`planId` 标识套餐模板，不随用户所选范围改变；接收方需按 `subscriberId` 保留本次选择，不能用一人的能力范围覆盖其他订购者。GET 查询仍返回内部 `kind/id`，不含价格或本次通知的能力选择。
+示例 UUID 对应场景 `robot_patrol`，能力描述为简写；实际正文来自目录。UUID 规则为 Python `uuid5(NAMESPACE_URL, "urn:nef:service-plan:" + kind + ":" + id)`，其中 `kind` 是查询响应中的 `scene` 或 `capability_package`。因此同名旧套餐和新场景不会撞号。`planId` 标识套餐模板，不随用户所选范围改变；接收方将本次选择归入固定测试订购者 `subscriber-001`，并按事件头去重。同一套餐从不同本地账号购买仍属于该测试订购者，需按双方业务约定处理更新。GET 查询仍按本地账号返回内部 `kind/id`，不含价格或本次通知的能力选择。
 
 未选择网络能力的请求如下，同一订购者仍有明确身份，不需要另加账号请求头：
 
 ```json
 {
-  "subscriberId": "1",
+  "subscriberId": "subscriber-001",
   "servicePlan": {
     "planId": "36b3d800-2774-5e2d-a647-c26194fba4ae",
     "showName": "机器狗巡检",
@@ -371,7 +371,7 @@ X-NEF-Event-ID: sub_<本次通知标识>
 
 订购弹窗提供当前套餐内的可用网络能力复选框，默认全部勾选，优先发送能力组合。所选项只是交给网络侧的范围约束，不自动开通原子工具的独立调用权益，也不改变本地场景执行实现。
 
-页面调用 NEF 的场景订购接口可带 `{"network_capability_ids":["target_detection"]}`；省略请求体或传 `{}` 默认发送套餐能力组合，只有显式 `{"network_capability_ids":[]}` 表示不限定范围。仅接受当前套餐已开放的能力 ID，重复、未知或越出套餐的能力返回 422，且不产生订购。NEF 从认证账号取 `subscriberId`，不接受场景请求体伪造订购者。
+页面调用 NEF 的场景订购接口可带 `{"network_capability_ids":["target_detection"]}`；省略请求体或传 `{}` 默认发送套餐能力组合，只有显式 `{"network_capability_ids":[]}` 表示不限定范围。仅接受当前套餐已开放的能力 ID，重复、未知或越出套餐的能力返回 422，且不产生订购。NEF 仍从认证账号确认本地权益和通知归属，但外发 `subscriberId` 使用固定值；不接受场景请求体覆盖该字段。
 
 旧 `POST /api/v1/subscribe` 同样支持 `network_capability_ids`，但非空选择时要求 `package_ids` 只有一个套餐，避免把不同套餐的范围混在一起。旧接口的演示账号身份规则未升级为生产认证。
 
@@ -426,6 +426,6 @@ NEF 先记录本地开通权益，再同步尝试通知。通知失败不撤销�
 
 1. 农场提供完整 POST 地址、鉴权方式、成功/失败响应；双方确认套餐价格和 `capabilityName` 的稳定标识映射。
 2. NEF 配好 URL 和明确价格，协调新后端加载；重新准备演示账号后，农场按钮跳转到带 `account_id` 的商城页面。
-3. 用户开通一个场景，农场核对 `subscriberId`、嵌套 `servicePlan`、稳定 UUID 和幂等头。分别验收选中部分能力时的精确列表，以及全不选时没有 `networkCapabilities` 字段；PA/CA 在范围内编排和 PA 自主编排由网络侧独立验收。
+3. 用户开通一个场景，农场核对 `subscriberId="subscriber-001"`、嵌套 `servicePlan`、稳定 UUID 和幂等头。切换本地账号后外发标识仍相同，本地查询和通知访问权限仍隔离。分别验收选中部分能力时的精确列表，以及全不选时没有 `networkCapabilities` 字段；PA/CA 在范围内编排和 PA 自主编排由网络侧独立验收。
 4. 让模拟对端返回 503，确认本地权益保留，再重试同一事件，核对不重复处理。不要故意中断正在使用的真实农场服务。
 5. 需要补偿时使用第 1–9 节的只读查询；分别验收套餐资料收到、账号归属正确和页面显示，不以单一 HTTP 200 代替三项验收。

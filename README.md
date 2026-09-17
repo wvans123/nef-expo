@@ -133,6 +133,8 @@ node tests/test_purchase.cjs
 
 订购主流程：农场按钮跳转 `/?account_id=1`，用户开通后由 NEF 向配置的 `/business/v1/service-plans` POST `subscriberId` + `servicePlan`。套餐内含 `planId/showName/description/price`；默认发送套餐可用能力组成 `networkCapabilities`，用户全部取消勾选才省略并交给 PA 自主编排。NEF 不实现 PA/CA 决策。价格必须明确配置；失败保留订阅并支持同事件手动重试。真实农场地址及接收回执待联调；本次上传不重启已有进程。唯一契约见[套餐订购通知与订阅查询](docs/reference/subscription-query.md#10-跳转订购与套餐通知)，新部署使用统一配置模板 `config/integration.example.json`。
 
+当前联调的外发 `subscriberId` 固定为 `subscriber-001`，定义在 `subscription_notifications.py` 的 `SUBSCRIBER_ID`，无需新增配置。跳转和查询仍使用本地账号 `1/2/3`；对方会将这些账号的通知都归入同一个测试订购者。
+
 向 ARF/NRF 提供选定的本地能力或场景元数据，使用独立的[网络目录发布接口](docs/reference/network-catalog.md)。这是待同事确认的项目契约，不是已实现标准 NRF 注册；与农场订购通知、AF MCP 注册分开。
 
 对接同事仅需 [场景接口对接说明](docs/reference/integration.md)；运维与网络目录边界见 [展示设计](docs/superpowers/specs/2026-06-11-frontend-demo-redesign-design.md)。
