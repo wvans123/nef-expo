@@ -65,7 +65,7 @@ NEF 承担目录汇聚、接入授权、能力和场景开放、套餐定义与�
 - `POST /api/v1/network/catalog/refresh`：向运维配置的目录 URL 请求 `{items:[...]}`，验证后整体替换，不将无效响应混入旧目录。
 - 目录项至少包含 `id`、`name`、`kind`（`tool` 或 `package`），可附 `description`、参数声明等元数据。
 - MCP 注册与套餐声明通过各自 `/sync` 操作发布。只有对方明确返回 `{"accepted":true}` 才标记已同步；仅 HTTP 2xx 记为已提交、待确认。
-- 本地原子能力/场景可通过 `/api/v1/network/catalog/publication` 预览、`/publish` 发布，只发送明确选择的项。契约见[网络目录发布](../../reference/network-catalog.md)，不宣称它是 NRF NFRegister；真实接收方仍待确认。
+- 本地原子能力/场景可在能力超市「发布 NEF 目录」中勾选，通过 `/api/v1/network/catalog/publication` 预览、`/publish` 发布；默认全不选，修改选择需重新预览，账号 / 页签切换丢弃旧预览。只发送明确选择的项，自动拉取不触发发布。契约见[网络目录发布](../../reference/network-catalog.md)，不宣称它是 NRF NFRegister；真实接收方仍待确认。
 - 无配置 / 无网络连接不产生演示目录、不伪造同步成功。账号之间的登记、套餐、目录快照隔离；服务重启清空。
 
 配置入口 `NEF_REGISTRY_CONFIG` 指向运维 JSON，示例 `config/registry.example.json`。`catalog_url` 为目录拉取地址；`publish_url` 为统一发布地址；`token_env` 指向内部凭证环境变量。伙伴实际字段不同，修改适配层，不要求对方照搬界面模型。

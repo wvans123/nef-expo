@@ -19,7 +19,7 @@
 - [套餐订购通知与订阅查询](reference/subscription-query.md)：跳转账号、固定 `subscriberId=subscriber-001` 的套餐通知、默认能力组合、显式空选择、价格、重试和 1.1 已购详情；本地账号与查询编号不变，真实对端待联调。
 - [统一对接配置](../config/integration.example.json)：`start.py` 自动生成本地配置，集中设置订购、ARF/TRF 发布、通用 Intent 和场景执行地址；价格由双方填写，本地文件不上传。
 - [旧订购通知配置](../config/subscription.example.json)：兼容独立配置模式，新部署优先使用统一文件。
-- [选定网络目录发布](reference/network-catalog.md)：显式选择本地能力/场景，预览并发布元数据到目录；不是标准 NRF 注册，真实 ARF/NRF 接口待确认，上传不会更新已有进程。
+- [选定网络目录发布](reference/network-catalog.md)：能力超市「发布 NEF 目录」的选择、预览、发布入口及对应接口；不是标准 NRF 注册，真实 ARF/NRF 接口待确认，上传不会更新已有进程。
 - [农场平台联调](reference/farm-integration.md)：面向农场开发同事的双向联调步骤，覆盖套餐查询、MCP 注册 / 发现 / 网络发布、网络经 NEF 访问农场工具、双方配置与验收清单；真实农场与目录地址待提供。
 - [网络目录配置](../config/registry.example.json)：运维侧 TRF / ARF 拉取 / 发布接口和 NEF 网络可达入口、内部调用方授权及 MCP 服务允许列表示例；不含实际密钥。
 - [配置模板](../config/bridge.example.json)：从接口契约配套维护的可复制配置；示例域名不可用，必须按实际接口替换。
@@ -30,5 +30,6 @@
 ## 展示资产
 - [原版活动工作台](../static/index.html)：原能力超市、订阅弹窗、拖拽编排、API / MCP 调试与鉴权交互上的增量更新；七个可见页签，隐藏 Skill / 场景方案和 AF 终端。
 - [增量控制逻辑](../static/workbench.js) / [增量样式](../static/workbench.css) / [订购交接](../static/purchase.js)：场景订阅与 Intent、账号跳转、可选网络能力范围、通知状态与重试、网络目录、自动准备调用页回传接口；沿用 index.html 原样式。
+- [本地目录发布交互](../static/catalog-ui.js)：仅发布明确选中的本地能力和场景；修改选择需重新预览，保留账号隔离和真实接收状态。
 - [工具发现客户端](../static/showcase-mcp.js) / [结果语义](../static/showcase-story.js)：活动工作台复用的纯协议和回执模块。
 - [旧展示书签](../static/showcase.html)：兼容跳转至原工作台，不再维护第二套活动界面；其余未引用的 showcase 样式和控制脚本为旧迭代资产。

@@ -14,7 +14,7 @@
 
 可见页签：**能力超市 / 订阅与鉴权 / API 直调 / MCP 接口 / 意图受理 / 自助编排 / 双向开放 · MCP**。
 
-- **能力超市**保留基础能力与三大场景套餐，场景卡显示可点击的基础能力组合，并展示 TRF / ARF 导入目录和自建套餐定义。
+- **能力超市**保留基础能力与三大场景套餐，场景卡显示可点击的基础能力组合，并展示 TRF / ARF 导入目录和自建套餐定义。顶部「发布 NEF 目录」可勾选本地能力 / 场景，预览后显式发布到配置的网络目录。
 - **三个场景以 Intent 为主**：机器狗巡检、车流量检测、端网协同识别追踪。端网协同仍保留 API / Tool 参数化调用，其他基础能力保留 API / MCP 接入。
 - **自助编排**选择能力、调整步骤、检查配置冲突；可选 LLM 根据需求推荐组合，经采用和确认后保存声明式套餐，再发布至网络目录。NEF 不因此成为自主 Agent，也不会在保存时执行步骤；网络执行与参数绑定由内部对接。
 - **双向开放**通过名称、URL、说明组成的 JSON 注册 MCP Server；经运维批准的地址可真实连接并发现工具，再同步至 TRF / ARF。登记、发现、发布确认分别显示；后端记录 `source: AF` 与认证账号，随发布报文传给网络，能力超市同时展示 AF 来源及同步状态。
@@ -65,7 +65,7 @@ python start.py
 |---|---|---|
 | 订购套餐后发给农场 | `subscriptions.callback_url` | 完整地址，例如 `http://<农场IP>:<端口>/business/v1/service-plans` |
 | 套餐价格 | `subscriptions.plan_prices` | 将对应套餐的 `null` 改为双方确认的数字；测试免费也要明确填 `0`，否则不发送通知 |
-| 外部 MCP 登记发布到 ARF/TRF | `registry.publish_url` | 对方接收登记的完整 POST 地址；当前只支持一个接收方 |
+| 外部 MCP 登记及选定 NEF 目录发布到 ARF/TRF | `registry.publish_url` | 对方接收登记的完整 POST 地址；当前只支持一个接收方 |
 | 对方访问本 NEF 的地址 | `registry.nef_base_url` | `http://<NEF电脑IP>:8069`，用于生成 MCP 代理入口 |
 | 允许连接的外部 MCP | `registry.mcp_servers` | 按[农场联调](docs/reference/farm-integration.md#5-nef-运维配置)填精确 URL 允许列表；只登记不代表已经发布 |
 | 车流量 Intent | `bridge.scenes.traffic_flow_detection.intent.url` | 已填 `http://10.70.113.122:5432/car/start`，按部署实际修改 |

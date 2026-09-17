@@ -181,7 +181,7 @@ th{background:var(--card);color:var(--muted)}
 .rev-badge{font-size:10px;color:var(--green);border:1px solid #39ffb066;border-radius:8px;padding:0 6px;margin-left:6px}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;border-radius:8px;padding:9px 18px;z-index:200;display:none}
 </style>
-<link rel="stylesheet" href="/static/workbench.css?v=20260917-1">
+<link rel="stylesheet" href="/static/workbench.css?v=20260917-2">
 <script src="/static/showcase-story.js?v=20260909-1"></script>
 <script src="/static/showcase-mcp.js?v=20260909-1"></script>
 </head>
@@ -212,7 +212,7 @@ th{background:var(--card);color:var(--muted)}
   <!-- Tab 1 能力超市 -->
   <div class="tabpane active" id="pane-market">
     <div class="banner" id="market-banner"></div>
-    <div class="registry-strip"><div><b>网络内部 · ARF / TRF 能力目录</b><span id="wb-catalog-status" class="muted">接入账号后自动同步</span></div></div>
+    <div class="registry-strip"><div><b>网络内部 · ARF / TRF 能力目录</b><span id="wb-catalog-status" class="muted">接入账号后自动同步</span></div><button id="wb-open-catalog-publication">发布 NEF 目录</button></div>
     <h3 class="sec">场景套餐 <small class="muted">按业务场景开通网络能力</small></h3>
     <div id="wb-scene-market" class="wb-scene-grid"></div>
     <details class="wb-legacy-packages" hidden><summary>基础能力组合套餐（兼容旧订阅）</summary><div id="pkg-row"></div></details>
@@ -935,7 +935,8 @@ $('#term-send').onclick = ()=>termRequest($('#term-input').value.trim());
 $('#term-input').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#term-send').click(); });
 </script>
 <script src="/static/purchase.js?v=20260917-2"></script>
-<script src="/static/workbench.js?v=20260917-4"></script>
+<script src="/static/workbench.js?v=20260917-5"></script>
+<script src="/static/catalog-ui.js?v=20260917-1"></script>
 <script src="/static/composer.js?v=20260917-3"></script>
 </body>
 </html>

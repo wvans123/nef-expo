@@ -169,9 +169,9 @@ async function wbPollFeedback(){
     if(media&&media.asset_id!==wb.mediaId){const response=await fetch('/api/v1/exhibition/channels/'+encodeURIComponent(channel)+'/media/'+encodeURIComponent(media.asset_id),{headers:{Authorization:'Bearer '+apiKey()}});if(!response.ok)throw new Error('媒体读取失败');const blob=await response.blob();if(epoch!==wb.epoch||channel!==wb.channel)return;if(wb.mediaUrl)URL.revokeObjectURL(wb.mediaUrl);wb.mediaUrl=URL.createObjectURL(blob);wb.mediaId=media.asset_id;const el=document.createElement(media.kind==='video'?'video':'img');el.src=wb.mediaUrl;if(media.kind==='video'){el.controls=true;el.preload='metadata';}else el.alt=media.title||'场景图像';el.onerror=()=>{$('#wb-feedback-media').textContent='媒体无法解码，请核对文件内容';};$('#wb-feedback-media').replaceChildren(el);}
   }catch(e){if(epoch===wb.epoch)$('#wb-feedback-note').textContent='回传读取失败 · '+wbMessage(e);}finally{wb.feedbackBusy=false;}
 }
-function wbTabChanged(name){wb.epoch++;if(name!=='mcp')wbMcp.reset();wbUpdateFeedback();}
+function wbTabChanged(name){wb.epoch++;window.wbCatalogClose?.();if(name!=='mcp')wbMcp.reset();wbUpdateFeedback();}
 async function refreshAll(){
-  wb.epoch++;wbMcp.reset();wb.catalog=[];wb.servers=[];wb.packages=[];wb.channels=[];wb.channel='';wb.feedbackContext='';pipeSteps.length=0;window.wbComposerReset?.();wbClearFeedback();wbResetResult();$('#wb-register-message').textContent='';$('#purchase-notice').hidden=true;renderAccounts();wbRenderNetwork();
+  wb.epoch++;window.wbCatalogClose?.();wbMcp.reset();wb.catalog=[];wb.servers=[];wb.packages=[];wb.channels=[];wb.channel='';wb.feedbackContext='';pipeSteps.length=0;window.wbComposerReset?.();wbClearFeedback();wbResetResult();$('#wb-register-message').textContent='';$('#purchase-notice').hidden=true;renderAccounts();wbRenderNetwork();
   try{await loadMarket();if(wbActive()==='subs')await renderSubs();if(wbActive()==='intent')wbRenderIntent();if(wbActive()==='api')await renderApiTab();if(wbActive()==='mcp')renderMcpTab();if(wbActive()==='composer')await renderComposer();await wbUpdateFeedback();}catch(e){wbError(e);}
 }
 window.addEventListener('pagehide',()=>{wb.epoch++;if(wb.mediaUrl)URL.revokeObjectURL(wb.mediaUrl);});

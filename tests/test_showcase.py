@@ -104,3 +104,13 @@ def test_network_gateway_story_and_publication_are_visible():
     assert '查看网络登记内容' in js and 's.gateway_path' in js
     assert '最近网络调用' in js and 's.last_call.caller' in js
     assert "+'/publication'" in js
+
+
+def test_selected_catalog_publication_is_a_separate_explicit_action():
+    html=client.get('/').text
+    assert 'id="wb-open-catalog-publication"' in html
+    js=client.get('/static/catalog-ui.js').text
+    assert "CAPS.filter(c=>c.status==='available')" in js
+    assert 'wb.catalog' not in js and 'wb.servers' not in js
+    assert 'capability_ids:' in js and 'service_ids:' in js
+    assert "'/api/v1/network/catalog/'" in js
