@@ -3,3 +3,12 @@ __pycache__/
 .superpowers/
 .claude/settings.local.json
 .pytest_cache/
+.runtime/
+
+# Local integration routes; credentials belong in process environment.
+config/bridge.local.json
+
+# Operator model endpoint configuration (secret remains in environment).
+config/composer.local.json
+config/subscription.local.json
+config/registry.local.json

@@ -1,0 +1,7 @@
+{
+  "base_url": "https://sub2api.2012wtlab.com/v1",
+  "model": "gpt-6-astra",
+  "wire_api": "responses",
+  "reasoning_effort": "low",
+  "api_key_env": "NEF_COMPOSER_API_KEY"
+}

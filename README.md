@@ -1,11 +1,32 @@
 # 6G NEF 能力开放平台 Demo
 
 一个面向运营商现场演示的 **6G 网络能力开放功能（NEF, Network Exposure Function）** 原型。
-后端为 FastAPI，前端为单文件原生 HTML/JS（无构建步骤），用于向第三方应用（AF, Application Function）
+后端为 FastAPI，前端为原生 HTML/CSS/JS（无构建步骤），用于向第三方应用（AF, Application Function）
 开发者展示"一张网络、无限调用"的能力开放生态：服务化接口（REST）、类 MCP 接口、意图接口、
 场景一键运行、自助编排、以及 AF 双向开放与网络反向调用。
 
 > 状态全部存于内存，重启服务即清零——演示从"新 AF 入驻"讲起即可。
+
+
+## 当前展示更新（2026-09-17）
+
+入口：`/`（`static/index.html`）。直接在原版工作台上增量修改，保留原有布局、能力详情弹窗、订阅、拖拽排序、参数表单和逐级鉴权；不再维护第二套活动展示页。原 `/static/showcase.html` 书签自动跳转到这里。
+
+可见页签：**能力超市 / 订阅与鉴权 / API 直调 / MCP 接口 / 意图受理 / 自助编排 / 双向开放 · MCP**。
+
+- **能力超市**保留基础能力与三大场景套餐，场景卡显示可点击的基础能力组合，并展示 TRF / ARF 导入目录和自建套餐定义。
+- **三个场景以 Intent 为主**：机器狗巡检、车流量检测、端网协同识别追踪。端网协同仍保留 API / Tool 参数化调用，其他基础能力保留 API / MCP 接入。
+- **自助编排**选择能力、调整步骤、检查配置冲突；可选 LLM 根据需求推荐组合，经采用和确认后保存声明式套餐，再发布至网络目录。NEF 不因此成为自主 Agent，也不会在保存时执行步骤；网络执行与参数绑定由内部对接。
+- **双向开放**通过名称、URL、说明组成的 JSON 注册 MCP Server；经运维批准的地址可真实连接并发现工具，再同步至 TRF / ARF。登记、发现、发布确认分别显示；后端记录 `source: AF` 与认证账号，随发布报文传给网络，能力超市同时展示 AF 来源及同步状态。
+- **网络经 NEF 调用 AF**：ARF / TRF 是网络内部目录，接收 AF 工具声明与 NEF MCP 入口，而不是可绕过 NEF 的 AF 原始 URL。内部网元以独立凭证访问 NEF，NEF 按 AF 账号授权范围与 URL 允许列表校验、验证工具参数，再向 AF 真实发送 `tools/call`，保持实际 `CallToolResult` 与 `isError`。页面可查看发布报文和最近网络调用状态。
+- **调用与鉴权**展示实际身份、入口权限和订阅校验回执；文字业务结果优先，图片 / 视频按需展开。场景回传仍只在具体调用页出现。
+- **显式 demo / live**：三个场景默认演示；真实模式原文转发，缺少接口配置时失败关闭。HTTP 受理不等于业务完成。
+- **简化回传**：选择真实调用时自动准备并复用当前场景接口，不再创建或选择调用点；“接口信息”可查看对接资料。同事只接收一个 `/api/v1/scene-feedback` 地址与场景 Key；文字、数据、图片、视频都一次提交，无需 channel_id。
+- **目录展示**：主页不再强调 Intent 标签，场景卡展示可点击的基础能力组合与套餐设计来源；网络导入和自助编排定义分别标明来源。浏览器进入目录页、以及停留超市 / 双向开放时每 30 秒自动同步，不再提供手动同步网络目录按钮。
+- **边界**：当前目录契约是本项目的对接约定，不是 TRF / ARF 标准协议。生产网络接口仍待同事提供；本地账号、权益、登记与回传保存在内存。mTLS / OAuth、资源级策略、生产持久化未接入。
+- **本期隐藏**：对外 Skill / 场景方案、AF 智能终端不进入展示动线。对应页签隐藏，旧后端接口保留兼容但不进入本期演示。
+
+详见[演示手册](docs/demo-playbook.md)、[场景对接说明](docs/reference/integration.md)、[展示与网络对接设计](docs/superpowers/specs/2026-06-11-frontend-demo-redesign-design.md)和[文档索引](docs/README.md)。
 
 ---
 
@@ -13,9 +34,9 @@
 
 | 项目 | 版本 / 说明 |
 |---|---|
-| Python | 3.10+（已在 3.14 上验证） |
+| Python | 3.11+（已在 3.14 上验证） |
 | 操作系统 | Windows / macOS / Linux 均可（开发环境为 Windows + PowerShell） |
-| 依赖 | `fastapi`、`uvicorn`（运行）；`pytest`、`httpx`（测试） |
+| 依赖 | `fastapi`、`uvicorn`、`httpx`、`jsonschema`（运行）；`pytest`（测试） |
 
 ---
 
@@ -55,8 +76,10 @@ python server.py
 ```
 
 启动后访问 **http://localhost:8000** 。
-> 端口被占用时，先结束旧进程：Windows 用
-> `Get-NetTCPConnection -LocalPort 8000 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`。
+> 跨机器联调使用 `python -m uvicorn server:app --host 0.0.0.0 --port 8069`，其他机器访问本机网卡 IP。不要仅凭端口强杀未知进程；先核对进程身份。详见演示手册。
+> Cloudflare Tunnel 部署与启动脚本见[演示手册](docs/demo-playbook.md#cloudflare-tunnel-演示部署)。受保护的公网入口 `https://nef.2012wtlab.com` 已发布，支持单邮箱验证码登录（会话 7 天）及专用机器凭据。登录后原版页面和未授权请求拦截已验证；有效机器凭据调用及回传待验收。不使用 IP 白名单，不直接开放本机公网端口。
+
+> 公网入口已启用 HTTP → HTTPS 跳转、最低 TLS 1.2，并对 API / MCP 路径配置浏览器检查兼容规则，保留原有鉴权。客户端直接使用 HTTPS 和原有凭据，无需特殊 User-Agent；不要向 HTTP 地址发送密钥。
 
 ### 5. 运行测试（可选）
 
@@ -64,183 +87,142 @@ python server.py
 pytest -q
 ```
 
+前端鉴权、MCP 发现与开放路径回执规则测试（可选，需要 Node.js）：
+
+```bash
+node tests/test_showcase_auth.cjs
+node tests/test_showcase_mcp.cjs
+node tests/test_showcase_story.cjs
+node tests/test_composer.cjs
+node tests/test_purchase.cjs
+```
+
 ---
 
 ## 三、快速体验（5 分钟）
 
-1. 右上角 **「注册账号」**：输入名称（如 `developer_zhang`）→ 注册即签发 API Key（订阅与签发已解耦）。
-2. **「订阅与鉴权」**：查看 🔐 CAPIF 鉴权流水线（7 级逐级点亮：接入·限流 / 凭证解析 / 令牌校验 / 身份识别 Invoker / 权限范围 scope / 授权判定 / 审计落账，依据 3GPP CAPIF）；
-   可切换账号等级 **FREE / PRO / MAX**（PRO 含 basic 层免订阅，MAX 含 basic+advanced）。
-3. **「API 直调」**：调一个未授权能力 → 弹 **402 Payment Required**（身份认证通过≠已授权）→ 确认按次支付 → 成功；
-   响应以"业务结论 + 关键指标 + 可折叠原始 JSON"的标准信封呈现。
-4. **「MCP 接口」**：`tools/list` →`tools/call`；工具列表按订阅/等级标记 ✓ / 💳，含 `scenario_*`、`pipeline_*`。
-5. **「意图受理」**：提交自然语言（如"机器狗巡检，雾天也要看得清"）→ 看鉴权证据 + 状态推进 + 执行轨迹回传；未授权步骤被标 🚫。
-6. **「双向开放 · AF」**：注册第三方能力（设定价）→ 网络内部 Agent 经 `/internal/mcp` 发现并反向调用 → 台账与 70/30 分成。
+1. 顶栏注册演示账号，能力超市查看三个场景及原有基础能力卡片；点击能力仍可查看参数、价格并订阅。
+2. 开通任一场景，进入意图受理；场景演示返回明确标注的文字结果，同时沿用原版逐级点亮的鉴权回执。
+3. 自助编排中拖入或点击能力、拖拽调整顺序。交付方式、GPU 上限及目标来源收在“可选约束”中，默认不填。可选模型推荐经采用进入草稿，填写名称并确认保存；发布按钮交付目录定义，不表示执行完成。
+4. 双向开放提交 MCP Server JSON；连接并发现工具后展开参数声明，按需同步 TRF / ARF。无配置时明确待对接。
+5. MCP 接口先连接 / 发现、再选工具；API 直调从已知能力开始。两者保留原版请求、参数、鉴权和响应两栏。
+6. 实际接口配置后切换真实调用；场景数据源仅需一个回传地址与 Key。文字优先，媒体按需展开。
 
-详细的现场演示动线（25–30 分钟，对应测试项 T1/T2/T3）见 **[docs/demo-playbook.md](docs/demo-playbook.md)**。
+## 四、接口和执行边界
 
----
+- **认证与授权分开**：场景使用本地 AF Key + scope + 场景订阅；场景未开通返回 403。旧基础能力的等级 / 订阅 / 按次付费接口保留。Key 不等于标准 mTLS / OAuth 安全接入。
+- **Intent 原文转发**：三个场景调用 `/api/v1/services/{service_id}/intent`；网络侧负责解析与执行。没有内部 Intent ID 也可回文字，不虚构 Planning Agent 轨迹。
+- **API / MCP 并行**：已知能力走 HTTP API；AF 通过 `/mcp` 初始化、发现、选用和调用工具。两者可以映射同一内部 HTTP 服务，不要求网络内部都重写为 MCP。
+- **套餐定义不是执行计划引擎**：NEF 保存有序能力引用，发布至 TRF / ARF；真实部署、参数绑定和失败处理仍需网络侧契约。
+- **双向开放**：外部 MCP Server 先登记，运维批准后才实际发现工具；发现与同步分别显示，不自动授予外部工具执行权。
+- **结果证据**：demo 明确标注；live 无配置返回 503、不回落；HTTP 受理不等于业务完成。场景级回传与某次调用不自动关联。
 
-## 四、核心概念
+真实执行配置：`NEF_BRIDGE_CONFIG` → `config/bridge.example.json`。网络目录 / 发布 / MCP 允许列表：`NEF_REGISTRY_CONFIG` → `config/registry.example.json`。智能推荐默认读取 `config/composer.local.json`（可由 `NEF_COMPOSER_CONFIG` 覆盖），模板为 `config/composer.example.json`；远程 Base URL `https://sub2api.2012wtlab.com/v1`、模型 `gpt-6-astra` 和 Responses 协议沿用既有远程配置，本项目推理档位已降为 `low`。模型 Key 使用 `NEF_COMPOSER_API_KEY`，不读取 Codex 密钥、不依赖本机 CPA。此前 `high` 档位通过一次真实推荐；`low` 的真实响应尚待验证。每次请求内嵌可用原子能力池与参数 schema；新代码按超时、上游错误、连接失败和响应格式错误分类，并返回排查用 request_id，不暴露密钥或上游正文。运行方法与代码加载状态见[演示运行手册](docs/demo-playbook.md#智能编排准备与现场操作)。
 
-- **注册即签发 Key**：`POST /api/v1/register` 立即返回 API Key；订阅只记录权益（entitlement）。
-- **认证 ≠ 授权**：未订阅 / 等级不足时身份认证通过但授权失败，返回 402（可订阅 / 升级 / 按次支付三条合法化路径）。
-- **CAPIF 鉴权流水线**：每次 API/MCP/意图/场景调用都逐级执行 6 步鉴权（取出凭证→校验密钥→识别身份→检查接口权限→判定能力授权→记录审计；依据 3GPP CAPIF，AEF 对 API Invoker 鉴权），前端逐级点亮，未授权时在「授权判定」步变红。鉴权只在调用发生时展示，不在订阅页常驻。
-- **调用去向**（路由判定，后端 `GET /api/v1/dispatch-table`）：化解「NEF 是 tool 粒度、后台只实现到场景粒度」的错配——命中后台声明过的 `service_id` 才经 NEF 出向网关转发（带显式请求信封），其余由 NEF 网元直接执行（参考实现），后台不会收到看不懂的请求。每次调用的鉴权回执末尾内联展示这一行。
-- **两道意图鉴权**：第一道在 NEF 受理时按套餐/等级判定「意图受理资格」（免费裸账号不能发起意图——一条意图会触发网络侧多步编排，开销大）；第二道（逐能力鉴权）由网络侧 Planning Agent 在执行过程中进行（**当前为 NEF 模拟占位，待网络侧 PA 接入后替换**）。
-- **场景/Pipeline 参数**：场景套餐与自助 Pipeline 一键运行时按主用例**预填逼真默认参数**（如 `area`），可在表单中修改；留空则用默认，调用始终带着像样的参数转发。
-- **标准结果信封**：每次调用返回 `summary`（一行业务结论）+ `metrics`（关键指标）+ `result`（原始数据）+ `nef_auth`（鉴权回执）+ `billing`（按需）。
-- **两个 MCP Server**：`/mcp`（对外，AF 的 AI Agent，Bearer 鉴权）与 `/internal/mcp`（对内，网络 Agent/网元，信任域内免 AF 鉴权，用于发现并反向调用第三方能力）。
-- **能力分层**：`tier` = basic / advanced / premium；账号等级 `PLAN_TIERS` 决定免订阅可用的层级。
+跨应用读取订阅：`GET /api/v1/integration/subscriptions?account_id=1`，其中 `1` 是在 NEF 注册的账号名，不是自动编号。1.1 响应的 `purchased_packages` 直接提供已购场景/能力套餐及详情，适合农场平台展示“已购网络套餐”；原子工具、参数 schema、权益来源等旧字段仍保留，不返回 API Key。公网仍需 Access 机器凭据，接口详细契约见[订阅查询接口](docs/reference/subscription-query.md)。农场查询套餐、MCP 注册发现、发布网络和网络回调的步骤见[农场平台联调](docs/reference/farm-integration.md)。场景开通不要求组件逐一订阅，但组件单独调用仍校验各自权益；订阅数据仍为内存态，重启后需恢复。
 
-### 外部 AI Agent 直连 MCP
+订购主流程：农场按钮跳转 `/?account_id=1`，用户开通后由 NEF 向服务端配置的 `/business/v1/service-plans` POST `subscriberId` + `servicePlan`。套餐内含 `planId/showName/description/price`；用户明确选能力才附 `networkCapabilities`，不选则省略，交给网络 PA 自主编排。NEF 不实现 PA/CA 的决策逻辑。价格必须明确配置；失败保留订阅并支持同事件手动重试。实际地址待提供，**运行中服务尚未加载通知后端**。唯一契约见[套餐订购通知与订阅查询](docs/reference/subscription-query.md#10-跳转订购与套餐通知)，配置模板为 `config/subscription.example.json`。
 
-```bash
-claude mcp add --transport http nef http://localhost:8000/mcp \
-  --header "Authorization: Bearer <你的 api_key>"
-```
+向 ARF/NRF 提供选定的本地能力或场景元数据，使用独立的[网络目录发布接口](docs/reference/network-catalog.md)。这是待同事确认的项目契约，不是已实现标准 NRF 注册；与农场订购通知、AF MCP 注册分开。
 
-### AF Agent 如何把用户的话变成 NEF 调用（规则 / 可选 LLM）
-
-「AF 智能终端」演示的是这条链路：**终端用户**用自然语言找 AF 办事 → AF 的 AI Agent 理解意图 → 以 **tool 调用**方式调 NEF 能力 → 把结果答复用户。AF Agent 只负责「理解意图 + 选对工具」，它**不**自己实现网络能力。
-
-规划端点 `POST /api/v1/af-agent/plan` 有两档实现，默认规则、可选 LLM：
-
-1. **规则规划（默认，零依赖）**：按能力的 `intent_keywords` 做关键词匹配选工具，演示稳定、不依赖外网。
-2. **LLM 规划（可选）**：配置环境变量后启用，把 NEF 的 `tools/list`（每个工具的 `name` + `description` + `inputSchema`）作为 **function-calling 的函数清单**喂给模型，由模型决定调哪个工具、填什么参数——这正是「让 LLM 理解并适配」的标准做法：模型不需要懂网络，只需读懂工具描述与入参 schema。
-
-启用 LLM 规划：
-
-```bash
-pip install anthropic
-# Windows PowerShell：
-$env:ANTHROPIC_API_KEY = "sk-ant-..."
-# 然后正常启动 server.py
-```
-
-未安装 `anthropic` 或未设 `ANTHROPIC_API_KEY` 时自动回落到规则规划（演示不会因缺 Key 而失败）。响应里的 `mode` 字段标明本次走的是 `rule` / `llm` / `meta`（元查询，如「有哪些能力」直接作答）。
-
-> 真实对接网络侧时，意图的语义解析与工具编排由**网络侧 Planning Agent**负责（见上文「两道意图鉴权」）；本仓库的 AF Agent 规划是 **AF 侧**把用户话术映射到 NEF 工具的轻量实现，二者分属 AF 域与网络域。
-
----
+对接同事仅需 [场景接口对接说明](docs/reference/integration.md)；运维与网络目录边界见 [展示设计](docs/superpowers/specs/2026-06-11-frontend-demo-redesign-design.md)。
 
 ## 五、项目结构
 
+```text
+server.py             FastAPI 路由、账号权益、API / MCP / 场景调用
+skills.py             基础能力、标准分类、组合套餐与参考映射
+composition.py        配置冲突检查、限定目录的 LLM 推荐（不执行）
+subscription_query.py  对外订阅查询响应模型（不含凭据）
+subscription_notifications.py  订购通知、可选能力范围与手动重试
+catalog_publication.py  选定本地能力/场景的目录发布报文
+registry.py           旧第三方注册与调用台账（兼容）
+intent.py / stubs.py   旧意图与参考执行（不作为当前真实结果）
+scene_services.py     三场景契约与明确标注的演示文字
+exhibition.py         真实转发与统一场景回传
+network_registry.py   TRF / ARF 目录、MCP 注册发现、套餐发布
+static/index.html     活动原版工作台，保留原布局与交互
+static/workbench.js    新接口接入及原交互的增量控制逻辑
+static/workbench.css   原主题的少量新增组件样式
+static/showcase.html   旧书签兼容跳转，不再独立展示
+static/showcase-mcp.js / showcase-story.js  共用发现与回执语义
+config/               内部执行、网络目录配置模板
 ```
-server.py          FastAPI 后端（REST + MCP + 内部发现 MCP + Intent + Pipeline + Skill 双文档 + 反向调用）
-registry.py        第三方能力注册表 + 反向调用台账 + Intent 存储
-skills.py          能力目录唯一数据源（33 能力·含规划中 / 8 大类 / 9 场景套餐 / Agent-NF Tool 映射）
-stubs.py           能力调用模拟返回
-intent.py          Intent 安全受理 + 状态推进 + 网络内部 Agent 执行轨迹回传
-static/index.html  单页前端（无框架，深空电信蓝主题，9 个页签）
-docs/              demo-playbook.md（演示手册与对接需求）+ 设计文档
-tests/             pytest 冒烟与 API 测试
-```
 
-> 提示：API Key / Pipeline / 第三方注册能力 / 反向调用台账 / Intent 均存于内存，重启即清空，需重新注册与订阅（账号名称存于浏览器 localStorage）。
+所有业务状态保存在单进程内存。重启清除账号 Key、订阅、套餐定义、注册、目录及回传数据；浏览器中保存的账号记录会失效，需重新注册。
 
----
+## 六、能力目录与标准复核
 
-## 六、能力目录（这些 tool 为什么应该有）
+分类：接口参考。复核日期：2026-09-10。以下覆盖 `skills.py` 的 33 个内置能力，含规划中能力。**本项目的 ID、参数结构和 REST / Tool 封装均为项目接口，不等于对应标准已经定义了同名 NEF 北向 API，更不等于已通过符合性测试。**
 
-每个能力都有出处，不是凭空编的。来源分四级：
+页面用简短标签区分“5G 能力参考”“通感能力探索”“平台扩展”；标签指设计依据和本原型定位，不是商用部署证明。`standard_basis.api_contract=project_defined` 随能力元数据返回。AF 动态登记能力单独标为 AF 扩展。
 
-- 🟢 **已标准化**：现成的 3GPP NEF 北向 API，运营商网络今天就在暴露。
-- 🔵 **6G 通感 ISAC**：对应 3GPP **TR 22.837《Integrated Sensing and Communication》** 列出的感知用例。
-- 🟣 **6G 通算 / 算网融合**：边缘计算、网络 AI、算力网络的研究与产业方向（MEC、Rel-18 AI/ML、CAN）。
-- ⚪ **垂直增值**：建在上面标准能力之上的产品化封装（面向具体行业场景）。
+重要修正：
+- 不能把通感全部说成“尚未标准化的 6G”。本次读取的 TS 22.137 V19.1.0 已有 **5G 无线感知服务要求**，但它不是这套 Tool 的 API 规范。6G/IMT-2030 是演进背景，不作为本项目接口符合性的依据。
+- AKMA 以 UE 的 5G 主认证与应用密钥上下文为基础，不是向任意 AF/Agent 颁发通用数字身份。应用登记与平台凭证保留为产品能力，不声称实现 AKMA。
+- 网络分析、定位、ATSSS 等存在标准能力，也不代表 AF 可以通过本项目简化字段直接调用内部 NF 服务；须映射授权、标识、请求参数及返回格式。
+- 切片创建、CPU/GPU 调度、模型部署、收益结算是应用/平台或管理域扩展；不能写成 NEF 已有的通用标准操作。
 
-> Demo 中每个 tool 的执行均为 NEF 参考回显（见「场景方案」页路由分发表）。真实业务按 `docs/demo-playbook.md` 的对接契约接入即替换。
+| 能力 ID | 展示名称 | 分类 | 依据与需要保留的边界 |
+|---|---|---|---|
+| `target_detection` | 目标检测 | 通感能力探索 | S2 §5.2.1 支持对象检测要求；模型类别与置信度字段为产品定义。 |
+| `target_tracking` | 目标追踪 | 通感能力探索 | S2 §5.2.1 支持跟踪和服务连续性；本项目 target_id 和报告结构自定义。 |
+| `environment_recon` | 环境重构 | 通感能力探索 | S2 §§3.1、5.1 涉及环境特征；点云/mesh/voxel 格式与重构算法是扩展。 |
+| `sensing_fusion` | 多源感知融合 | 通感能力探索 | S2 §5.2.1 有联合处理 3GPP/非 3GPP 数据要求；具体融合模式及接口自定义，不承诺全天候效果。 |
+| `traffic_flow_sensing` | 车流量感知 | 平台扩展 | S2 §4.1 提及交通管理；车流密度、计数和拥堵指标是场景产品输出，输入不必然是无线感知。 |
+| `vital_sign_detection` | 生命体征感知（规划中） | 通感能力探索 | S2 §4.1 涉及健康与活动监测；未逐项验证本项目呼吸/心率参数，保持规划，不作医疗准确性承诺。 |
+| `gesture_recognition` | 手势姿态识别（规划中） | 通感能力探索 | S2 §5.1 涉及运动/手势；本项目尚为规划，具体识别服务未验证。 |
+| `sensing_fence` | 感知虚拟围栏 | 通感能力探索 | S2 §5.2.1 对象/区域感知要求可作基础；周界和告警逻辑是产品组合。 |
+| `compute_offload` | 计算卸载 | 平台扩展 | S7 支持边缘应用架构；不等同于本项目通用任务调度/模型部署 API。 |
+| `ai_inference` | AI推理服务 | 平台扩展 | S7 仅作边缘应用承载背景；通用 LLM/视觉推理 API 未据此认定为 NEF 标准能力。 |
+| `render_offload` | 云渲染卸载 | 平台扩展 | 渲染与帧率/分辨率控制为应用扩展；S7 不证明存在同名 NEF GPU 渲染 API。 |
+| `compute_qos` | 算力服务保障 | 平台扩展 | CPU/GPU 份额、优先级、抖动目标为调度平台策略，不是通信 QoS API。 |
+| `edge_agent_hosting` | 边缘智能体托管（规划中） | 平台扩展 | S7 可作边缘承载参考；Agent 镜像部署/托管为规划中的平台扩展。 |
+| `federated_learning` | 联邦学习编排（规划中） | 平台扩展 | 联邦学习技术背景不等同于可向任意 AF 开放的训练编排 API；保持规划，未核实该接口标准映射。 |
+| `qos_guarantee` | 应用 QoS 请求 | 5G 能力参考 | S1 的 QoS 会话 API 为参考；简化 device_id/latency/bandwidth 仍需映射会话、流和策略，不保证任意目标可满足。 |
+| `event_subscription` | 事件订阅 | 5G 能力参考 | S1 的 MonitoringEvent 为参考；四种本地 event_type 须逐一映射标准事件，不能视作同一通用事件资源。 |
+| `network_diagnosis` | 网络诊断 | 平台扩展 | 综合体验评分与建议为产品分析，不是已核实的标准通用 NEF 诊断 API。 |
+| `slice_management` | 切片服务申请 | 平台扩展 | S6 有切片架构；create/modify/release 为本项目对服务管理方的申请契约，不是 NEF 任意创建切片。 |
+| `device_wakeup` | 设备触达请求 | 平台扩展 | 设备触达按提供方契约适配；paging/WUS/NIDD 不能视为可互换的标准 AF 唤醒选项。保留旧字段仅为兼容。 |
+| `mobility_insight` | 移动性洞察 | 5G 能力参考 | S3 §6.7.2 UE mobility analytics 为参考；任意目标群体和时间窗是简化产品参数。 |
+| `multipath_boost` | 多路径聚合加速（规划中） | 5G 能力参考 | S6 §5.32 ATSSS 为参考；保持规划，取消无条件蜂窝/Wi-Fi/卫星聚合承诺。 |
+| `deterministic_latency` | 确定性时延（规划中） | 5G 能力参考 | S6 §4.4.8 TSC/时间同步/DetNet 为参考；保持规划，不意味着仅传 device_id 即获有界时延。 |
+| `precision_location` | 终端位置服务 | 5G 能力参考 | S4 §6.1 是 Nlmf_Location 内部服务，不是同名 NEF 北向接口；精度是申请目标，不承诺亚米/厘米级结果。 |
+| `geofencing` | 电子围栏 | 5G 能力参考 | S1 事件监测及 S4 定位可作为组合依据；设备围栏的区域和触发字段为产品封装。 |
+| `trajectory_predict` | 轨迹预测（规划中） | 平台扩展 | S3 UE mobility 可作方向参考；任意 target_id 的轨迹预测仍属规划产品扩展。 |
+| `data_query` | 数据服务 | 平台扩展 | 覆盖图/热力图/历史性能等数据集访问为平台定义，不声称通用 NEF 数据湖 API。 |
+| `network_analytics` | 网络智能分析 | 5G 能力参考 | S3 §§6.4、6.7、6.7.5 分别支持业务体验、UE 相关及异常行为分析背景；容量预测等本地枚举不逐字对应标准 Analytics ID。 |
+| `traffic_forecast` | 车流量预测分析 | 平台扩展 | 行业车流预测模型与结果定义，不应归为 NWDAF 原生道路交通预测 API。 |
+| `digital_twin_feed` | 数字孪生数据底座（规划中） | 平台扩展 | 数字孪生数据供给为规划中的平台服务；未核实同名标准北向 API。 |
+| `identity_service` | 应用接入身份 | 平台扩展 | S5 的 UE-AF 应用密钥机制不能证明任意 Agent 身份签发；当前能力是平台身份登记与凭证管理封装。 |
+| `security_posture` | 连接安全态势 | 平台扩展 | S3 §6.7.5 异常行为分析可作输入；风险评分、depth 及处置建议为产品扩展。 |
+| `capability_register` | 能力注册 | 平台扩展 | 本项目 AF MCP 登记/发现/发布协议为平台扩展，不等同于 CAPIF API 发布实现或标准 TRF/ARF 接口。 |
+| `revenue_share` | 生态收益结算（规划中） | 平台扩展 | 收益分账/结算为规划中的商业平台能力，不能类比 CHF 就认定为标准 NEF 接口。 |
 
-### 通感一体 ISAC（感知 = 用无线信号探测目标/环境）
-| 能力 | 说明 | 来源 |
-|---|---|---|
-| 目标检测 | 检测区域内人/车/无人机，返回类型·位置·置信度 | 🔵 TR 22.837 物体/入侵检测 |
-| 目标追踪 | 持续追踪目标轨迹（位置·速度·航向） | 🔵 TR 22.837 目标追踪 |
-| 车流量感知 | 道路车流密度·车速·拥堵状态实时**测量** | 🔵 TR 22.837 交通监测 |
-| 车流量预测分析 | 基于车流感知数据预测未来车流与拥堵 | 🔵+🟣 ISAC 感知 + 分析 |
-| 环境重构 | 基于无线信号的三维空间建模 | 🔵 TR 22.837 环境监测 |
-| 多源感知融合 | 无线感知 + 摄像头(可来自 AF)等多源融合，全天候 | 🔵+⚪ ISAC 增值 |
-| 感知虚拟围栏 | **无需终端配合**，感知任意闯入目标并告警 | 🔵 TR 22.837 周界/入侵感知 |
-| 生命体征感知 · 手势识别 | 非接触呼吸/心率、手势姿态（规划中） | 🔵 TR 22.837 |
+### 本次使用的官方核对基线
 
-> 为什么车流量预测在 ISAC 而非数据服务：它建立在通感的车流测量之上、与测量同源；纯通用预测（容量/趋势）则归 AI 服务的网络智能分析。
+以下 PDF 本次均从 ETSI 官方站点取得 HTTP 200 并读取原文；是本次选定的核对基线，不声称各系列最新版本。标准文件只支持表中明确对应的技术方向/要求；“未核实”不是不存在的证明。原 README 对 TR 22.837 的笼统映射不再作为逐项证据。
 
-### AI 服务 AIaaS（6G AI 原生：把网络 AI 能力作为服务开放）
-| 能力 | 说明 | 来源 |
-|---|---|---|
-| AI 推理服务 | 调用网络侧已部署的**通用**模型实时推理（行业专用模型由 AF 注册接入） | 🟣 Rel-18 AI/ML、AIML as a Service |
-| 网络智能分析 | 异常检测/容量预测/UE 行为/业务体验分析 | 🟢 NWDAF (TS 23.288) |
-| 边缘智能体托管 | 把 AF 的 AI Agent 托管到网络边缘（规划中） | 🟣 边缘 AI / EDGEAPP |
-| 联邦学习编排 | 跨终端/边缘的联邦学习任务编排（规划中） | 🟣 Rel-18/19 联邦学习 |
+- **S1**：[TS 29.522 V18.10.0](https://www.etsi.org/deliver/etsi_ts/129500_129599/129522/18.10.00_60/ts_129522v181000p.pdf)：5G NEF 北向 API；检查 MonitoringEvent、AsSessionWithQoS 相关说明及其对 TS 29.122 的引用。
+- **S2**：[TS 22.137 V19.1.0](https://www.etsi.org/deliver/etsi_ts/122100_122199/122137/19.01.00_60/ts_122137v190100p.pdf)：§1 范围、§4.1 服务概述、§5.1/5.2.1 功能要求；5G 无线感知，不是本项目 Tool 规范。
+- **S3**：[TS 23.288 V18.13.0](https://www.etsi.org/deliver/etsi_ts/123200_123299/123288/18.13.00_60/ts_123288v181300p.pdf)：§6.4、§6.7.2、§6.7.5 网络分析背景。
+- **S4**：[TS 29.572 V18.11.0](https://www.etsi.org/deliver/etsi_ts/129500_129599/129572/18.11.00_60/ts_129572v181100p.pdf)：§6.1 Nlmf_Location 服务。
+- **S5**：[TS 33.535 V18.8.0](https://www.etsi.org/deliver/etsi_ts/133500_133599/133535/18.08.00_60/ts_133535v180800p.pdf)：AKMA 的 AAnF、UE 主认证与 UE-AF 应用密钥上下文。
+- **S6**：[TS 23.501 V18.12.0](https://www.etsi.org/deliver/etsi_ts/123500_123599/123501/18.12.00_60/ts_123501v181200p.pdf)：§4.4.8、§5.32 的架构背景。
+- **S7**：[TS 23.558 V18.11.0](https://www.etsi.org/deliver/etsi_ts/123500_123599/123558/18.11.00_60/ts_123558v181100p.pdf)：§1、§6 的边缘应用架构背景。
 
-> 为什么从通算拆出 AI 服务：通算一体是**算力底座**（卸载/渲染/算力QoS），AI 服务是建在算力之上的**智能能力**（推理/分析/学习）。6G AI 原生，单列更清晰。
-
-### 通算一体 Computing（算力底座）
-| 能力 | 说明 | 来源 |
-|---|---|---|
-| 计算卸载 | 把模型部署/转码/渲染卸载到边缘或云 | 🟣 MEC / 3GPP EDGEAPP |
-| 云渲染卸载 | XR/AR 渲染卸到边缘 GPU，回传渲染流 | 🟣 边缘 XR |
-| 算力 QoS 保障 | 保障算力侧优先级/抖动，与通信 QoS 联动 | 🟣 算网融合 CAN/CATS |
-
-### 连接服务 Connectivity
-| 能力 | 说明 | 来源 |
-|---|---|---|
-| QoS 保障 | 为设备/应用保障时延·带宽·可靠性 | 🟢 AsSessionWithQoS (TS 29.522) |
-| 事件订阅 | 订阅设备上下线/位置变更等网络事件 | 🟢 MonitoringEvent (TS 29.522) |
-| 设备唤醒 | 唤醒省电模式的 IoT 设备 | 🟢 Device Triggering / NIDD (TS 29.122) |
-| 移动性洞察 | 分析设备/用户群移动模式 | 🟢 NWDAF UE Mobility 分析 |
-| 按需切片 | 按需创建/配置/释放网络切片 | 🟢🟣 Network Slice 开放 (NSCE) |
-| 网络诊断 | 输出网络体验评分与优化建议 | ⚪ 基于网络状态的增值 |
-| 多路径聚合加速 | 蜂窝+WiFi(+卫星)多接入聚合到一条会话（规划中） | 🟢 ATSSS (TS 23.501) |
-| 确定性时延 | 工业控制有界时延确定性网络（规划中） | 🟢 5G-TSC / TSN |
-
-### 定位服务 Location（基于已知设备位置 = LCS）
-| 能力 | 说明 | 来源 |
-|---|---|---|
-| 精准定位 | 亚米级室内外定位、实时位置/轨迹 | 🟢 LCS 定位 (TS 29.572) |
-| 电子围栏 | **已知设备**进出地理围栏时网络主动告警 | 🟢 MonitoringEvent 兴趣区域 |
-| 轨迹预测 | 基于历史轨迹预测未来位置（规划中） | 🟣 NWDAF + 定位 |
-
-> 电子围栏 vs 感知虚拟围栏：前者跟踪**带 SIM 的已知设备**越界（LCS/定位），后者**无需设备**、用通感探测任意闯入（ISAC）——两种能力，分属两类。
-
-### 数据服务 Data（网络数据的获取与供给）
-| 能力 | 说明 | 来源 |
-|---|---|---|
-| 数据服务 | 覆盖图/热力图/性能统计等数据集获取 | 🟢🟣 数据开放 / ADRF / AnalyticsExposure |
-| 数字孪生数据底座 | 向数字孪生平台持续供给网络数据（规划中） | 🟣 网络数字孪生 |
-
-> 数据服务只做「取数/供数」；「分析/预测」这类智能加工归 AI 服务（NWDAF 分析）。
-
-### 安全·身份 Security（应用/Agent 级身份与安全态势）
-| 能力 | 说明 | 来源 |
-|---|---|---|
-| 应用身份服务 | 为 AF 应用/Agent 颁发网络级身份与应用密钥 | 🟢 AKMA (TS 33.535) / CAPIF onboarding |
-| 连接安全态势 | 基于网络侧异常行为分析输出风险评分与建议 | 🟢 NWDAF 异常行为分析 (TS 23.288) |
-
-> 5G 里用户级身份是 SUPI/SUCI + AUSF/UDM；**应用/Agent 级**则是 AKMA 与 CAPIF 发证——所以身份与安全单列，不与「收益结算」混在生态。
-
-### 生态服务 Ecosystem（双向开放的平台经济）
-| 能力 | 说明 | 来源 |
-|---|---|---|
-| 能力注册 | 把第三方能力注册到网络（双向开放） | 🟢 CAPIF API 发布 (TS 29.222) |
-| 生态收益结算 | 第三方能力被调用后按量自动分账（规划中） | ⚪ 计费结算（类比 5G CHF） |
+本次未做标准 OpenAPI 逐字段一致性、正式鉴权互通、无线感知性能、6G 网络部署或场景真实算法验收；不能把目录复核说成标准认证。AKMA/CAPIF 的身份边界与场景授权责任继续维护在 [鉴权设计](docs/superpowers/specs/2026-06-15-dynamic-auth-and-dispatch-design.md)。
 
 ---
 
 ## 七、推送到 GitHub
 
-本仓库已是 git 仓库。新建远程并推送：
+已有远程为 `https://github.com/wvans123/nef-expo.git`，当前开发分支为 `main`；不要重复创建仓库或覆盖远程。确认测试通过并检查待提交文件不含凭据后：
 
 ```bash
-# 1. 在 GitHub 网页上 New repository 建一个空仓库（不要勾选 README/.gitignore）
-# 2. 关联远程并推送当前分支
-git remote add origin https://github.com/<用户名>/<仓库名>.git
-git push -u origin feature/demo-redesign      # 或先 git checkout -b main 再推 main
+git status --short
+git diff --cached --check
+git push origin main
 ```
 
-若已安装 GitHub CLI（`gh`），一条命令即可建仓并推送：
-
-```bash
-gh repo create <仓库名> --public --source=. --remote=origin --push
-```
+`.runtime/`、`config/*.local.json` 中当前列入 `.gitignore` 的本地配置和服务端环境变量不上传；各类 `*.example.json` 是可提交模板。GitHub 推送不等于正在运行的 NEF 自动更新，Python 变更仍需协调加载。

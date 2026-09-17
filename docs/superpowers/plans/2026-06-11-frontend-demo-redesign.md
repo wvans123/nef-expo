@@ -1,5 +1,8 @@
 # 6G NEF Demo 前端优化实施计划（深空电信蓝换肤 + AF 反向调用）
 
+> 历史实施计划（2026-09-07 标注）：保留供回溯，不是本期展示实施清单。当前待讨论提案见 [当前展示体验设计](../specs/2026-06-11-frontend-demo-redesign-design.md)。
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 给 nef-expo 演示平台整体换肤为「深空电信蓝」，并新增「AF 反向调用」能力（网络内部调用 AF 注册的能力，Intent 联动 + 手动触发）。

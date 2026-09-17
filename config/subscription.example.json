@@ -1,0 +1,6 @@
+{
+  "callback_url": null,
+  "token_env": null,
+  "account_ids": ["1", "2", "3"],
+  "plan_prices": {}
+}

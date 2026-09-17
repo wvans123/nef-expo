@@ -1,0 +1,58 @@
+{
+  "intent": {
+    "url": "https://network-service.example.invalid/intent",
+    "method": "POST",
+    "token_env": "NEF_INTERNAL_TOKEN",
+    "body": {
+      "text": "$text"
+    }
+  },
+  "capabilities": {
+    "target_detection": {
+      "url": "https://network-service.example.invalid/detect",
+      "method": "POST",
+      "token_env": "NEF_INTERNAL_TOKEN",
+      "body": "$arguments"
+    }
+  },
+  "scenes": {
+    "robot_patrol": {
+      "intent": {
+        "url": "https://network-service.example.invalid/scenes/patrol",
+        "token_env": "NEF_INTERNAL_TOKEN",
+        "body": {
+          "text": "$text",
+          "serviceId": "$service_id"
+        }
+      }
+    },
+    "traffic_flow_detection": {
+      "intent": {
+        "url": "https://network-service.example.invalid/scenes/traffic",
+        "token_env": "NEF_INTERNAL_TOKEN",
+        "body": {
+          "text": "$text",
+          "serviceId": "$service_id"
+        }
+      }
+    },
+    "collaborative_tracking": {
+      "invoke": {
+        "url": "https://network-service.example.invalid/scenes/tracking",
+        "token_env": "NEF_INTERNAL_TOKEN",
+        "body": {
+          "input": "$arguments",
+          "serviceId": "$service_id"
+        }
+      },
+      "intent": {
+        "url": "https://network-service.example.invalid/scenes/tracking/intent",
+        "token_env": "NEF_INTERNAL_TOKEN",
+        "body": {
+          "text": "$text",
+          "serviceId": "$service_id"
+        }
+      }
+    }
+  }
+}

@@ -46,6 +46,7 @@ class Capability:
             "intent_keywords": self.intent_keywords,
             "unit_price": self.unit_price, "source": self.source,
             "status": self.status, "icon": self.icon,
+            "standard_basis": CAPABILITY_STANDARDS.get(self.id, {"family": "platform_extension", "label": "AF 扩展", "api_contract": "provider_defined"}),
         }
 
     def mcp_tool(self):
@@ -104,7 +105,7 @@ CAPABILITIES = [
     ),
     Capability(
         id="environment_recon", name="环境重构", category="isac", tier="premium", icon="🏗️",
-        description="基于无线信号进行三维空间建模，生成区域环境的数字化重构结果",
+        description="根据感知数据生成区域空间模型与环境重构结果",
         params=[
             CapParam("area", "string", "重构区域标识", required=True),
             CapParam("resolution", "string", "重构分辨率", default="medium", enum=["low", "medium", "high"]),
@@ -115,7 +116,7 @@ CAPABILITIES = [
     ),
     Capability(
         id="sensing_fusion", name="多源感知融合", category="isac", tier="premium", icon="🌐",
-        description="将 3GPP 无线感知与非 3GPP 数据（摄像头/激光雷达/红外）融合处理，输出全天候高置信感知结果",
+        description="融合摄像头、无线感知或其他已接入数据源，返回融合观测结果",
         params=[
             CapParam("area", "string", "融合感知区域（区域标识或坐标范围）", required=True),
             CapParam("data_sources", "array",
@@ -128,7 +129,7 @@ CAPABILITIES = [
     ),
     Capability(
         id="traffic_flow_sensing", name="车流量感知", category="isac", tier="advanced", icon="🚗",
-        description="基于通感一体对城市道路进行车流量实时检测，输出车流密度、车速与拥堵状态",
+        description="基于已接入的道路观测数据统计车流，返回车流量、车速与道路状态",
         params=[
             CapParam("area", "string", "检测区域/路段（区域标识或坐标范围）", required=True),
             CapParam("direction", "string", "检测方向", default="both", enum=["both", "inbound", "outbound"]),
@@ -149,7 +150,7 @@ CAPABILITIES = [
                intent_keywords=["手势", "姿态识别"]),
     Capability(
         id="sensing_fence", name="感知虚拟围栏", category="isac", tier="advanced", icon="🚧",
-        description="基于无线感知的虚拟周界：无需终端配合，对设定区域内任意闯入目标（人/车/无人机）实时检测并告警",
+        description="基于感知数据监测设定周界内的目标，返回越界事件",
         params=[
             CapParam("area", "string", "围栏区域（区域标识或坐标范围）", required=True),
             CapParam("object_types", "array", "关注目标类型", default=["person", "vehicle", "uav"]),
@@ -195,8 +196,8 @@ CAPABILITIES = [
         unit_price="69.9/月",
     ),
     Capability(
-        id="compute_qos", name="算力 QoS 保障", category="computing", tier="advanced", icon="🎛️",
-        description="为指定计算任务保障算力侧 QoS（CPU/GPU 优先级、抖动上限），可与通信 QoS 联动实现端到端体验保障",
+        id="compute_qos", name="算力服务保障", category="computing", tier="advanced", icon="🎛️",
+        description="为计算任务申请优先级、GPU 份额和抖动目标",
         params=[
             CapParam("task_id", "string", "计算任务标识（来自计算卸载结果）", required=True),
             CapParam("cpu_priority", "string", "CPU 优先级", default="high", enum=["standard", "high", "realtime"]),
@@ -218,8 +219,8 @@ CAPABILITIES = [
                intent_keywords=["联邦学习"]),
     # ===== 连接服务 Connectivity =====
     Capability(
-        id="qos_guarantee", name="QoS 保障", category="connectivity", tier="basic", icon="📶",
-        description="为指定设备或应用保障网络质量（时延/带宽/可靠性）",
+        id="qos_guarantee", name="应用 QoS 请求", category="connectivity", tier="basic", icon="📶",
+        description="为应用连接申请时延和带宽目标，接收网络侧策略处理结果",
         params=[
             CapParam("device_id", "string", "设备标识（IMSI/GPSI）", required=True),
             CapParam("latency_ms", "integer", "目标时延上限（ms）", default=20),
@@ -251,8 +252,8 @@ CAPABILITIES = [
         unit_price="免费",
     ),
     Capability(
-        id="slice_management", name="按需切片", category="connectivity", tier="advanced", icon="🧩",
-        description="按需创建/配置/释放网络切片",
+        id="slice_management", name="切片服务申请", category="connectivity", tier="advanced", icon="🧩",
+        description="向切片服务提供方申请创建、调整或释放切片服务",
         params=[
             CapParam("action", "string", "操作类型", required=True, enum=["create", "modify", "release"]),
             CapParam("slice_type", "string", "切片类型", default="urllc", enum=["embb", "urllc", "miot"]),
@@ -262,8 +263,8 @@ CAPABILITIES = [
         unit_price="59.9/月",
     ),
     Capability(
-        id="device_wakeup", name="设备唤醒", category="connectivity", tier="basic", icon="⏰",
-        description="唤醒处于省电模式的 IoT 设备",
+        id="device_wakeup", name="设备触达请求", category="connectivity", tier="basic", icon="⏰",
+        description="向设备服务提供方提交触达请求，返回处理回执",
         params=[
             CapParam("device_id", "string", "目标设备标识", required=True),
             CapParam("wakeup_mode", "string", "唤醒方式", default="paging", enum=["paging", "wus", "nidd"]),
@@ -283,18 +284,18 @@ CAPABILITIES = [
     ),
     Capability(id="multipath_boost", name="多路径聚合加速", category="connectivity", tier="advanced", icon="🛣️",
                status="planned", unit_price="规划中",
-               description="蜂窝+Wi-Fi+卫星多路径聚合传输（规划中）",
+               description="探索多接入流量引导、切换与分流服务（规划中）",
                params=[CapParam("device_id", "string", "设备标识", required=True)],
                intent_keywords=["多路径", "聚合加速"]),
     Capability(id="deterministic_latency", name="确定性时延", category="connectivity", tier="premium", icon="⏱️",
                status="planned", unit_price="规划中",
-               description="为工业控制提供有界时延的确定性网络（规划中）",
+               description="面向工业应用申请时延与同步目标（规划中）",
                params=[CapParam("device_id", "string", "设备标识", required=True)],
                intent_keywords=["确定性", "有界时延"]),
     # ===== 定位服务 Location =====
     Capability(
-        id="precision_location", name="精准定位", category="location", tier="advanced", icon="📍",
-        description="提供亚米级室内外定位，支持实时位置查询和轨迹追踪",
+        id="precision_location", name="终端位置服务", category="location", tier="advanced", icon="📍",
+        description="查询终端位置或订阅位置更新，可提出定位精度需求",
         params=[
             CapParam("device_id", "string", "目标设备标识", required=True),
             CapParam("accuracy", "string", "精度要求", default="submeter", enum=["meter", "submeter", "centimeter"]),
@@ -358,8 +359,8 @@ CAPABILITIES = [
                intent_keywords=["数字孪生底座"]),
     # ===== 安全·身份 Security（应用/Agent 级身份与安全态势）=====
     Capability(
-        id="identity_service", name="应用身份服务", category="security", tier="advanced", icon="🪪",
-        description="为 AF 应用/Agent 颁发网络级数字身份与应用密钥（对应 5G AKMA TS 33.535 与 CAPIF API Invoker onboarding），用于跨域互认与安全调用",
+        id="identity_service", name="应用接入身份", category="security", tier="advanced", icon="🪪",
+        description="管理应用身份登记与平台访问凭证，支持应用接入管理",
         params=[
             CapParam("subject", "string", "申请主体（Agent/应用名称）", required=True),
             CapParam("key_lifetime_h", "integer", "应用密钥有效期（小时）", default=24),
@@ -370,7 +371,7 @@ CAPABILITIES = [
     ),
     Capability(
         id="security_posture", name="连接安全态势", category="security", tier="basic", icon="🛡️",
-        description="基于网络侧异常行为分析（NWDAF Abnormal behaviour，TS 23.288）评估设备/连接的安全态势，输出风险评分与处置建议",
+        description="结合连接观测与异常分析结果，提供风险评估和处置建议",
         params=[
             CapParam("target_id", "string", "评估对象（设备/连接 ID）", required=True),
             CapParam("window_h", "integer", "分析时间窗口（小时）", default=24),
@@ -400,13 +401,24 @@ CAPABILITIES = [
 
 CAP_INDEX = {c.id: c for c in CAPABILITIES}
 
+# Classification of design basis, not a declaration of API conformity or live deployment.
+CAPABILITY_STANDARDS = {}
+for family, label, ids in [
+    ("5g_reference", "5G 能力参考", ["qos_guarantee", "event_subscription", "mobility_insight", "multipath_boost", "deterministic_latency", "precision_location", "geofencing", "network_analytics"]),
+    ("sensing_reference", "通感能力探索", ["target_detection", "target_tracking", "environment_recon", "vital_sign_detection", "gesture_recognition", "sensing_fence", "sensing_fusion"]),
+    ("platform_extension", "平台扩展", ["traffic_flow_sensing", "compute_offload", "ai_inference", "render_offload", "compute_qos", "edge_agent_hosting", "federated_learning", "network_diagnosis", "slice_management", "device_wakeup", "trajectory_predict", "data_query", "traffic_forecast", "digital_twin_feed", "identity_service", "security_posture", "capability_register", "revenue_share"]),
+]:
+    for capability_id in ids:
+        CAPABILITY_STANDARDS[capability_id] = {"family": family, "label": label, "api_contract": "project_defined"}
+
+
 # ===== 场景套餐 =====
 PACKAGES = [
     {
         "id": "live_offload", "name": "直播计算卸载套餐", "price": "69/月",
         "description": "特效计算卸载先行；体验吃紧时通信 QoS 与算力 QoS 联动调整，保障 0 卡顿 AI 换脸",
         "capabilities": ["compute_offload", "compute_qos", "qos_guarantee", "network_diagnosis"],
-        "scenario": "电商/户外直播 · 0卡顿 AI 特效",
+        "scenario": "电商/户外直播 · 实时 AI 特效",
         "story_steps": [
             {"name": "端到端安全传输通道", "detail": "直播流经运营商加密通道传输，密钥由网络侧托管"},
         ],
@@ -432,35 +444,35 @@ PACKAGES = [
         ],
     },
     {
-        "id": "deterministic_conn", "name": "确定性连接保障套餐", "price": "49/月",
-        "description": "面向远程控制与实时交互的连接 SLA：QoS 保障、专属切片、链路诊断、移动性预测与连接事件订阅",
+        "id": "deterministic_conn", "name": "应用连接服务套餐", "price": "49/月",
+        "description": "组合应用 QoS 请求、切片服务申请、网络诊断、移动性洞察与事件订阅",
         "capabilities": ["qos_guarantee", "slice_management", "network_diagnosis", "mobility_insight", "event_subscription"],
         "scenario": "远程控制/实时交互 · 连接 SLA",
         "story_steps": [
-            {"name": "连接 SLA 违约自动补偿", "detail": "连接质量未达承诺 SLA 时，网络自动触发计费补偿与告警工单"},
+            {"name": "连接质量通知", "detail": "订阅连接质量事件，供业务侧处理异常"},
         ],
     },
     {
         "id": "robot_patrol", "name": "机器狗巡检套餐", "price": "89/月", "featured": True,
-        "description": "通感一体把摄像头数据（可来自 AF 注册的第三方数据能力）与 3GPP 无线感知融合，让机器狗在雾天黑夜也看得清并精准定位目标",
+        "description": "组合目标检测、多源融合与终端位置服务，辅助园区巡检",
         "capabilities": ["target_detection", "sensing_fusion", "precision_location"],
-        "scenario": "园区/变电站全天候巡检",
+        "scenario": "园区/变电站巡检",
     },
     {
         "id": "traffic_forecast_pkg", "name": "城市车流量测量套餐", "price": "59/月", "featured": True,
-        "description": "以摄像头数据为主、可叠加通感(sensing)数据融合，对道路历史时段车流量进行测量（不含未来预测）；通常由意图触发",
+        "description": "组合多源感知、车流统计与数据查询，查看道路交通变化",
         "capabilities": ["sensing_fusion", "traffic_flow_sensing", "data_query"],
         "scenario": "智慧交通 · 历史车流量测量",
     },
     {
         "id": "xr_render", "name": "XR 渲染卸载套餐", "price": "119/月",
-        "description": "渲染卸载至边缘 GPU，通信 QoS 与算力 QoS 双保障",
+        "description": "组合渲染卸载、算力配置与连接质量请求",
         "capabilities": ["render_offload", "compute_qos", "qos_guarantee", "environment_recon"],
         "scenario": "XR/元宇宙 · 通算一体",
     },
     {
         "id": "uav_track", "name": "目标识别与跟踪套餐", "price": "49/月",
-        "description": "6G 网络以通感一体(ISAC)对目标进行识别并持续跟踪：目标检测确定有什么、在哪，目标追踪持续回传其轨迹/速度/航向。识别与追踪均由网络完成，终端无需具备感知能力",
+        "description": "组合目标检测与轨迹追踪，返回目标观测信息与连续轨迹",
         "capabilities": ["target_detection", "target_tracking"],
         "scenario": "低空经济 / 安防 · ISAC 目标识别与跟踪",
     },
@@ -526,8 +538,8 @@ AGENTS = {
         "capabilities": ["identity_service", "security_posture"],
         "nf_tools": [
             {"tool": "ausf_ue_authentication", "sbi": "Nausf_UEAuthentication"},
-            {"tool": "aanf_akma_key", "sbi": "Nnef_AKMA / AAnF"},
-            {"tool": "capif_invoker_onboard", "sbi": "CAPIF API Provider Mgmt"},
+            {"tool": "aanf_akma_key", "sbi": "Naanf_AKMA (UE application key context)"},
+            {"tool": "capif_invoker_onboard", "sbi": "CAPIF API Invoker Management"},
         ],
     },
     "location": {

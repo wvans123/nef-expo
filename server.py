@@ -5,11 +5,18 @@ import random
 import secrets
 import time
 import uuid
+from datetime import datetime, timezone
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+import exhibition
+import subscription_notifications
+from scene_services import SCENES, catalog as scene_catalog, tool_definition, demo_result
+from starlette.concurrency import run_in_threadpool
+
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from subscription_query import SubscriptionSnapshot
 
 from skills import (CAPABILITIES, CAP_INDEX, PACKAGES, PKG_INDEX, CATEGORIES,
                     AGENTS, Capability, CapParam, agent_for_capability)
@@ -45,6 +52,12 @@ class SubscribeReq(BaseModel):
     capability_ids: list[str] = []
     package_ids: list[str] = []
     plan: str = "free"
+    network_capability_ids: list[str] = Field(default_factory=list, max_length=64)
+
+
+class SceneSubscribeReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    network_capability_ids: list[str] = Field(default_factory=list, max_length=64)
 
 
 class PlanReq(BaseModel):
@@ -102,11 +115,26 @@ def _auth(authorization: str | None, required_scope: str | None = None):
     return key, rec
 
 
+def _security_implementation():
+    """Describe actual demo checks, not a claim of CAPIF/TLS/OAuth compliance."""
+    return {"authentication": "local_api_key", "standard_compliance": False,
+            "mtls_validated": False, "oauth_token_validated": False,
+            "key_expiry_checked": False, "resource_policy": "not_implemented",
+            "scene_policy": "not_implemented", "audit_persistence": False}
+
+
+def _with_auth_error(exc: HTTPException, auth: dict):
+    detail = dict(exc.detail) if isinstance(exc.detail, dict) else {"message": exc.detail}
+    detail["nef_auth"] = auth
+    return HTTPException(exc.status_code, detail, headers=exc.headers)
+
+
 def _auth_evidence(key: str, rec: dict, scope: str, request_id: str) -> dict:
     masked_key = f"{key[:8]}...{key[-4:]}"
     return {
         "status": "verified",
         "scheme": "Bearer API Key",
+        "implementation": _security_implementation(),
         "account": rec["account"],
         "credential": masked_key,
         "scope": scope,
@@ -129,6 +157,7 @@ def _auth_stamp(key: str, rec: dict, scope: str) -> dict:
     return {
         "status": "verified",
         "scheme": "Bearer API Key",
+        "implementation": _security_implementation(),
         "account": rec["account"],
         "credential": f"{key[:8]}...{key[-4:]}",
         "scope": scope,
@@ -317,17 +346,17 @@ def _capif_pipeline(key, rec, *, scope, scope_ok=True, entitled=True, paid=False
 
     def add(code, label, status, detail):
         stages.append({"seq": len(stages) + 1, "code": code, "label": label,
-                       "status": status, "latency_ms": random.randint(1, 5), "detail": detail})
+                       "status": status, "latency_ms": None, "timing_source": "not_measured", "detail": detail})
 
     def done(decision):
         return {"request_id": request_id, "decision": decision, "stages": stages}
 
     add("credential", "取出凭证", "passed", f"从请求头取出 API Key（Bearer {masked}）")
-    add("validate", "校验密钥", "passed", "确认这把 Key 真实有效、未过期、未被吊销")
+    add("validate", "校验密钥", "passed", "Key 存在于本地账号存储；未实施独立的过期时间或撤销列表校验")
     add("identify", "识别身份", "passed", f"这把 Key 属于 AF 账号「{acct}」（等级 {plan}）")
     if not scope_ok:
         add("scope", "检查接口权限", "denied", f"该 Key 不允许调用这类接口（缺 scope：{scope}）")
-        add("audit", "记录审计", "passed", f"写审计日志 {request_id}（结果：拒绝 · 接口权限不足）")
+        add("audit", "记录审计", "passed", f"生成关联编号 {request_id}（拒绝：接口权限不足；未持久化审计）")
         return done("deny_scope")
     add("scope", "检查接口权限", "passed", f"该 Key 允许调用这类接口（scope：{scope}）")
     capname = cap.name if cap else "本次调用"
@@ -340,9 +369,9 @@ def _capif_pipeline(key, rec, *, scope, scope_ok=True, entitled=True, paid=False
         tier = getattr(cap, "tier", "?") if cap else "?"
         add("authorize", authz_label, "denied",
             authz_deny_detail or f"账号没订阅「{capname}」、等级也不含 {tier} 层 → 拒绝（可订阅 / 升级 / 按次付费）")
-        add("audit", "记录审计", "passed", f"写审计日志 {request_id}（结果：拒绝 · 未授权）")
+        add("audit", "记录审计", "passed", f"生成关联编号 {request_id}（拒绝：未授权；未持久化审计）")
         return done("deny_authz")
-    add("audit", "记录审计", "passed", f"写审计日志 {request_id}（记下谁/何时/调了什么/放行）")
+    add("audit", "记录审计", "passed", f"生成关联编号 {request_id}（放行回执；未持久化审计）")
     return done("allow")
 
 
@@ -404,7 +433,8 @@ def get_capability(cap_id: str):
 
 
 @app.post("/api/v1/capabilities/{cap_id}/invoke")
-async def invoke_capability(cap_id: str, request: Request, authorization: str = Header(None)):
+async def invoke_capability(cap_id: str, request: Request, authorization: str = Header(None),
+                            x_nef_execution: str = Header(None)):
     key, rec = _auth(authorization, required_scope="capabilities:invoke")
     cap = CAP_INDEX.get(cap_id) or next((c for c in THIRD_PARTY if c.id == cap_id), None)
     if not cap:
@@ -414,7 +444,11 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
     try:
         params = await request.json()
     except Exception:
+        if exhibition.live_requested(x_nef_execution):
+            raise HTTPException(422, "需要有效 JSON 对象")
         params = {}
+    if not isinstance(params, dict):
+        raise HTTPException(422, "请求参数需要 JSON 对象")
     confirm_pay = bool(params.pop("_confirm_pay", False))
     # 先做参数校验：调用失败（422）绝不计费
     missing = [p.name for p in cap.params if p.required and p.name not in params]
@@ -429,7 +463,16 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
         if not confirm_pay:
             raise HTTPException(402, _payment_required_payload(cap, "REST", pipeline))
     dispatch = _dispatch("tool", cap_id, params, request_id)
-    result = _result_envelope(cap, invoke_stub(cap_id, params))
+    if exhibition.live_requested(x_nef_execution):
+        try:
+            result = await run_in_threadpool(exhibition.forward, "capability", {
+                "capability_id": cap_id, "arguments": params, "account": rec["account"], "request_id": request_id})
+        except HTTPException as exc:
+            raise _with_auth_error(exc, _nef_auth(key, rec, "capabilities:invoke", pipeline)) from exc
+        dispatch = {"target": "configured_backend", "note": "已按配置发送真实 HTTP 请求"}
+    else:
+        result = _result_envelope(cap, invoke_stub(cap_id, params))
+        result["data_source"] = "mock"
     # 调用成功后才计费（按次）
     if cap.source == "third_party" and _tp_billing_mode(cap) == "per_call":
         # 第三方按次能力：每次调用都向调用方计费，并给提供方记一笔分成收益（包月已订阅则不按次扣）
@@ -444,6 +487,85 @@ async def invoke_capability(cap_id: str, request: Request, authorization: str = 
         result["billing"] = {"mode": "per_call", "charged": per_call_fee,
                              "message": f"按次计费 ¥{per_call_fee}，已记入账号 {rec['account']} 账单"}
     return result
+
+
+# ===== 场景级服务：目录、订阅、执行，与旧套餐及细粒度能力分开 =====
+class SceneIntentReq(BaseModel):
+    text: str
+
+
+@app.get("/api/v1/services")
+def list_scene_services():
+    return {"services": scene_catalog()}
+
+
+@app.post("/api/v1/services/{service_id}/subscribe")
+def subscribe_scene(service_id: str, req: SceneSubscribeReq | None = None, authorization: str = Header(None)):
+    _, rec = _auth(authorization)
+    if service_id not in SCENES:
+        raise HTTPException(404, "场景服务不存在")
+    selected = req.network_capability_ids if req else []
+    allowed = {item["capability_id"] for item in SCENES[service_id]["provenance"]["components"]}
+    subscription_notifications.validate_capabilities(selected, allowed)
+    rec.setdefault("scene_subscriptions", set()).add(service_id)
+    return {"service_id": service_id, "subscribed": True, "account": rec["account"], "billing": "demo_entitlement",
+            "notification": _notify_subscriptions(rec["account"], {("scene", service_id)}, selected)}
+
+
+def _execute_scene(service_id, mode, payload, authorization, execution):
+    scope = {"intent": "intent:submit", "api": "capabilities:invoke", "tool": "mcp:tools"}[mode]
+    key, rec = _auth(authorization, required_scope=scope)
+    scene = SCENES.get(service_id)
+    if not scene:
+        raise HTTPException(404, "场景服务不存在")
+    if mode not in scene["modes"]:
+        raise HTTPException(422, "该场景不支持此接入方式")
+    if execution not in ("live", "demo"):
+        raise HTTPException(422, "请选择 demo 或 live 执行模式")
+    allowed = service_id in rec.get("scene_subscriptions", set())
+    pipeline = _capif_pipeline(key, rec, scope=scope, entitled=allowed,
+        authz_label="场景授权", authz_pass_detail="已开通场景：" + scene["name"],
+        authz_deny_detail="尚未开通场景：" + scene["name"])
+    auth = _nef_auth(key, rec, scope, pipeline)
+    auth["authorization_target"] = {"kind": "scene", "service_id": service_id, "mode": mode}
+    auth["implementation"]["scene_policy"] = "local_scene_entitlement"
+    if not allowed:
+        raise HTTPException(403, {"message": "请先开通「" + scene["name"] + "」", "nef_auth": auth})
+    context = {"service_id": service_id, "request_id": pipeline["request_id"], "account": rec["account"]}
+    if mode == "intent":
+        text = payload.get("text") if isinstance(payload, dict) else None
+        if not isinstance(text, str) or not text.strip() or len(text) > 16000:
+            raise HTTPException(422, "请提供非空 Intent 原文（最多 16000 字符）")
+        context["text"] = text
+    else:
+        fields = set(scene["sample_arguments"])
+        if not isinstance(payload, dict) or set(payload) != fields or any(not isinstance(v, str) or not v.strip() or len(v)>256 for v in payload.values()):
+            raise HTTPException(422, "请提供 device_id、video_source、target 三个非空字符串参数")
+        context["arguments"] = payload
+    if execution == "demo":
+        result = demo_result(scene, pipeline["request_id"])
+    else:
+        try:
+            result = exhibition.forward("scene_intent" if mode == "intent" else "scene_invoke", context)
+        except HTTPException as exc:
+            raise _with_auth_error(exc, auth) from exc
+        result["service_id"] = service_id
+    result["nef_auth"] = auth
+    return result
+
+
+@app.post("/api/v1/services/{service_id}/intent")
+def invoke_scene_intent(service_id: str, req: SceneIntentReq, authorization: str = Header(None), x_nef_execution: str = Header("live")):
+    return _execute_scene(service_id, "intent", {"text": req.text}, authorization, x_nef_execution)
+
+
+@app.post("/api/v1/services/{service_id}/invoke")
+async def invoke_scene_api(service_id: str, request: Request, authorization: str = Header(None), x_nef_execution: str = Header("live")):
+    try:
+        args = await request.json()
+    except Exception:
+        raise HTTPException(422, "参数需要 JSON 对象")
+    return await run_in_threadpool(_execute_scene, service_id, "api", args, authorization, x_nef_execution)
 
 
 # ===== 套餐 =====
@@ -585,6 +707,10 @@ def subscribe(req: SubscribeReq):
     planned = [c for c in req.capability_ids if c in CAP_INDEX and CAP_INDEX[c].status == "planned"]
     if planned:
         raise HTTPException(403, f"能力规划中，暂未开放订阅: {', '.join(planned)}")
+    if req.network_capability_ids and len(req.package_ids) != 1:
+        raise HTTPException(422, "指定网络能力时请一次订阅一个套餐")
+    allowed = {cid for pid in req.package_ids for cid in PKG_INDEX[pid]["capabilities"]}
+    subscription_notifications.validate_capabilities(req.network_capability_ids, allowed)
     key = _ensure_account(req.account)
     rec = API_KEYS[key]
     rec["subscriptions"] |= set(req.capability_ids)
@@ -597,7 +723,119 @@ def subscribe(req: SubscribeReq):
     return {"account": req.account, "api_key": key,
             "subscriptions": sorted(rec["subscriptions"]),
             "packages": sorted(rec["packages"]),
-            "message": "订阅成功，权益已记录到账号（API Key 不变）"}
+            "message": "订阅成功，权益已记录到账号（API Key 不变）",
+            "notification": _notify_subscriptions(req.account, {("capability_package", pid) for pid in req.package_ids},
+                                                 req.network_capability_ids)}
+
+
+def _notify_subscriptions(account, selections, network_capability_ids=()):
+    snapshot = SubscriptionSnapshot(**integration_subscriptions(Response(), account)).model_dump()
+    return subscription_notifications.notify(snapshot, selections, network_capability_ids)
+
+
+@app.get("/api/v1/integration/notifications", tags=["Integration"])
+def subscription_notification_list(response: Response, authorization: str = Header(None)):
+    _, rec = _auth(authorization)
+    response.headers["Cache-Control"] = "no-store"
+    return {"notifications": subscription_notifications.list_for(rec["account"])}
+
+
+@app.post("/api/v1/integration/notifications/{event_id}/retry", tags=["Integration"])
+def retry_subscription_notification(event_id: str, authorization: str = Header(None)):
+    _, rec = _auth(authorization)
+    return subscription_notifications.deliver(event_id, rec["account"])
+
+
+@app.get(
+    "/api/v1/integration/subscriptions",
+    response_model=SubscriptionSnapshot,
+    tags=["Integration"],
+    summary="Query demo subscriptions by agreed account identifier",
+    description=(
+        "Read-only demo metadata lookup. account_id is the exact NEF account name "
+        "(for example '1'), not an API key. No NEF Authorization header is required. "
+        "The deployed public hostname remains protected by Cloudflare Access. "
+        "Any client admitted by that shared boundary can query any known demo account. "
+        "No credentials are returned. Subscriptions are in process memory and reset on restart. "
+        "Grants are not proof of live backend availability, and do not authorize invocation."
+    ),
+    responses={404: {"description": "Account is not registered in the current NEF process."}},
+)
+def integration_subscriptions(
+    response: Response,
+    account_id: str = Query(min_length=1, max_length=128, pattern=r"^\S(?:.*\S)?$"),
+):
+    key = ACCOUNT_KEYS.get(account_id)
+    rec = API_KEYS.get(key)
+    if rec is None:
+        raise HTTPException(
+            404, {"code": "account_not_found", "message": "该账号尚未在当前 NEF 服务中注册"},
+            headers={"Cache-Control": "no-store"},
+        )
+    response.headers["Cache-Control"] = "no-store"
+    # Copy the mutable entitlement sets once; the response never serializes credentials.
+    direct = set(rec["subscriptions"])
+    package_ids = sorted(rec["packages"])
+    scene_ids = sorted(rec.get("scene_subscriptions", set()))
+    plan = rec.get("plan", "free")
+    subscribed = direct | {cid for pid in package_ids for cid in PKG_INDEX[pid]["capabilities"]}
+    tools = []
+    for cap in sorted([*CAPABILITIES, *THIRD_PARTY], key=lambda c: c.id):
+        if cap.status != "available":
+            continue
+        sources = (["direct"] if cap.id in direct else []) + [
+            "package:" + pid for pid in package_ids if cap.id in PKG_INDEX[pid]["capabilities"]
+        ]
+        if cap.source != "third_party" and cap.tier in PLAN_TIERS.get(plan, set()):
+            sources.append("plan:" + plan)
+        if sources:
+            tools.append({
+                "capability_id": cap.id, "display_name": cap.name,
+                **cap.mcp_tool(), "grant_sources": sources,
+            })
+    entitled = {tool["capability_id"] for tool in tools}
+    scenes = []
+    for sid in scene_ids:
+        scene = SCENES[sid]
+        scenes.append({
+            "service_id": sid, "name": scene["name"], "modes": scene["modes"],
+            "components": [
+                {"capability_id": component["capability_id"],
+                 "name": CAP_INDEX[component["capability_id"]].name,
+                 "standalone_entitled": component["capability_id"] in entitled}
+                for component in scene["provenance"]["components"]
+            ],
+            "tool": tool_definition(scene) if "tool" in scene["modes"] else None,
+        })
+    purchased_packages = [
+        {"kind": "scene", "id": scene["service_id"], "name": scene["name"],
+         "description": SCENES[scene["service_id"]]["description"],
+         "components": scene["components"], "modes": scene["modes"],
+         "intent_example": SCENES[scene["service_id"]]["intent_example"], "tool": scene["tool"]}
+        for scene in scenes
+    ]
+    for pid in package_ids:
+        pkg = PKG_INDEX[pid]
+        purchased_packages.append({
+            "kind": "capability_package", "id": pid, "name": pkg["name"],
+            "description": pkg["description"],
+            "components": [
+                {"capability_id": cid, "name": CAP_INDEX[cid].name,
+                 "standalone_entitled": cid in entitled}
+                for cid in pkg["capabilities"]
+            ],
+            "modes": [], "intent_example": None, "tool": None,
+        })
+    return {
+        "account_id": account_id, "generated_at": datetime.now(timezone.utc).isoformat(),
+        "plan": plan, "direct_subscriptions": sorted(direct),
+        "subscribed_capabilities": sorted(subscribed),
+        "entitled_capabilities": sorted(entitled),
+        "packages": [{"id": pid, "name": PKG_INDEX[pid]["name"],
+                      "capability_ids": list(PKG_INDEX[pid]["capabilities"])} for pid in package_ids],
+        "scene_subscriptions": scene_ids, "tools": tools, "scene_services": scenes,
+        "purchased_packages": purchased_packages,
+    }
 
 
 @app.get("/api/v1/auth/info")
@@ -620,6 +858,7 @@ def auth_info(authorization: str = Header(None)):
         est += float(PKG_INDEX[pid]["price"].split("/")[0])
     return {"account": rec["account"], "api_key": key,
             "subscribed_capabilities": caps,
+            "scene_subscriptions": sorted(rec.get("scene_subscriptions", set())),
             "direct_subscriptions": sorted(rec["subscriptions"]),
             "packages": sorted(rec["packages"]),
             "estimated_monthly_cost": round(est, 1),
@@ -643,8 +882,24 @@ def auth_info(authorization: str = Header(None)):
 
 # ===== Intent =====
 @app.post("/api/v1/intent")
-def intent(req: IntentReq, authorization: str = Header(None)):
+def intent(req: IntentReq, authorization: str = Header(None), x_nef_execution: str = Header(None)):
     key, rec = _auth(authorization, required_scope="intent:submit")
+    if exhibition.live_requested(x_nef_execution):
+        pipeline = _capif_pipeline(key, rec, scope="intent:submit", entitled=_intent_eligible(rec),
+            cap=None, authz_label="Intent 接入权益", authz_pass_detail="当前账号已开通 Intent 接入",
+            authz_deny_detail="当前账号尚未开通 Intent 接入权益")
+        auth = _auth_evidence(key, rec, "intent:submit", pipeline["request_id"])
+        auth["pipeline"] = pipeline["stages"]
+        if not _intent_eligible(rec):
+            raise HTTPException(403, {"message": "请先开通 Intent 接入权益", "nef_auth": auth})
+        if not req.text.strip():
+            raise HTTPException(422, "Intent 不能为空")
+        try:
+            result = exhibition.forward("intent", {"text": req.text, "request_id": pipeline["request_id"], "account": rec["account"]})
+        except HTTPException as exc:
+            raise _with_auth_error(exc, auth) from exc
+        result["nef_auth"] = auth
+        return result
     # 第一道：NEF 受理鉴权 —— 按套餐/等级判定能否发起意图。
     # 免费且无任何订阅的账号不支持意图编排（会触发网络侧多步编排，开销大）；
     # PRO/MAX 或已订阅能力/套餐的账号可发起。具体能用哪些 tool 留给第二道——
@@ -675,7 +930,9 @@ def intent(req: IntentReq, authorization: str = Header(None)):
         }
     entitled = {c.id for c in CAPABILITIES if c.status == "available" and _entitled(rec, c)}
     entitled |= {c.id for c in THIRD_PARTY}
-    return process_intent(req.text, auth, entitled)
+    result = process_intent(req.text, auth, entitled)
+    result["data_source"] = "mock"
+    return result
 
 
 @app.get("/api/v1/intent/{intent_id}")
@@ -930,6 +1187,13 @@ def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
             t["subscribed"] = True
         tools.append(t)
     tools += [c.mcp_tool() for c in THIRD_PARTY]
+    for scene in SCENES.values():
+        if "tool" in scene["modes"]:
+            tool = tool_definition(scene)
+            tool["subscribed"] = scene["id"] in rec.get("scene_subscriptions", set())
+            if not tool["subscribed"]:
+                tool["description"] = "[未订阅 · 场景服务] " + tool["description"]
+            tools.append(tool)
     for pid in sorted(rec["packages"]):
         pkg = PKG_INDEX[pid]
         tools.append({"name": f"scenario_{pid}",
@@ -946,11 +1210,22 @@ def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
 
 
 @app.post("/api/v1/mcp/tools/call")
-def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
+def mcp_tools_call(req: McpCallReq, authorization: str = Header(None), x_nef_execution: str = Header(None)):
     key, rec = _auth(authorization, required_scope="mcp:tools")
     name = req.params.get("name")
     args = req.params.get("arguments", {})
     import json as _json
+    live = exhibition.live_requested(x_nef_execution)
+    if not isinstance(name, str) or not isinstance(args, dict):
+        raise HTTPException(422, "工具名称需为字符串，arguments 需为对象")
+    if name.startswith("scene_"):
+        scene = next((s for s in SCENES.values() if s.get("tool_name") == name), None)
+        if not scene:
+            raise HTTPException(404, "场景 Tool 不存在")
+        result = _execute_scene(scene["id"], "tool", args, authorization, x_nef_execution or "live")
+        return {"jsonrpc": "2.0", "id": req.id, "result": {"content": [{"type": "text", "text": _json.dumps(result, ensure_ascii=False)}], "isError": False}}
+    if live and name and name.startswith(("pipeline_", "scenario_")):
+        raise HTTPException(503, "此类 Tool 尚未配置真实接口，不执行模拟回退")
     if name and name.startswith("pipeline_"):
         pipe = PIPELINES.get(name[len("pipeline_"):])
         if not pipe or pipe["owner"] != rec["account"]:
@@ -990,7 +1265,21 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None)):
                                         "text": _json.dumps(payload, ensure_ascii=False, indent=2)}],
                            "isError": False, "payment_required": True}}
     dispatch = _dispatch("tool", name, args, request_id)
-    result = _result_envelope(cap, invoke_stub(name, args))
+    if live:
+        if cap.status != "available":
+            raise HTTPException(403, "能力尚未开放")
+        missing = [p.name for p in cap.params if p.required and p.name not in args]
+        if missing:
+            raise HTTPException(422, "缺少必填参数: " + ", ".join(missing))
+        try:
+            result = exhibition.forward("capability", {"capability_id": name, "arguments": args,
+                                         "account": rec["account"], "request_id": request_id})
+        except HTTPException as exc:
+            raise _with_auth_error(exc, _nef_auth(key, rec, "mcp:tools", pipeline)) from exc
+        dispatch = {"target": "configured_backend", "note": "已按配置发送真实 HTTP 请求"}
+    else:
+        result = _result_envelope(cap, invoke_stub(name, args))
+        result["data_source"] = "mock"
     if cap.source == "third_party" and _tp_billing_mode(cap) == "per_call":   # 第三方按次计费 + 提供方分成
         per_call_fee = _bill_per_call(rec, cap, request_id)
         record_reverse_call(cap.id, trigger="north_invoke",
@@ -1185,7 +1474,7 @@ async def internal_mcp(request: Request):
 
 # ===== 标准 MCP 端点（streamable HTTP，可被 Claude Code / Codex 等直连） =====
 @app.post("/mcp")
-async def mcp_endpoint(request: Request, authorization: str = Header(None)):
+async def mcp_endpoint(request: Request, authorization: str = Header(None), x_nef_execution: str = Header(None)):
     """最小 MCP Server：initialize / tools/list / tools/call（JSON-RPC over HTTP）。
     外部 AI Agent 配置示例：
       claude mcp add --transport http nef http://localhost:8000/mcp \
@@ -1207,9 +1496,21 @@ async def mcp_endpoint(request: Request, authorization: str = Header(None)):
             return {"jsonrpc": "2.0", "id": rid, "result": {}}
         return Response(status_code=202)
     if method == "tools/list":
-        return mcp_tools_list(McpCallReq(id=rid or 1), authorization)
+        result = mcp_tools_list(McpCallReq(id=rid if rid is not None else 1), authorization)
+        if exhibition.live_requested(x_nef_execution):
+            result["result"]["tools"] = [t for t in result["result"]["tools"]
+                if not t["name"].startswith(("scenario_", "pipeline_"))]
+        return result
     if method == "tools/call":
-        return mcp_tools_call(McpCallReq(id=rid or 1, params=body.get("params", {})), authorization)
+        try:
+            return await run_in_threadpool(mcp_tools_call, McpCallReq(id=rid if rid is not None else 1, params=body.get("params", {})), authorization, x_nef_execution)
+        except HTTPException as exc:
+            if exc.status_code in (401, 403):
+                raise
+            import json
+            return {"jsonrpc": "2.0", "id": rid, "result": {"isError": True,
+                "content": [{"type": "text", "text": json.dumps({"http_status": exc.status_code,
+                    "detail": exc.detail}, ensure_ascii=False)}]}}
     return {"jsonrpc": "2.0", "id": rid,
             "error": {"code": -32601, "message": f"method not supported: {method}"}}
 
@@ -1379,6 +1680,11 @@ def build_internal_skill(pkg):
 
 
 # ===== 静态文件 =====
+exhibition.mount_routes(app, _auth)
+
+from network_registry import build_router as build_network_router
+app.include_router(build_network_router(_auth))
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
