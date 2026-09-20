@@ -1,4 +1,7 @@
 /* Small additions to the original workbench; existing palette, tabs, tiles and drag/drop are retained. */
+.ops-only{display:none}body.ops .ops-only{display:revert}
+.wb-price{font-size:16px;color:var(--green);margin:8px 0;letter-spacing:0}.wb-price small{font-size:12px;color:var(--muted);margin-left:8px}
+.wb-feedback-grid:has(>[hidden]){grid-template-columns:1fr}
 #purchase-capabilities{border:0;padding:0;margin:16px 0;min-width:0}
 #purchase-capabilities legend{font-size:13px;color:var(--muted);padding:0;margin-bottom:8px;letter-spacing:0}
 #purchase-capabilities label{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px;letter-spacing:0}

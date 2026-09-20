@@ -8,17 +8,27 @@
         "intent": {
           "url": "",
           "method": "POST",
-          "body": {"intent": "$text"},
+          "content_type": "text/plain",
+          "body": "$text",
           "timeout_seconds": 8
+        },
+        "result": {
+          "url": "",
+          "method": "GET",
+          "timeout_seconds": 8,
+          "delay_seconds": 0
         }
       },
       "traffic_flow_detection": {
         "intent": {
-          "url": "http://10.70.113.122:5432/car/start",
+          "url": "",
           "method": "POST",
           "body": {"user_request": "$text"},
           "timeout_seconds": 8
         }
+      },
+      "collaborative_tracking": {
+        "intent": {"url": "", "method": "POST", "body": {"user_request": "$text"}, "timeout_seconds": 8}
       }
     }
   },
@@ -27,13 +37,18 @@
     "publish_url": null,
     "token_env": null,
     "nef_base_url": null,
+    "open_registration_account": "1",
+    "allow_unlisted_mcp_servers": false,
     "mcp_servers": {},
     "network_clients": {}
   },
   "subscriptions": {
     "callback_url": null,
     "token_env": null,
-    "account_ids": ["1", "2", "3"],
+    "account_ids": null,
+    "notify_plans": null,
+    "discount": 0.8,
+    "reset_partner_plans_on_start": false,
     "plan_prices": {
       "scene:robot_patrol": null,
       "scene:traffic_flow_detection": null,

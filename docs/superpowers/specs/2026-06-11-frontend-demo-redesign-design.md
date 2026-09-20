@@ -1,6 +1,6 @@
 # NEF 展示体验与网络目录对接设计
 
-分类：架构 / 设计决策。更新：2026-09-17。当前范围以本文为准，旧实施计划仅作历史记录。
+分类：架构 / 设计决策。更新：2026-09-20。当前范围以本文为准，旧实施计划仅作历史记录。
 
 ## 1. 展示范围
 
@@ -12,11 +12,11 @@
 - 三个场景默认 Intent；协同追踪仍兼容 API / Tool。API 面向已知接口，AF 的 MCP 路径保持先发现、再选工具、再调用，不预选场景。
 - 自助编排说明套餐的来源，双向开放展示外部 MCP 能力源的登记与工具发现。
 - 对外 Skill / 场景方案、AF 智能终端不在本期活动导航中。对应按钮隐藏，原功能代码与旧接口保留兼容；hash 不能打开隐藏页签。
-- 文字是主结果；图像 / 视频可展开。场景回传仅在具体调用页出现，不能铺在目录、编排、注册页。
+- 页面显示文字与结构化数据，图像 / 视频保留后端接收。场景回传仅在具体调用页出现，不能铺在目录、编排、注册页。
 
 ## 2. NEF、网络与外部服务的职责
 
-NEF 承担目录汇聚、接入授权、能力和场景开放、套餐定义与协议适配；网络侧承接目标解析和实际执行。MCP Server 登记不会自动赋予调用权，也不会把注册地址当作可信地址直接连接。
+NEF 承担目录汇聚、接入授权、能力和场景开放、套餐定义与协议适配；网络侧承接目标解析和实际执行。MCP 登记默认需 URL 允许列表才可连接；开放一步登记会立即发现并按配置发布。测试配置可显式放宽允许列表，但不授予网内调用权。
 
 自助编排采用**声明式套餐**：操作员选择能力引用、排列顺序，NEF 保存定义并交付网络侧。当前不自动生成参数映射、不把前一步输出注入后一步，也不将声明式步骤伪装成自主规划。可选 LLM 在 NEF 侧推荐能力组合，经确定性校验后由用户采用草稿并确认保存；这不改变业务 Intent 原文转发路径。执行仍由内部 NW Agent / 执行平台承接。
 
@@ -66,7 +66,7 @@ NEF 承担目录汇聚、接入授权、能力和场景开放、套餐定义与�
 - 目录项至少包含 `id`、`name`、`kind`（`tool` 或 `package`），可附 `description`、参数声明等元数据。
 - MCP 注册与套餐声明通过各自 `/sync` 操作发布。只有对方明确返回 `{"accepted":true}` 才标记已同步；仅 HTTP 2xx 记为已提交、待确认。
 - 本地原子能力/场景可在能力超市「发布 NEF 目录」中勾选，通过 `/api/v1/network/catalog/publication` 预览、`/publish` 发布；默认全不选，修改选择需重新预览，账号 / 页签切换丢弃旧预览。只发送明确选择的项，自动拉取不触发发布。契约见[网络目录发布](../../reference/network-catalog.md)，不宣称它是 NRF NFRegister；真实接收方仍待确认。
-- 无配置 / 无网络连接不产生演示目录、不伪造同步成功。账号之间的登记、套餐、目录快照隔离；服务重启清空。
+- 无配置 / 无网络连接不产生演示目录、不伪造同步成功。私有登记、套餐、目录快照按账号隔离；开放 MCP 登记跨账号可见和管理；服务重启清空。
 
 配置入口 `NEF_REGISTRY_CONFIG` 指向运维 JSON，示例 `config/registry.example.json`。`catalog_url` 为目录拉取地址；`publish_url` 为统一发布地址；`token_env` 指向内部凭证环境变量。伙伴实际字段不同，修改适配层，不要求对方照搬界面模型。
 
@@ -80,7 +80,9 @@ NEF 承担目录汇聚、接入授权、能力和场景开放、套餐定义与�
 
 无需逐项填写工具参数。注册时仅保存信息，`POST /servers/{id}/discover` 才对运维批准的 URL 发起 `initialize → notifications/initialized → tools/list`，分页汇聚真实名称、描述与 inputSchema。前缀均为 `/api/v1/network`。
 
-服务地址需在配置 `mcp_servers` 精确允许列表中；认证凭证通过服务端 `token_env` 加载，不从 AF Key 转发，不放注册 JSON。禁止跟随重定向，不使用环境代理，限制响应体和超时。发现结果以实际响应为准；不支持的协议或畸形响应报错。支持本期 HTTP MCP 交互，不承诺旧版 SSE 独立双端点或任意 MCP 扩展。
+默认服务地址需在 `mcp_servers` 精确允许列表中；`allow_unlisted_mcp_servers:true` 仅用于获准隔离测试网，会允许连接任意合法 HTTP(S) 地址。凭据通过服务端 `token_env` 加载，不从 AF Key 转发。禁止跟随重定向，不使用环境代理，限制响应体和超时。发现结果以实际响应为准，不承诺旧版 SSE 独立双端点或任意 MCP 扩展。
+
+无 Key `POST /api/v1/af/mcp-servers` 使用相同正文，以 `open_registration_account`（默认 `1`）登记，标记 `registered_via:open`，同 URL 重复请求更新。立即发现，有 publish_url 则发布；失败保留登记。所有登录账号可见，具备 af:register 可管理；网络调用仍检查独立凭据及原来源账号授权。完整契约见[农场联调](../../reference/farm-integration.md#60-无-key-一步注册内网)。
 
 `POST /servers/{id}/sync` 可先发布服务登记，也可在发现后发布工具信息；发现中不允许发布。后端从认证账号写入 `source: "AF"`、`source_account`、`registration_status: "registered"`，不接受调用方伪造来源。发布报文和能力超市均保留 AF 来源、登记 / 发现 / 同步状态，尚未发现时只显示能力源，不声称已有可用工具。注册服务供网络内部目录发现，不挂到外部 AF 使用的北向 `/mcp` 中。内部网元使用独立的 NEF 代理 MCP 入口，接入与调用规则如下。
 
@@ -116,7 +118,7 @@ ARF / TRF 是网络内部网元，已有网络内部工具信息。NEF 一方面
 `内部网元 / NW Agent → NEF 代理 MCP → AF MCP Server`。
 
 - 每个注册服务对应 `POST /api/v1/network/af-servers/{id}/mcp`，支持 `initialize`、`notifications/initialized`、`ping`、`tools/list`、`tools/call`。NEF 代理侧为无状态请求；向 AF 侧每次调用重新握手，透传 AF 分配的会话 ID，随后真实发送工具调用，不自动重试。
-- 内部调用者使用 `network_clients` 配置的独立 Bearer 凭证与 `af_accounts` 授权范围，不借用 AF 注册账号 Key，不默认允许所有网络调用者访问所有 AF。每次调用重新核对配置、账号范围、AF URL 精确允许列表和已发现状态。
+- 内部调用者使用 `network_clients` 配置的独立 Bearer 凭证与 `af_accounts` 授权范围，不借用 AF 注册账号 Key。每次调用重新核对配置、账号范围、AF URL 连接许可和已发现状态；开放登记不取消这层鉴权。
 - NEF 校验名称必须存在于实际发现目录，参数需满足该工具的 JSON Schema。校验不解析外部引用；含远程 `$ref` / `$dynamicRef` 或 `$id` 的 schema 暂拒绝执行，不让声明触发任意外联。当前按 Draft 2020-12 校验，不承诺任意 schema dialect。
 - AF `CallToolResult` 原样返回，`isError:true` 保持工具错误。网络故障只报告未获得可确认回执，不能推断没有执行，也不自动重试。最近一次调用仅记录调用者、工具、状态、实际耗时，不保存业务参数、内容或密钥。
 - 没有凭证 / 不在授权账号范围 / 允许列表被撤销 / 未发现 / 不合法参数均在转发前拒绝。单个 AF 服务同一时刻只处理一个代理工具调用；重复并发返回 busy。单次外部 HTTP 总超时 10 秒，工具握手加调用总超时 30 秒；单请求 / 响应 1 MiB。仅支持可在期限内结束的 JSON / SSE 响应，不承诺长连接事件流。
@@ -152,23 +154,23 @@ ARF / TRF 是网络内部网元，已有网络内部工具信息。NEF 一方面
 {"name":"园区协同巡检","description":"组合感知与分析","steps":[{"capability_id":"target_detection"}],"execution_target":"network"}
 ```
 
-步骤只能引用已知可用基础能力、导入工具或本账号发现的服务工具；外部工具引用形式为 `serverId:toolName`。支持顺序调整，限制 1–12 个不重复步骤。保存不执行，`POST /packages/{id}/sync` 交付网络目录。
+步骤只能引用已知可用基础能力、导入工具、本账号或开放登记已发现的工具；外部工具引用形式为 `serverId:toolName`。支持顺序调整，限制 1–12 个不重复步骤。保存不执行，`POST /packages/{id}/sync` 交付网络目录。
 
 ## 6. 场景 Intent、结果与鉴权
 
-农场订购交接独立于执行：跳转 `/?account_id=1`，用户开通后发送 `subscriberId` + `servicePlan` 到运维配置的 `/business/v1/service-plans`。当前约定外发 `subscriberId` 固定为 `subscriber-001`，本地账号及通知权限仍独立；不同本地账号在对方侧属于同一个测试订购者。`networkCapabilities` 默认勾选套餐可用能力，全部取消则省略；PA/CA 编排归网络侧，NEF 不实现规划器。通知失败不撤销本地权益，手动重试保留事件 ID 与正文；价格不能默认零元。唯一契约见[套餐订购通知与订阅查询](../../reference/subscription-query.md)。
+农场订购交接独立于执行：跳转 `/?account_id=1`，开通后 POST `subscriberId` + `servicePlan`，取消后 DELETE 固定 planId。外发 subscriberId 固定为 `subscriber-001`，各本地账号在对方侧属于同一个测试订购者。页面至少选一项能力，后端兼容空选择；PA/CA 编排归网络侧。价格按所选能力总价乘 discount，缺折扣时用固定价；失败保留本地开通/取消结果，重试保留事件 ID 与正文。启动清理对端计划需显式开启，默认 false。唯一契约见[套餐订购通知与订阅查询](../../reference/subscription-query.md)。
 
 `scene_services.py` 维护三个场景契约。`POST /api/v1/services/{service_id}/intent` 先校验 AF、`intent:submit` 和场景订阅，再转发原文。
 
 内部执行映射由 `NEF_BRIDGE_CONFIG` 配置，示例 `config/bridge.example.json`。`$text` 保留原文，`$arguments` 支持 API / Tool 参数。外部 API 与 MCP Tool 可以映射同一个内部 HTTP 接口，不要求内部也使用 MCP。
 
-活动页面默认且固定 live，缺配置返回 503，不回退。Intent 可不选场景，此时经账号与 scope 校验转发到通用地址；选场景仍检查其订阅。旧后端 demo 行为仅保留兼容。前端读取上游 final_result / text / result.text / summary 等实际文字；仅受理不代表完成。独立回传按场景 Key 归属，不能把无 request_id 的任意状态自动认定为本次 Intent 完成。
+活动页面固定 live，缺配置返回 503，不回退。Intent 可不选场景，经账号与 scope 校验转发到通用地址；选场景仍检查订阅。旧 demo 行为保留兼容。读取上游实际文字，仅受理不代表完成。共享回传按 scene_id 归属，不能把无 request_id 的状态认定为本次 Intent 完成。机器狗支持 text/plain Intent 与独立 GET/POST result；Intent 成功立即拉取，失败不影响受理，页面每 3 秒继续拉取直到离开。相同结果哈希去重，手动 result 需账号与场景权益。
 
 鉴权动画仅展示后端实际校验结果；等待时只提示正在核验，不编造时延、Agent 思考过程、资源授权或执行进度。安全细节见同目录鉴权设计。对接同事只需阅读简短的 `docs/reference/integration.md`，不承担内部通道和配置结构。
 
 ### 自动提供场景回传接口
 
-前端进入真实调用时使用账号凭证请求 `POST /api/v1/services/{service_id}/feedback-access`；基础能力使用保留值 `general`。服务端幂等准备、并在本次进程中复用同账号同场景的回传接入信息，不要求演示者创建或选择调用点。此管理接口返回内部读取定位和专用写 Key，使用 `Cache-Control: no-store`；只有“接口信息”详情可查看 Key。对接同事仍只收到统一 `POST /api/v1/scene-feedback` 地址与 Key。普通列表不返回 Key，Key 无账号读取权。所有状态内存保存，重启后重新获取。按场景顺序展示回传，但不自动把未关联结果认定为本次请求完成。
+三场景自动使用 `scene_<id>` 共享通道，owner=None；无 Key POST/GET `/api/v1/scene-feedback/{scene_id}` 即可写入和自查，页面未登录也可轮询。登录后 feedback-access 返回共享定位、open_endpoint 和备用 receiver_key；`general` 与手工通道仍按账号隔离。`?ops=1` 的“回传地址”优先交付无 Key 地址，此参数只是显示开关。普通列表不返回 Key，接收 Key 无账号读取权。重启清空事件和备用 Key；页面以 `/api/v1/instance` 检测进程变化，清掉失效账号缓存。固定场景路径不变，未关联结果仍不代表本次请求完成。
 
 ## 7. 验证范围
 

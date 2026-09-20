@@ -143,8 +143,9 @@ def _checked_url(value: Any) -> str:
         raise ValueError("url") from exc
     if parsed.scheme.lower() not in {"http", "https"}:
         raise ValueError("url")
-    if not parsed.netloc or parsed.username is not None or parsed.password is not None:
+    if not parsed.hostname or parsed.username is not None or parsed.password is not None:
         raise ValueError("url")
+    parsed.port
     return value
 
 
@@ -180,6 +181,13 @@ def _load_config() -> dict[str, Any]:
         raise _ConfigError("invalid_config")
 
     normalized: dict[str, Any] = {"mcp_servers": {}}
+    account = data.get("open_registration_account", "1")
+    if not isinstance(account, str) or not 1 <= len(account) <= 128:
+        raise _ConfigError("invalid_config")
+    unlisted = data.get("allow_unlisted_mcp_servers", False)
+    if type(unlisted) is not bool:
+        raise _ConfigError("invalid_config")
+    normalized.update(open_registration_account=account, allow_unlisted_mcp_servers=unlisted)
     for name in ("catalog_url", "publish_url", "nef_base_url"):
         value = data.get(name)
         if value in (None, ""):
@@ -677,8 +685,18 @@ def _get_owned_server(account: str, server_id: str) -> dict[str, Any]:
     with _STATE_LOCK:
         record = _ACCOUNTS.get(account, {}).get("servers", {}).get(server_id)
         if record is None:
+            record = next((s for state in _ACCOUNTS.values() for s in state["servers"].values()
+                           if s["id"] == server_id and s.get("registered_via") == "open"), None)
+        if record is None:
             _http_error(404, "not_found", "网络服务器不存在")
         return record
+
+
+def _approved_server(config, url):
+    approved = config.get("mcp_servers", {}).get(url)
+    if approved is None and config.get("allow_unlisted_mcp_servers"):
+        return {}
+    return approved
 
 
 def _get_owned_package(account: str, package_id: str) -> dict[str, Any]:
@@ -728,7 +746,8 @@ def _synced_catalog_ids(account: str) -> set[str]:
 def _owned_tool_refs(account: str) -> set[str]:
     refs: set[str] = set()
     with _STATE_LOCK:
-        servers = _ACCOUNTS.get(account, {}).get("servers", {})
+        servers = {s["id"]: s for owner, state in _ACCOUNTS.items() for s in state["servers"].values()
+                   if owner == account or s.get("registered_via") == "open"}
         for server_id, server in servers.items():
             if server.get("discovery_status") != "discovered":
                 continue
@@ -759,6 +778,8 @@ def _validate_package_steps(account: str, value: Any) -> list[dict[str, str]]:
 
 
 def _upstream_failure_status(code: str) -> tuple[int, str]:
+    if code == "upstream_timeout":
+        return 504, "上游请求超时"
     if code == "unsupported_transport":
         return 502, "上游传输类型不受支持"
     if code == "redirect_not_allowed":
@@ -957,7 +978,8 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
         _key, record = auth(authorization, None)
         account = _account_from_record(record)
         with _STATE_LOCK:
-            servers = list(_ACCOUNTS.get(account, {}).get("servers", {}).values())
+            servers = [s for owner, state in _ACCOUNTS.items() for s in state["servers"].values()
+                       if owner == account or s.get("registered_via") == "open"]
             return {"servers": [_public_record(item) for item in servers]}
 
     @router.post("/api/v1/network/servers")
@@ -967,6 +989,9 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
     ):
         _key, record = auth(authorization, "af:register")
         account = _account_from_record(record)
+        return register_server(payload, account)
+
+    def register_server(payload, account, opened=False):
         name = _require_text(payload.get("name"), "name", MAX_NAME_LENGTH)
         url = _require_url(payload.get("url"))
         description = _require_text(
@@ -977,6 +1002,14 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
         )
         with _STATE_LOCK:
             state = _set_account_state(account)
+            if opened:
+                existing = next((s for s in state["servers"].values()
+                                 if s["url"] == url and s.get("registered_via") == "open"), None)
+                if existing:
+                    if existing.get("discovery_status") == "discovering" or existing.get("sync_status") == "syncing" or existing.get("gateway_busy"):
+                        _http_error(409, "busy", "服务正在处理另一项操作")
+                    existing.update(name=name, description=description)
+                    return {**_public_record(existing), "created": False}
             if len(state["servers"]) >= MAX_SERVERS_PER_ACCOUNT:
                 _http_error(409, "limit_exceeded", "每个账号最多注册 64 个网络服务器")
             server_id = _new_id("srv", state["servers"])
@@ -991,9 +1024,38 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                 "registration_status": "registered",
                 "discovery_status": "not_discovered",
                 "sync_status": "pending",
+                "registered_via": "open" if opened else "account",
             }
             state["servers"][server_id] = server
-            return _public_record(server)
+            return {**_public_record(server), **({"created": True} if opened else {})}
+
+    @router.post("/api/v1/af/mcp-servers")
+    async def register_open_server(payload: dict[str, Any] = Body(...)):
+        try:
+            config = _load_config()
+        except _ConfigError:
+            _http_error(503, "invalid_config", "网络登记配置无效")
+        account = config["open_registration_account"]
+        record = register_server(payload, account, opened=True)
+        sid, created = record["id"], record["created"]
+        try:
+            record = await discover_server(sid, account)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {"message": exc.detail}
+            raise HTTPException(exc.status_code, {**detail, **_public_record(_get_owned_server(account, sid)),
+                                                "created": created, "discovery_status": "failed"}) from exc
+        record.update(created=created, discovery_status="ok")
+        if not config.get("publish_url"):
+            return {**record, "sync_status": "pending", "sync_note": "ARF/TRF 发布地址未配置"}
+        try:
+            published = await sync_server(sid, account)
+            record.update(sync_status="accepted" if published["accepted"] else "pending")
+            if not published["accepted"]:
+                record["sync_note"] = "已提交，待目录确认"
+        except HTTPException as exc:
+            _mark_sync_status(account, "servers", sid, "failed")
+            record.update(sync_status="failed", sync_error=exc.detail)
+        return record
 
     @router.post("/api/v1/network/servers/{server_id}/discover")
     async def discover_network_server(
@@ -1002,12 +1064,16 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
     ):
         _key, record = auth(authorization, "af:register")
         account = _account_from_record(record)
+        return await discover_server(server_id, account)
+
+    async def discover_server(server_id, account):
         server = _get_owned_server(account, server_id)
+        account = server["source_account"]
         try:
             config = _load_config()
         except _ConfigError:
             _http_error(503, "invalid_config", "NEF_REGISTRY_CONFIG 无效")
-        approved = config.get("mcp_servers", {}).get(server["url"])
+        approved = _approved_server(config, server["url"])
         if approved is None:
             if not config or not (
                 config.get("catalog_url")
@@ -1058,7 +1124,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
             _http_error(503, "invalid_config", "网络发布配置无效")
         with _STATE_LOCK:
             server = copy.deepcopy(_get_owned_server(account, server_id))
-        return _publication(config, account, server)
+        return _publication(config, server["source_account"], server)
 
     @router.post("/api/v1/network/servers/{server_id}/sync")
     async def sync_network_server(
@@ -1067,7 +1133,11 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
     ):
         _key, record = auth(authorization, "af:register")
         account = _account_from_record(record)
+        return await sync_server(server_id, account)
+
+    async def sync_server(server_id, account):
         server = _get_owned_server(account, server_id)
+        account = server["source_account"]
         if server.get("discovery_status") == "discovering":
             _http_error(409, "busy", "MCP 服务器正在发现工具")
         try:
@@ -1100,7 +1170,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
         except _ConfigError:
             _http_error(503, "invalid_config", "网络调用配置无效")
         caller, account, server = _network_access(config, authorization, server_id)
-        approved = config.get("mcp_servers", {}).get(server["url"])
+        approved = _approved_server(config, server["url"])
         if approved is None:
             _http_error(403, "not_approved", "AF 服务未获连接许可")
         if server.get("discovery_status") != "discovered":

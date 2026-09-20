@@ -1,10 +1,27 @@
 /* Incremental integration for the original workbench. Native tabs, forms and drag/drop remain in index.html. */
-const wb={networkBusy:false,networkError:'',access:null,scenes:[],sceneId:'',catalog:[],servers:[],packages:[],networkStatus:'not_configured',epoch:0,channels:[],channel:'',mediaUrl:'',mediaId:'',feedbackKey:'',feedbackContext:'',feedbackSignature:'',feedbackBusy:false};
+const wb={networkBusy:false,networkError:'',access:null,scenes:[],sceneId:'',catalog:[],servers:[],packages:[],networkStatus:'not_configured',epoch:0,channels:[],channel:'',feedbackContext:'',feedbackSignature:'',feedbackBusy:false,resultTimer:null,resultBusy:false};
 const wbStatus=x=>({not_configured:'待对接',not_discovered:'未发现',discovering:'发现中',discovered:'已发现',pending:'待同步',submitted:'已提交 · 待确认',synced:'已同步',syncing:'同步中',calling:'转发中',returned:'已收到 AF 回执',tool_error:'AF 返回工具错误',failed:'失败'}[x]||x||'待处理');
 function wbMessage(e){const d=e?.data?.detail??e?.detail;return typeof d==='string'?d:d?.message||e?.message||'请求未完成';}
 function wbError(e){toast(wbMessage(e),false);}
 function wbActive(){return document.querySelector('#tabs .active')?.dataset.tab||'market';}
 function wbScene(){return wb.scenes.find(s=>s.id===wb.sceneId);}
+function wbPrice(scene,plain=false){const text=scene.price==null?'价格待配置':'¥'+scene.price+' / 月';return plain?text:`<div class="wb-price">${esc(text)}${scene.discount==null?'':`<small>组合价 ${Number((scene.discount*10).toFixed(2))} 折</small>`}</div>`;}
+function wbSceneActions(selector,owned){
+  $$(selector).forEach(button=>{
+    const id=button.dataset.wbScene||button.dataset.subsScene,scene=wb.scenes.find(s=>s.id===id);
+    button.insertAdjacentHTML('beforebegin',wbPrice(scene));
+    if(owned.has(id)){const cancel=document.createElement('button');cancel.textContent='取消开通';cancel.onclick=()=>wbCancelScene(id);button.after(cancel);}
+  });
+}
+function wbCancelScene(id){
+  const scene=wb.scenes.find(s=>s.id===id);if(!scene||!apiKey())return;
+  showModal(`<h2>取消「${esc(scene.name)}」</h2><div class="wb-modal-actions"><button id="wb-keep-scene">保留</button><button id="wb-confirm-cancel">取消开通</button></div><p id="wb-cancel-message" role="status"></p>`);
+  $('#wb-keep-scene').onclick=hideModal;
+  $('#wb-confirm-cancel').onclick=()=>wbJob($('#wb-confirm-cancel'),$('#wb-cancel-message'),async epoch=>{
+    const result=await api('/api/v1/services/'+encodeURIComponent(id)+'/subscribe',{method:'DELETE'});
+    if(epoch!==wb.epoch)return;wbStopResultLoop();hideModal();purchaseNotice(result.notification);await wbLoadScenes();
+  });
+}
 async function wbJob(button,target,fn){if(!apiKey())return toast('请先在顶栏注册或选择账号',false);const epoch=wb.epoch;button.disabled=true;if(target)target.textContent='正在处理…';try{const text=await fn(epoch);if(epoch===wb.epoch&&target)target.textContent=text||'已更新';}catch(e){if(epoch===wb.epoch){if(target)target.textContent=wbMessage(e);else wbError(e);}}finally{button.disabled=false;}}
 $('#btn-register-acct').onclick=()=>{
   showModal('<h2>注册演示账号</h2><p class="muted">账号、订阅与密钥保存在本次服务内，不产生真实费用。</p><label for="wb-account-name">AF 名称</label><input id="wb-account-name" maxlength="60" autocomplete="off"><div class="wb-modal-actions"><button id="wb-account-cancel">取消</button><button id="wb-account-create" class="primary">创建账号</button></div><p id="wb-account-error" class="muted"></p>');
@@ -19,6 +36,7 @@ async function wbLoadScenes(){
   $('#wb-scene-market').innerHTML=wb.scenes.map(s=>`<article class="pkg-chip wb-scene-card"><span class="method-chip">场景套餐</span><h3>${esc(s.name)}</h3><p class="muted">${esc(s.description)}</p><div class="wb-scene-outputs">${s.outputs.map(t=>`<span>${esc(t)}</span>`).join('')}</div><div class="wb-components"><label>基础能力组合</label>${(s.provenance?.components||[]).map(c=>`<button class="wb-component" data-scene-cap="${esc(c.capability_id)}" title="${esc(c.role)}">${esc(CAPS.find(x=>x.id===c.capability_id)?.name||c.capability_id)}</button>`).join('')}<small>套餐设计 · NEF / 场景服务方</small></div><button data-wb-scene="${esc(s.id)}" class="${owned.has(s.id)?'primary':'success'}">${owned.has(s.id)?'进入场景 →':'开通场景'}</button></article>`).join('');
   $$('#wb-scene-market [data-scene-cap]').forEach(b=>b.onclick=()=>showCap(b.dataset.sceneCap));
   $$('#wb-scene-market [data-wb-scene]').forEach(b=>b.onclick=()=>wbOpenScene(b.dataset.wbScene,owned.has(b.dataset.wbScene)));
+  wbSceneActions('#wb-scene-market [data-wb-scene]',owned);
   wbRenderSceneSubscriptions(info);
   if(wbActive()==='intent')wbRenderIntent();
 }
@@ -26,28 +44,34 @@ function wbRenderSceneSubscriptions(info){
   const owned=new Set(info?.scene_subscriptions||[]);
   $('#wb-scene-subs').innerHTML='<h3 class="sec">场景订阅权益</h3><div class="wb-scene-grid">'+wb.scenes.map(s=>`<div class="step-card"><b>${esc(s.name)}</b><p class="muted">场景入口 · 调用时核验使用权</p><button data-subs-scene="${esc(s.id)}" class="${owned.has(s.id)?'primary':'success'}">${owned.has(s.id)?'已开通 · 进入场景':'开通场景'}</button></div>`).join('')+'</div>';
   $$('#wb-scene-subs [data-subs-scene]').forEach(b=>b.onclick=()=>wbOpenScene(b.dataset.subsScene,owned.has(b.dataset.subsScene)));
+  wbSceneActions('#wb-scene-subs [data-subs-scene]',owned);
 }
 function wbOpenScene(id,owned){
   if(!apiKey())return toast('请先在顶栏注册账号',false);
   const s=wb.scenes.find(x=>x.id===id);if(!s)return;
   if(owned){wb.sceneId=id;activateTab('intent',true);return;}
   showModal(`<h2>开通「${esc(s.name)}」</h2><p class="muted">开通后获得该场景的调用权益。当前为演示订阅，不产生真实费用。</p>${purchaseCapabilitySelector((s.provenance?.components||[]).map(c=>c.capability_id))}<div class="wb-modal-actions"><button id="wb-cancel">取消</button><button class="success" id="wb-confirm-scene">开通并进入</button></div><p id="wb-sub-message" class="muted"></p>`);
+  $('#purchase-capabilities').insertAdjacentHTML('afterend','<div id="wb-purchase-quote" class="wb-price"></div>');
+  const quote=()=>{const ids=purchaseCapabilityIds();$('#wb-purchase-quote').textContent=purchaseQuoteText(purchaseQuote(s,ids));$('#wb-confirm-scene').disabled=!ids.length;};
+  $$('#purchase-capabilities input').forEach(input=>input.onchange=quote);quote();
   $('#wb-cancel').onclick=hideModal;$('#wb-confirm-scene').onclick=()=>wbJob($('#wb-confirm-scene'),$('#wb-sub-message'),async epoch=>{const result=await api('/api/v1/services/'+encodeURIComponent(id)+'/subscribe',{method:'POST',body:JSON.stringify({network_capability_ids:purchaseCapabilityIds()})});if(epoch!==wb.epoch)return;wb.sceneId=id;hideModal();purchaseNotice(result.notification);await wbLoadScenes();activateTab('intent',true);return '已开通';});
 }
 function wbRenderIntent(){
   const sel=$('#wb-intent-scene');sel.innerHTML='<option value="">不指定场景</option>'+wb.scenes.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');sel.value=wb.sceneId;
   $('#wb-intent-subscribe').hidden=!wb.sceneId;
+  $('#wb-intent-subscribe').disabled=false;$('#wb-intent-subscribe').textContent='开通当前场景';
   $('#wb-intent-subscribe').onclick=()=>wbOpenScene(wb.sceneId,false);
   if(apiKey()){const epoch=wb.epoch;api('/api/v1/auth/info').then(info=>{if(epoch!==wb.epoch)return;const has=info.scene_subscriptions?.includes(wb.sceneId);$('#wb-intent-subscribe').disabled=!!has;$('#wb-intent-subscribe').textContent=has?'✓ 场景已授权':'开通当前场景';}).catch(()=>{});}
 }
 function wbResetResult(){$('#intent-result').innerHTML='<div class="step-card muted">提交业务目标，查看接入核验与文字结果。</div>';}
-$('#wb-intent-scene').onchange=e=>{wb.sceneId=e.target.value;wb.epoch++;wbRenderIntent();wbResetResult();wbUpdateFeedback();};
+$('#wb-intent-scene').onchange=e=>{wbStopResultLoop();wb.sceneId=e.target.value;wb.epoch++;wbRenderIntent();wbResetResult();wbUpdateFeedback();};
 $('#intent-send').onclick=()=>wbJob($('#intent-send'),null,async epoch=>{
   const text=$('#intent-input').value,scene=wbScene()||{id:'',name:'不指定场景'},mode='live';if(!text.trim())throw new Error('请填写业务目标');
+  wbStopResultLoop();
   await wbUpdateFeedback();if(epoch!==wb.epoch)return;
   $('#intent-result').innerHTML='<div class="agent-block"><b>◌ NEF · 可信接入</b><p class="muted">请求处理中，等待服务回执…</p></div>';
   const endpoint=scene.id?'/api/v1/services/'+encodeURIComponent(scene.id)+'/intent':'/api/v1/intent';
-  try{const res=await api(endpoint,{method:'POST',headers:{'X-NEF-Execution':mode},body:JSON.stringify({text})});if(epoch!==wb.epoch)return;wbIntentResult(res,scene,mode);}
+  try{const res=await api(endpoint,{method:'POST',headers:{'X-NEF-Execution':mode},body:JSON.stringify({text})});if(epoch!==wb.epoch)return;wbIntentResult(res,scene,mode);if(scene.result_pull){await wbPollFeedback();wbStartResultLoop();}}
   catch(e){if(epoch!==wb.epoch)return;wbIntentResult(e.data||{},scene,mode,e);}
 });
 function wbIntentResult(res,scene,mode,error){
@@ -136,18 +160,20 @@ $('#mcp-call').onclick=()=>wbJob($('#mcp-call'),null,async epoch=>{
   try{const res=await api('/mcp',{method:'POST',headers:{'X-NEF-Execution':'live','MCP-Protocol-Version':NefMcp.VERSION},body:JSON.stringify(req)});if(epoch!==wb.epoch)return;if(res.error)throw new Error(res.error.message);if(res.id!==req.id)throw new Error('响应与本次请求不匹配');let inner;try{inner=JSON.parse(res.result.content.find(c=>c.type==='text').text);}catch{inner={summary:res.result?.content?.find(c=>c.type==='text')?.text};}renderAuthPipeline($('#mcp-pipeline'),inner?.nef_auth||inner?.detail?.nef_auth,null);$('#mcp-resp').textContent=(res.result?.isError?'工具执行未完成':NefStory.receipt(inner).badge)+'\n'+(res.result?.isError?wbMessage({data:{detail:inner}}):NefStory.businessResult(inner))+'\n\n'+jfmt(res);}
   catch(e){if(epoch===wb.epoch)$('#mcp-resp').textContent=wbMessage(e)+'\n'+jfmt(e.data||{});}
 });
-/* One feedback address and scenario-specific Key, original invocation panes only. */
+/* Shared scene feedback and private general channels, invocation panes only. */
 function wbInvocation(){const tab=wbActive();if(tab==='intent')return {sceneId:wb.sceneId,mode:'live'};if(tab==='api')return {sceneId:$('#api-cap-select').value.startsWith('scene:')?'collaborative_tracking':'',mode:'live'};if(tab==='mcp'&&wbMcp.state.selected)return {sceneId:wb.scenes.find(s=>s.tool_name===wbMcp.state.selected.name)?.id||'',mode:'live'};return null;}
-function wbClearFeedback(){wb.feedbackSignature='';wb.mediaId='';if(wb.mediaUrl)URL.revokeObjectURL(wb.mediaUrl);wb.mediaUrl='';$('#wb-feedback-text').textContent='等待回传';$('#wb-feedback-data').textContent='—';$('#wb-feedback-media').textContent='等待媒体回传';}
+function wbClearFeedback(){wb.feedbackSignature='';$('#wb-feedback-text').textContent='等待回传';$('#wb-feedback-data').textContent='—';$('#wb-feedback-data-wrap').hidden=true;}
 async function wbUpdateFeedback(){
+  const epoch=wb.epoch;
   const inv=wbInvocation();$('#wb-feedback').hidden=!inv;
   if(!inv){wb.feedbackContext='';wb.access=null;wbClearFeedback();return;}
   const context=[current,inv.sceneId,inv.mode].join(':');
   if(wb.feedbackContext!==context){wb.feedbackContext=context;wb.channel='';wb.access=null;wbClearFeedback();}
-  const demo=inv.mode==='demo';$('#wb-feedback-create').disabled=true;
-  $('#wb-feedback-note').textContent=demo?'演示模式 · 不接收现场回传':'当前场景回传接口 · 等待数据';
+  const demo=inv.mode==='demo';$('#wb-feedback-create').disabled=true;wbResultButton();
+  $('#wb-feedback-note').textContent=demo?'演示模式 · 不接收现场回传':wbScene()?.result_pull?'发送业务目标后自动向现场拉取感知结果':'等待现场服务回传结果';
+  if(inv.sceneId&&!demo){wb.channel='scene_'+inv.sceneId;await wbPollFeedback();}
+  if(epoch!==wb.epoch||context!==wb.feedbackContext)return;
   if(!apiKey()||demo)return;
-  const epoch=wb.epoch;
   try{
     const c=await api('/api/v1/services/'+encodeURIComponent(inv.sceneId||'general')+'/feedback-access',{method:'POST'});
     if(epoch!==wb.epoch||context!==wb.feedbackContext)return;
@@ -157,24 +183,42 @@ async function wbUpdateFeedback(){
 $('#wb-feedback-create').onclick=()=>{
   const c=wb.access;if(!c)return;
   const handoff=NefStory.feedbackHandoff(c,location.origin);
-  showModal(`<h2>${esc(c.name)} · 回传接口</h2><p class="muted">场景专用回传接口</p><label>回传地址</label><pre>POST ${esc(handoff.url)}</pre><details><summary>查看专用 Key（投屏时勿展开）</summary><pre>Authorization: Bearer ${esc(c.receiver_key)}</pre></details><label>文字结果 JSON</label><pre>${esc(jfmt(handoff.json_example))}</pre><p class="muted">图片 / 视频也向同一地址上传原始文件字节，设置对应 Content-Type；单文件最多 16 MiB。其他机器请使用本机网卡地址。Key 在本次服务内复用，重启后需重新获取。</p><div class="wb-modal-actions"><button id="wb-source-copy">复制对接信息</button><button id="wb-source-close">关闭</button></div>`);
+  showModal(`<h2>${esc(c.name)} · 回传地址</h2><label>回传地址${handoff.open_url?'（无需 Key）':''}</label><pre>POST ${esc(handoff.open_url||handoff.url)}</pre><label>文字结果 JSON</label><pre>${esc(jfmt(handoff.json_example))}</pre><details><summary>备用凭证接口</summary><pre>POST ${esc(handoff.url)}\nAuthorization: Bearer ${esc(c.receiver_key)}</pre></details><div class="wb-modal-actions"><button id="wb-source-copy">复制对接信息</button><button id="wb-source-close">关闭</button></div>`);
   $('#wb-source-close').onclick=hideModal;
   $('#wb-source-copy').onclick=async()=>{try{await navigator.clipboard.writeText(jfmt(handoff));toast('已复制');}catch{toast('剪贴板不可用，请手动复制',false);}};
 };
 async function wbPollFeedback(){
-  const inv=wbInvocation();if(!inv||inv.mode!=='live'||!wb.channel||!apiKey()||wb.feedbackBusy)return;wb.feedbackBusy=true;const epoch=wb.epoch,channel=wb.channel;
-  try{const r=await api('/api/v1/exhibition/channels/'+encodeURIComponent(channel)+'/events');if(epoch!==wb.epoch||channel!==wb.channel)return;$('#wb-feedback-note').textContent=r.events.length?'已接收 '+r.events.length+' 条回传 · 场景级反馈':'回传接口可用 · 等待数据源';const sig=jfmt(r.events);if(sig===wb.feedbackSignature)return;wb.feedbackSignature=sig;
-    const text=r.events.findLast(e=>e.kind==='status'),data=r.events.findLast(e=>e.kind==='data'),media=r.events.findLast(e=>e.kind==='image'||e.kind==='video');
-    if(text)$('#wb-feedback-text').textContent=[text.title,text.text].filter(Boolean).join('\n');if(data)$('#wb-feedback-data').textContent=jfmt(data.data??data.text);
-    if(media&&media.asset_id!==wb.mediaId){const response=await fetch('/api/v1/exhibition/channels/'+encodeURIComponent(channel)+'/media/'+encodeURIComponent(media.asset_id),{headers:{Authorization:'Bearer '+apiKey()}});if(!response.ok)throw new Error('媒体读取失败');const blob=await response.blob();if(epoch!==wb.epoch||channel!==wb.channel)return;if(wb.mediaUrl)URL.revokeObjectURL(wb.mediaUrl);wb.mediaUrl=URL.createObjectURL(blob);wb.mediaId=media.asset_id;const el=document.createElement(media.kind==='video'?'video':'img');el.src=wb.mediaUrl;if(media.kind==='video'){el.controls=true;el.preload='metadata';}else el.alt=media.title||'场景图像';el.onerror=()=>{$('#wb-feedback-media').textContent='媒体无法解码，请核对文件内容';};$('#wb-feedback-media').replaceChildren(el);}
+  const inv=wbInvocation();if(!inv||inv.mode!=='live'||!wb.channel||(!inv.sceneId&&!apiKey())||wb.feedbackBusy)return;wb.feedbackBusy=true;const epoch=wb.epoch,channel=wb.channel;
+  try{let r;if(inv.sceneId){const response=await fetch('/api/v1/scene-feedback/'+encodeURIComponent(inv.sceneId),{cache:'no-store'});if(!response.ok)throw new Error('场景回传读取失败');r=await response.json();}else r=await api('/api/v1/exhibition/channels/'+encodeURIComponent(channel)+'/events');if(epoch!==wb.epoch||channel!==wb.channel)return;const sig=jfmt(r.events);if(sig===wb.feedbackSignature)return;wb.feedbackSignature=sig;
+    if(r.events.length)$('#wb-feedback-note').textContent='已接收 '+r.events.length+' 条回传 · 场景级反馈';
+    else {wbClearFeedback();$('#wb-feedback-note').textContent='等待现场服务回传结果';}
+    const text=r.events.findLast(e=>e.kind==='status'),data=r.events.findLast(e=>e.kind==='data');
+    $('#wb-feedback-text').textContent=text?[text.title,text.text].filter(Boolean).join('\n'):'等待回传';
+    $('#wb-feedback-data').textContent=data?jfmt(data.data??data.text):'—';$('#wb-feedback-data-wrap').hidden=!data;
   }catch(e){if(epoch===wb.epoch)$('#wb-feedback-note').textContent='回传读取失败 · '+wbMessage(e);}finally{wb.feedbackBusy=false;}
 }
-function wbTabChanged(name){wb.epoch++;window.wbCatalogClose?.();if(name!=='mcp')wbMcp.reset();wbUpdateFeedback();}
+function wbResultButton(){const inv=wbInvocation(),scene=wb.scenes.find(s=>s.id===inv?.sceneId);$('#wb-feedback-pull').hidden=!scene?.result_pull||inv?.mode!=='live';$('#wb-feedback-pull').disabled=!apiKey()||wb.resultBusy;}
+function wbStopResultLoop(){clearTimeout(wb.resultTimer);wb.resultTimer=null;wb.resultGeneration=(wb.resultGeneration||0)+1;}
+function wbStartResultLoop(){
+  wbStopResultLoop();const epoch=wb.epoch,generation=wb.resultGeneration;
+  const tick=async()=>{if(epoch!==wb.epoch||generation!==wb.resultGeneration)return;await wbPullResult();if(epoch===wb.epoch&&generation===wb.resultGeneration&&apiKey())wb.resultTimer=setTimeout(tick,3000);};
+  wb.resultTimer=setTimeout(tick,3000);
+}
+async function wbPullResult(){
+  const inv=wbInvocation(),scene=wb.scenes.find(s=>s.id===inv?.sceneId),epoch=wb.epoch;if(wb.resultBusy||!apiKey()||!scene?.result_pull||inv.mode!=='live')return;
+  wb.resultBusy=true;wbResultButton();
+  try{const result=await api('/api/v1/services/'+encodeURIComponent(scene.id)+'/result',{method:'POST'});if(epoch!==wb.epoch)return;
+    if(result.status==='stored')await wbPollFeedback();else if(result.status==='unavailable')$('#wb-feedback-note').textContent='感知结果暂不可用：'+wbMessage(result);
+  }catch(e){if(epoch===wb.epoch)$('#wb-feedback-note').textContent='感知结果读取失败：'+wbMessage(e);}finally{wb.resultBusy=false;wbResultButton();}
+}
+$('#wb-feedback-pull').onclick=wbPullResult;
+function wbTabChanged(name){wbStopResultLoop();wb.epoch++;window.wbCatalogClose?.();if(name!=='mcp')wbMcp.reset();wbUpdateFeedback();}
 async function refreshAll(){
+  wbStopResultLoop();
   wb.epoch++;window.wbCatalogClose?.();wbMcp.reset();wb.catalog=[];wb.servers=[];wb.packages=[];wb.channels=[];wb.channel='';wb.feedbackContext='';pipeSteps.length=0;window.wbComposerReset?.();wbClearFeedback();wbResetResult();$('#wb-register-message').textContent='';$('#purchase-notice').hidden=true;renderAccounts();wbRenderNetwork();
   try{await loadMarket();if(wbActive()==='subs')await renderSubs();if(wbActive()==='intent')wbRenderIntent();if(wbActive()==='api')await renderApiTab();if(wbActive()==='mcp')renderMcpTab();if(wbActive()==='composer')await renderComposer();await wbUpdateFeedback();}catch(e){wbError(e);}
 }
-window.addEventListener('pagehide',()=>{wb.epoch++;if(wb.mediaUrl)URL.revokeObjectURL(wb.mediaUrl);});
+window.addEventListener('pagehide',()=>{wbStopResultLoop();wb.epoch++;});
 setInterval(wbPollFeedback,2000);
 setInterval(()=>{if(['market','afreg'].includes(wbActive())&&apiKey())wbLoadNetwork().catch(wbError);},30000);
-purchaseBootstrap().catch(wbError).then(refreshAll).then(()=>{const hash=location.hash.slice(1);if(hash&&!activateTab(hash,false))activateTab('market',true);});
+checkInstance().then(purchaseBootstrap).catch(wbError).then(refreshAll).then(()=>{const hash=location.hash.slice(1);if(hash&&!activateTab(hash,false))activateTab('market',true);});

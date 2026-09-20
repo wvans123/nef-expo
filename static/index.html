@@ -181,8 +181,8 @@ th{background:var(--card);color:var(--muted)}
 .rev-badge{font-size:10px;color:var(--green);border:1px solid #39ffb066;border-radius:8px;padding:0 6px;margin-left:6px}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;border-radius:8px;padding:9px 18px;z-index:200;display:none}
 </style>
-<link rel="stylesheet" href="/static/workbench.css?v=20260917-2">
-<script src="/static/showcase-story.js?v=20260909-1"></script>
+<link rel="stylesheet" href="/static/workbench.css?v=20260920-1">
+<script src="/static/showcase-story.js?v=20260920-1"></script>
 <script src="/static/showcase-mcp.js?v=20260909-1"></script>
 </head>
 <body>
@@ -208,7 +208,7 @@ th{background:var(--card);color:var(--muted)}
 </div>
 
 <main>
-  <div id="purchase-notice" role="status" hidden><span id="purchase-notice-text"></span> <button id="purchase-notice-retry" hidden>重试通知</button></div>
+  <div id="purchase-notice" role="status" hidden><span id="purchase-notice-text"></span> <span id="purchase-notice-detail" class="ops-only muted"></span><button id="purchase-notice-retry" class="ops-only" hidden>重试通知</button></div>
   <!-- Tab 1 能力超市 -->
   <div class="tabpane active" id="pane-market">
     <div class="banner" id="market-banner"></div>
@@ -340,7 +340,7 @@ th{background:var(--card);color:var(--muted)}
       <button class="primary" id="term-send">📱 终端发起请求</button>
     </div>
   </div>
-<section id="wb-feedback" hidden><div class="wb-feedback-head"><h3 class="sec">场景数据接口</h3><button id="wb-feedback-create" class="primary">接口信息</button></div><div id="wb-feedback-note" class="muted">当前场景独立提供一个回传接口，可接收文字、数据、图像或视频</div><div class="wb-feedback-grid"><div><label>文字 / 状态</label><div id="wb-feedback-text" class="wb-business-text">等待回传</div><label>数据</label><pre id="wb-feedback-data">—</pre></div><details><summary>图像 / 视频</summary><div id="wb-feedback-media" class="wb-feedback-media">等待媒体回传</div></details></div></section></main>
+<section id="wb-feedback" hidden><div class="wb-feedback-head"><h3 class="sec">现场结果</h3><button id="wb-feedback-pull" hidden>刷新感知结果</button><button id="wb-feedback-create" class="primary ops-only">回传地址</button></div><div id="wb-feedback-note" class="muted">等待现场服务回传结果</div><div class="wb-feedback-grid"><div><label>文字 / 状态</label><div id="wb-feedback-text" class="wb-business-text">等待回传</div></div><div id="wb-feedback-data-wrap" hidden><label>数据</label><pre id="wb-feedback-data">—</pre></div></div></section></main>
 
 <div id="modal-bg"><div id="modal"></div></div>
 <div class="toast" id="toast"></div>
@@ -353,6 +353,20 @@ let CAPS = [], CATS = {}, PKGS = [];
 let accounts = JSON.parse(localStorage.getItem('nef_accounts') || '{}'); // name -> {api_key}
 let current = localStorage.getItem('nef_current') || '';
 let pipeSteps = [];
+if(new URLSearchParams(location.search).get('ops')==='1')document.body.classList.add('ops');
+let instanceCheck=null;
+async function checkInstance(){
+  if(instanceCheck)return instanceCheck;
+  instanceCheck=(async()=>{
+    const r=await fetch('/api/v1/instance',{cache:'no-store'});if(!r.ok)return false;
+    const data=await r.json();if(!/^[a-f0-9]{16}$/.test(data.instance_id||''))return false;
+    const old=localStorage.getItem('nef_instance');
+    const changed=old!==data.instance_id;
+    if(changed){accounts={};current='';saveAccounts();}
+    localStorage.setItem('nef_instance',data.instance_id);return changed;
+  })();
+  try{return await instanceCheck;}finally{instanceCheck=null;}
+}
 
 function saveAccounts(){ localStorage.setItem('nef_accounts', JSON.stringify(accounts)); localStorage.setItem('nef_current', current); }
 function apiKey(){ return (accounts[current] || {}).api_key || ''; }
@@ -362,9 +376,13 @@ function jfmt(o){ return JSON.stringify(o, null, 2); }
 
 async function api(path, opts={}){
   opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
-  if(apiKey()) opts.headers['Authorization'] = 'Bearer ' + apiKey();
+  const sentKey=apiKey();
+  if(sentKey) opts.headers['Authorization'] = 'Bearer ' + sentKey;
   const r = await fetch(path, opts);
   const data = await r.json().catch(()=>({}));
+  if(r.status===401&&sentKey&&sentKey===apiKey()){
+    try{if(await checkInstance()){renderAccounts();toast('NEF 已重启，原账号已失效，请重新注册账号',false);refreshAll();}}catch{}
+  }
   if(!r.ok) throw {status:r.status, data};
   return data;
 }
@@ -934,8 +952,8 @@ window.termRequest = termRequest;
 $('#term-send').onclick = ()=>termRequest($('#term-input').value.trim());
 $('#term-input').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#term-send').click(); });
 </script>
-<script src="/static/purchase.js?v=20260917-2"></script>
-<script src="/static/workbench.js?v=20260917-5"></script>
+<script src="/static/purchase.js?v=20260920-1"></script>
+<script src="/static/workbench.js?v=20260920-1"></script>
 <script src="/static/catalog-ui.js?v=20260917-1"></script>
 <script src="/static/composer.js?v=20260917-3"></script>
 </body>

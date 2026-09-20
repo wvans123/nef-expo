@@ -81,6 +81,63 @@ def test_missing_unified_config_is_empty(tmp_path, monkeypatch):
     assert integration_config.section("bridge") == {}
 
 
+@pytest.mark.parametrize("scene_id", ["robot_patrol", "traffic_flow_detection", "collaborative_tracking"])
+def test_published_template_never_connects_to_a_partner(monkeypatch, scene_id):
+    template = Path(__file__).parents[1] / "config/integration.example.json"
+    monkeypatch.setenv("NEF_INTEGRATION_CONFIG", str(template))
+    monkeypatch.delenv("NEF_BRIDGE_CONFIG", raising=False)
+    def unexpected_client(*args, **kwargs):
+        pytest.fail("An unconfigured template attempted an outbound request")
+    monkeypatch.setattr(exhibition.httpx, "Client", unexpected_client)
+    with pytest.raises(HTTPException) as error:
+        exhibition.forward("scene_intent", {"service_id": scene_id, "text": "test", "request_id": "template-test"})
+    assert error.value.status_code == 503
+
+
+def test_robot_text_plain_intent_and_result_pull(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from test_network_registry import LocalHTTPFixture, json_response
+    import server
+    monkeypatch.setattr(exhibition,'CHANNELS',{})
+    peer=LocalHTTPFixture()
+    try:
+        peer.add('POST','/in/intent',lambda r:json_response({'accepted':True}))
+        peer.add('GET','/data/perception2/latest',lambda r:json_response({'final_result':'巡检结果'}))
+        cfg={'bridge':{'scenes':{'robot_patrol':{
+            'intent':{'url':peer.url('/in/intent'),'method':'POST','content_type':'text/plain','body':'$text'},
+            'result':{'url':peer.url('/data/perception2/latest'),'method':'GET'}}}}}
+        path=tmp_path/'robot.json';path.write_text(json.dumps(cfg),encoding='utf-8')
+        monkeypatch.setenv('NEF_INTEGRATION_CONFIG',str(path));monkeypatch.delenv('NEF_BRIDGE_CONFIG',raising=False)
+        with TestClient(server.app) as client:
+            key=client.post('/api/v1/register',json={'account':'robot-pull-test'}).json()['api_key']
+            headers={'Authorization':'Bearer '+key}
+            assert client.post('/api/v1/services/robot_patrol/result',headers=headers).status_code==403
+            client.post('/api/v1/services/robot_patrol/subscribe',headers=headers)
+            text='  请检查东南区域\n保留原文  '
+            result=client.post('/api/v1/services/robot_patrol/intent',headers=headers,json={'text':text}).json()
+            assert result['sensing_result']['status']=='stored'
+            assert peer.requests[0]['body'].decode('utf-8')==text
+            assert peer.requests[0]['headers']['content-type']=='text/plain; charset=utf-8'
+            assert peer.requests[1]['method']=='GET' and peer.requests[1]['body']==b''
+            assert client.post('/api/v1/services/robot_patrol/result',headers=headers).json()['status']=='unchanged'
+            assert len(client.get('/api/v1/scene-feedback/robot_patrol').json()['events'])==1
+            peer.add('GET','/data/perception2/latest',lambda r:(204,{},b''))
+            assert client.post('/api/v1/services/robot_patrol/result',headers=headers).json()['status']=='empty'
+            route=cfg['bridge']['scenes']['robot_patrol']['result']
+            route.update(method='POST',body={'user_request':'$text'})
+            path.write_text(json.dumps(cfg),encoding='utf-8')
+            peer.add('POST','/data/perception2/latest',lambda r:json_response({'count':3}))
+            assert client.post('/api/v1/services/robot_patrol/result',headers=headers).json()['status']=='stored'
+            assert json.loads(peer.requests[-1]['body'])=={'user_request':text}
+            peer.add('POST','/data/perception2/latest',lambda r:(503,{},b''))
+            failed=client.post('/api/v1/services/robot_patrol/intent',headers=headers,json={'text':text})
+            assert failed.status_code==200 and failed.json()['sensing_result']['status']=='unavailable'
+            instance=client.get('/api/v1/instance')
+            assert len(instance.json()['instance_id'])==16 and instance.headers['cache-control']=='no-store'
+    finally:
+        peer.close()
+
+
 @pytest.mark.parametrize(
     "field,reply,content_type,expected",
     [
@@ -125,6 +182,7 @@ def test_robot_template_maps_intent_and_preserves_unknown_reply(
             route = config["bridge"]["scenes"]["robot_patrol"]["intent"]
             route["url"] = f"http://127.0.0.1:{upstream.server_port}/robot/execute"
             route["body"] = {field: "$text"}
+            route["content_type"] = "application/json"
             path.write_text(json.dumps(config), encoding="utf-8")
             result = exhibition.forward("scene_intent", context)
             assert seen == [("/robot/execute", {field: context["text"]})]

@@ -135,7 +135,7 @@ def test_concurrent_capacity_failure_cannot_publish_or_leave_orphan(monkeypatch)
     assert len(events(owner, channel)) == len(exhibition.CHANNELS[channel["id"]]["media"]) == 1
 
 
-def test_automatic_access_is_reused_isolated_and_write_only():
+def test_automatic_access_is_reused_shared_and_write_only():
     key = client.post('/api/v1/register', json={'account':'auto-'+uuid.uuid4().hex}).json()['api_key']
     owner = {'Authorization':'Bearer '+key}
     path='/api/v1/services/robot_patrol/feedback-access'
@@ -156,10 +156,36 @@ def test_automatic_access_is_reused_isolated_and_write_only():
     other_key=client.post('/api/v1/register',json={'account':'auto-other-'+uuid.uuid4().hex}).json()['api_key']
     other={'Authorization':'Bearer '+other_key}
     b=client.post(path,headers=other).json()
-    assert b['id']!=a['id'] and b['receiver_key']!=a['receiver_key']
-    assert client.get(events_path,headers=other).status_code==404
+    assert b['id']==a['id']=='scene_robot_patrol' and b['receiver_key']==a['receiver_key']
+    assert client.get(events_path,headers=other).status_code==200
     listing=client.get('/api/v1/exhibition/channels',headers=owner).text
     assert a['receiver_key'] not in listing and 'access_key' not in listing
+
+
+def test_keyless_scene_path_routes_to_shared_scene_channel():
+    path = URL + '/traffic_flow_detection'
+    for body in ({'final_result': '现场结果'}, {'kind': 'status', 'text': '处理中'},
+                 {'kind': 'data', 'data': {'count': 4}}):
+        assert client.post(path, json=body).status_code == 200
+    result = client.get(path, params={'after': 1}).json()
+    assert result['channel_id'] == 'scene_traffic_flow_detection'
+    assert result['service_id'] == 'traffic_flow_detection'
+    assert [e['id'] for e in result['events']] == [2, 3]
+    assert result['next_cursor'] == 3 and not result['reset_required']
+    assert client.get(path, params={'after': 99}).json()['reset_required']
+    assert client.post(URL + '/unknown', json={'final_result': 'x'}).status_code == 404
+    for body in ({'final_result': ''}, {'final_result': 'x', 'extra': 1}, {'final_result': 'x'*16001}, []):
+        assert client.post(path, json=body).status_code == 422
+    bad = client.post(path, content=b'{final_result:x}', headers={'Content-Type': 'application/json'})
+    assert bad.status_code == 422 and 'PowerShell' in bad.text
+    assert client.post(path, content=PNG, headers={'Content-Type': 'image/png'}).status_code == 200
+    key = client.post('/api/v1/register', json={'account':'shared-reader'}).json()['api_key']
+    headers = {'Authorization': 'Bearer '+key}
+    access = client.post('/api/v1/services/traffic_flow_detection/feedback-access', headers=headers).json()
+    assert access['open_endpoint'] == path
+    asset = client.get(path).json()['events'][-1]['asset_id']
+    assert client.get('/api/v1/exhibition/channels/'+access['id']+'/media/'+asset, headers=headers).content == PNG
+    assert client.get(URL+'/robot_patrol').json()['events'] == []
 
 
 def test_json_request_header_correlation_and_conflicts():

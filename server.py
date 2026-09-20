@@ -5,6 +5,7 @@ import random
 import secrets
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import exhibition
@@ -25,7 +26,20 @@ from intent import process_intent, intent_status
 from registry import (THIRD_PARTY, THIRD_PARTY_META, THIRD_PARTY_SUBS, REVERSE_CALLS,
                       record_reverse_call, caller_agent_for)
 
-app = FastAPI(title="6G NEF Capability Exposure Platform", version="0.9.0-demo")
+@asynccontextmanager
+async def lifespan(app):
+    await run_in_threadpool(subscription_notifications.reset_partner_plans)
+    yield
+
+
+app = FastAPI(title="6G NEF Capability Exposure Platform", version="0.9.0-demo", lifespan=lifespan)
+INSTANCE_ID = secrets.token_hex(8)
+
+
+@app.get("/api/v1/instance")
+def instance(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return {"instance_id": INSTANCE_ID}
 
 # ===== 内存存储（Demo 用途，无持久化） =====
 API_KEYS = {}       # api_key -> {"account": str, "subscriptions": set, "packages": set, "created": ts}
@@ -496,7 +510,12 @@ class SceneIntentReq(BaseModel):
 
 @app.get("/api/v1/services")
 def list_scene_services():
-    return {"services": scene_catalog()}
+    services = scene_catalog()
+    for scene in services:
+        scene.update(subscription_notifications.quote("scene:" + scene["id"],
+                     [c["capability_id"] for c in scene["provenance"]["components"]]))
+        scene["result_pull"] = exhibition.result_configured(scene["id"])
+    return {"services": services}
 
 
 @app.post("/api/v1/services/{service_id}/subscribe")
@@ -511,6 +530,30 @@ def subscribe_scene(service_id: str, req: SceneSubscribeReq | None = None, autho
     rec.setdefault("scene_subscriptions", set()).add(service_id)
     return {"service_id": service_id, "subscribed": True, "account": rec["account"], "billing": "demo_entitlement",
             "notification": _notify_subscriptions(rec["account"], {("scene", service_id)}, selected)}
+
+
+@app.delete("/api/v1/services/{service_id}/subscribe")
+def unsubscribe_scene(service_id: str, authorization: str = Header(None)):
+    _, rec = _auth(authorization)
+    if service_id not in SCENES:
+        raise HTTPException(404, "场景服务不存在")
+    if service_id not in rec.get("scene_subscriptions", set()):
+        raise HTTPException(404, "该场景尚未开通")
+    rec["scene_subscriptions"].remove(service_id)
+    rec.get("scene_intents", {}).pop(service_id, None)
+    return {"service_id": service_id, "subscribed": False, "account": rec["account"],
+            "notification": subscription_notifications.cancel(rec["account"], service_id)}
+
+
+@app.post("/api/v1/services/{service_id}/result")
+def scene_result(service_id: str, authorization: str = Header(None)):
+    _, rec = _auth(authorization, required_scope="intent:submit")
+    if service_id not in SCENES:
+        raise HTTPException(404, "场景服务不存在")
+    if service_id not in rec.get("scene_subscriptions", set()):
+        raise HTTPException(403, "请先开通当前场景")
+    return exhibition.pull_result(service_id, {"text": rec.get("scene_intents", {}).get(service_id, ""),
+                                               "request_id": uuid.uuid4().hex, "account": rec["account"]})
 
 
 def _execute_scene(service_id, mode, payload, authorization, execution):
@@ -551,6 +594,13 @@ def _execute_scene(service_id, mode, payload, authorization, execution):
         except HTTPException as exc:
             raise _with_auth_error(exc, auth) from exc
         result["service_id"] = service_id
+        if mode == "intent":
+            rec.setdefault("scene_intents", {})[service_id] = context["text"]
+            try:
+                if exhibition.result_configured(service_id):
+                    result["sensing_result"] = exhibition.pull_result(service_id, context)
+            except HTTPException as exc:
+                result["sensing_result"] = {"status": "unavailable", "detail": exc.detail}
     result["nef_auth"] = auth
     return result
 

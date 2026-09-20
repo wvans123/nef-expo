@@ -1,190 +1,113 @@
 # 场景接口对接说明
 
-分类：接口参考。面向场景开发同事 · 更新：2026-09-17
+分类：接口参考。面向场景开发同事，更新：2026-09-20。
 
-另一个应用查询“账号 1 / 2 / 3 订阅了哪些工具”请使用独立的[订阅查询接口](subscription-query.md)。本文只维护场景执行与回传契约。
-
-**你们提供执行接口，我们把调用发过去；我们提供回传地址，你们把状态、数据和画面发回来。**
-
-## 车流量联调
-
-换电脑运行 `python start.py`，启动与统一配置见 [README](../../README.md#二换电脑启动与配置)。页面选“车流量检测”，开通后输入意图，点击发送。
-
-**NEF 发给车流量服务：**
-
-```http
-POST http://10.70.113.122:5432/car/start
-Content-Type: application/json
-```
-
-```json
-{"user_request":"今天下午3点，十字路口东南侧的车流量情况怎么样"}
-```
-
-地址在 `config/integration.local.json` 的 `bridge.scenes.traffic_flow_detection.intent.url`；请求字段在同一对象的 `body` 中，`"$text"` 替换成用户原文。默认等待 8 秒；长任务请及时返回受理回执，完成后异步回传，不自动重试执行请求。
-
-**车流量服务回给 NEF：**
-
-```http
-POST http://<NEF电脑IP>:8069/api/v1/scene-feedback
-Authorization: Bearer <页面“接口信息”中的场景Key>
-Content-Type: application/json
-```
-
-```json
-{"final_result":"今天下午3点十字路口东南侧的车流量处于中等水平xxxxxx"}
-```
-
-正文只需要 `final_result`，非空字符串且最多 16000 字符。Key 放请求头，不加到 JSON；成功返回 `{"received":true,"event_id":1}`。先在调用页获取接口信息，重启后重新提供 Key。多个账号通过各自 Key 隔离；不带 request_id 时按场景展示，不推断属于哪一次请求。内网直连无需旧域名或 Cloudflare 头。
+启动、改地址用 [README](../../README.md#二换电脑启动与配置)，bash / PowerShell 命令见 [curl 联调手册](manual-curl.md)。套餐读取和通知另见[订阅契约](subscription-query.md)。机器狗地址和报文来自用户提供的另一台电脑联调记录，本机未访问真实对端。
 
 ## 一、把结果回传给我们
 
-我们会提供**完整回传地址和场景专用 Key**，不需要你们创建通道、调用点或填写场景 ID。同一场景在本次服务中复用同一份对接信息，重启后我们重新提供 Key。
+内网首选 **`POST http://<NEF电脑IP>:8069/api/v1/scene-feedback/{scene_id}`**，无需 NEF Key，也无需先注册账号或创建通道。`scene_id` 只允许 `robot_patrol`、`traffic_flow_detection`、`collaborative_tracking`；未知值返回 404，detail 列出可用值。
 
-统一接口：`POST /api/v1/scene-feedback`
+三个固定通道分别为 `scene_robot_patrol`、`scene_traffic_flow_detection`、`scene_collaborative_tracking`，owner 为 null。它们按场景共享，不隔离账号，不代表某次意图的专属结果。只能放获准共享的测试数据，不应直接暴露公网。旧 Tunnel 的 Access 策略未改变，经过它的机器仍需单独交付的 Access 凭据。
 
-所有请求都带：`Authorization: Bearer <场景Key>`
+### 1. 文字或结构化数据
 
-**内网回传地址：`http://<NEF电脑IP>:8069/api/v1/scene-feedback`；旧公网回传地址：`https://nef.2012wtlab.com/api/v1/scene-feedback`。** 仅公网接入还需带上我们单独提供的两个请求头，状态、数据、文件上传均相同；本地或内网直连不需要：
+`Content-Type: application/json`，推荐正文：
+
+```json
+{"final_result":"今天下午3点十字路口东南侧的车流量处于中等水平"}
+```
+
+`final_result` 必须是非空字符串，最多 16000 字符；只允许再带可选 `request_id`。也接受已有事件格式：
+
+```json
+{"kind":"status","title":"现场巡检","text":"巡检已完成"}
+```
+
+```json
+{"kind":"data","title":"车流统计","data":{"vehicle_count":18}}
+```
+
+`data` 必须是对象或数组。JSON 必须使用 UTF-8，最多 64 KiB；JSON 不合法返回 422，提示 PowerShell 使用管道传递 JSON。不要用未经确认的 `curl.exe -d '{"..."}'` 写法，部分 Windows PowerShell 会去掉内部引号。正确命令见手册。
+
+成功响应 HTTP 200：`{"received":true,"event_id":1}`。只证明 NEF 存入事件，不证明场景执行完成。重复 POST 会新增事件，不是幂等更新。
+
+### 2. 图片和视频
+
+同一场景 POST 地址接受原始文件字节，不是 multipart 或 Base64 JSON。支持 `image/png`、`image/jpeg`、`image/webp`、`video/mp4`、`video/webm`，校验类型和文件头；其它媒体类型返回 415。单文件最多 16 MiB，全进程媒体最多 64 MiB。
+
+后端仍接收并记录媒体事件，**本轮页面已移除媒体查看器，不会自动显示图像或视频**。已登录账号可从共享通道的 `GET /api/v1/exhibition/channels/scene_<scene_id>/media/<asset_id>` 获取原始媒体。私有通道仍仅拥有者可读。文件头通过不代表媒体一定能解码。
+
+### 3. 同事自查和页面轮询
+
+无需 Key：
 
 ```http
-CF-Access-Client-Id: <我们提供的Client ID>
-CF-Access-Client-Secret: <我们提供的Client Secret>
+GET /api/v1/scene-feedback/traffic_flow_detection?after=0
 ```
 
-公网入口和调用凭据已配置，凭据需单独交付，有效凭据回传尚待联调。以下示例省略这两个头，使用公网地址时请补齐；凭据不要写入前端页面或代码仓库。直接使用我们提供的 **HTTPS 地址**，不需要特殊 User-Agent；不要先向 HTTP 地址发送密钥再依赖跳转。
+返回 `channel_id/service_id/name/events/next_cursor/reset_required/history_truncated`。`after` 为非负整数，只取事件 `id > after`；游标超过当前序号时 `reset_required=true` 并从头返回保留记录。每通道仅保留最新 100 条，超出窗口会标记 `history_truncated`。服务重启清空事件，通道按场景重建。
 
-### 1. 发送状态或文字结果
+页面进入场景即每 2 秒读取共享通道，无需账号；文字和结构化数据分别显示保留历史中的最新一条，尚无数据或旧数据已移出历史时隐藏数据列。文字移出历史后恢复等待，不把过期内容当最新结果。媒体事件仍能通过 GET 查看元数据。HTTP 200 但无文字，先检查 scene_id 与 kind，再确认页面选的是同一场景。
 
-设置 `Content-Type: application/json`，请求体：
+### 4. 兼容凭证接口与请求关联
 
-```json
-{
-  "kind": "status",
-  "text": "巡检完成：发现一处待复核区域，其余巡检点正常。"
-}
-```
+旧 `POST /api/v1/scene-feedback` 保留，只接受 `Authorization: Bearer <场景接收Key>`，由 Key 路由。页面账号调用 `POST /api/v1/services/{scene_id}/feedback-access` 可拿到共享通道及 `open_endpoint/feedback_endpoint/receiver_key`；同一场景任意账号拿到相同通道与备用 Key。`general` 和手工创建的通道保持私有。
 
-### 2. 发送数据
+NEF 出向 Intent 带 `X-NEF-Request-ID`。可在回传 JSON 的 `request_id` 或同名 HTTP 头原样带回，图片/视频用头；头须为 1–1000 字符，正文和头同时存在须相同。关联仅是标签，不把它当执行完成证明。
 
-同样使用 `Content-Type: application/json`，业务数据放在 `data` 中，字段按场景约定：
+需按 request_id 筛选时，已登录账号使用 `GET /api/v1/exhibition/channels/<channel_id>/events?after=0&request_id=...`。共享场景任意账号可读，私有通道仍隔离；接收 Key 是只写凭证，不能替代账号 Key 读取。`?ops=1` 显示页面“回传地址”和通知细节，仅是展示开关，不是安全权限。
 
-```json
-{
-  "kind": "data",
-  "data": {
-    "location": "A路口",
-    "vehicle_count": 18
-  }
-}
-```
+## 二、NEF 向现场发送
 
-### 3. 发送图片或视频
+配置均位于 `config/integration.local.json` 的 `bridge.scenes`。发布模板的场景 URL 均留空，填写同事实际地址后才发送；已有 local 配置不覆盖。配置热读，不需要为改地址重启。显式 `NEF_BRIDGE_CONFIG` 仍优先覆盖。请求不走系统代理、不跟随重定向、不自动重发执行请求。
 
-向**同一个地址**发送文件原始字节，上传后自动显示，不需要再调用其他接口。
-
-例如发送 JPEG 图片（将地址和 Key 替换成我们提供的值）：
-
-```bash
-curl -X POST "<完整回传地址>" \
-  -H "Authorization: Bearer <场景Key>" \
-  -H "Content-Type: image/jpeg" \
-  --data-binary @frame.jpg
-```
-
-图片支持 `image/png`、`image/jpeg`、`image/webp`；视频支持 `video/mp4`、`video/webm`。更换文件时同步修改 Content-Type。**不是表单上传，也不是 Base64 JSON；直播流另行对接。**
-
-### 4. 如何判断回传成功
-
-成功时返回 HTTP 200，例如：
-
-```json
-{"received": true, "event_id": 1}
-```
-
-确认 `received` 为 true 即可，event_id 不需要再用于其他调用。公网请求若返回 302 或 HTML 登录页，说明尚未通过入口验证，不是回传成功。失败时把 HTTP 状态码和返回内容发给我们排查，不要无限重试；重复提交会产生重复记录。
-
-### 5. 关联某次意图与增量读取
-
-NEF 转发真实 Intent 时附带 `X-NEF-Request-ID`。同事收到后，可在回传 JSON 的 `request_id` 字段或同名 HTTP 头中原样带回；图片/视频用 HTTP 头。头值要求 1–1000 字符，JSON 与头同时存在时必须相同，否则返回 422 且不写入。没有关联值仍可按场景回传，不会自动匹配最近一次意图。
-
-供持有该账号 NEF Key 的读取方使用：
+### 车流量联调
 
 ```http
-GET /api/v1/exhibition/channels/<channel_id>/events?after=0&request_id=<原request_id>
-Authorization: Bearer <NEF账号Key>
+POST http://<车流服务IP>:5432/car/start
+Content-Type: application/json
+X-NEF-Request-ID: <本次请求标识>
+
+{"user_request":"今天下午3点，十字路口东南侧的车流量情况怎么样"}
 ```
 
-通道信息由 `POST /api/v1/services/{service_id}/feedback-access` 获得；回传同事仍无需自行创建通道。公网请求另带 Access 凭据。读取不能使用只写的场景回传 Key，也不能跨账号。
+对应配置 `bridge.scenes.traffic_flow_detection.intent`，`body={"user_request":"$text"}`。结果回传到 `/api/v1/scene-feedback/traffic_flow_detection`，无需 Key。
 
-`after` 是非负事件序号，返回严格大于该值的事件；`request_id` 可省略。响应新增 `next_cursor`（通道当前序号，即使筛选结果为空也推进）、`reset_required`（请求游标大于当前序号）和 `history_truncated`（需要的早期事件已超出保留范围）。每通道只保留最后 100 条事件，不能依赖它补齐全部历史。换 request_id 过滤条件时重新从 after=0 读取；通道不存在返回 404，服务重启后需重新获取接口信息和 Key。
+### 机器狗巡检
 
-请求关联是回传方提供的标签，NEF 不验证其是否确属先前某次执行，不将匹配 ID 当成业务完成证明。新代码已支持 JSON 请求头关联和增量读取；上传 GitHub 不会更新已有运行进程，部署后需验收接口版本。
+已提供的协议为纯文本，不是 JSON：
 
-## 二、请提供你们的执行接口
+```http
+POST http://<机器狗服务IP>:8000/in/intent
+Content-Type: text/plain; charset=utf-8
+X-NEF-Request-ID: <本次请求标识>
 
-每个场景请给我们以下资料：
-
-- **接口地址、HTTP 方法和鉴权方式**，实际密钥单独交付。
-- **一份完整请求示例**，说明必填字段和参数含义。
-- **成功、失败的响应示例**，说明返回的是“已受理”还是“已完成”。
-- **大致响应时间**，以及会回传哪些数据、图片或视频。
-
-**已有接口就发已有格式，我们负责适配。** 如果还没有确定格式，可以参考下面两类；这些是建议示例，不是要求你们改成固定格式。
-
-### 1. 三个场景：以接收 Intent 为主
-
-机器狗巡检、车流量检测、端网协同识别追踪均以 Intent 为主。每个场景提供接收地址，NEF 将业务意图原文发过去：
-
-```json
-{"text": "请检测A路口车流情况，并返回检测画面和统计数据"}
+<页面输入原文>
 ```
 
-意图由你们的场景服务或内部 Agent 处理，不要求新增 Intent ID 或任务状态查询接口。可以在执行接口响应中直接返回 `{"text":"业务结果摘要"}`；耗时较长时先返回受理回执，完成后通过上面的统一接口发送文字结果。数据和画面按需附加。
-
-#### 机器狗与车流接口分别配置
-
-使用 `python start.py` 启动时，若本地文件不存在，会从 `config/integration.example.json` 生成 `config/integration.local.json`；已有文件不会被覆盖。机器狗配置在 `bridge.scenes.robot_patrol.intent`，车流配置在 `bridge.scenes.traffic_flow_detection.intent`，互不共用执行地址。
-
-机器狗模板如下，`url` 留空时拒绝发送；填入同事提供的完整地址后才可调用：
+`bridge.scenes.robot_patrol` 配置：
 
 ```json
 {
-  "url": "",
-  "method": "POST",
-  "body": {"intent": "$text"},
-  "timeout_seconds": 8
+  "intent":{"url":"http://<机器狗服务IP>:8000/in/intent","method":"POST","content_type":"text/plain","body":"$text","timeout_seconds":8},
+  "result":{"url":"http://<机器狗服务IP>:8000/data/perception2/latest","method":"GET","timeout_seconds":8,"delay_seconds":0}
 }
 ```
 
-`intent` 只是待确认的参数名，不是已约定契约；若对方叫 `prompt`，改为 `"body": {"prompt": "$text"}`。`$text` 替换成页面输入的完整意图，保留原文。已有本地文件缺少 `robot_patrol` 时，仅补入这个场景配置，不覆盖车流或其他配置。未设置旧版 `NEF_BRIDGE_CONFIG` 覆盖项时，保存统一配置后下一次调用读取新值；改配置不需要重启。
+结果 200 + JSON 表示有数据，204 或空内容表示暂无结果。Intent 发送成功立即拉取一次，响应附 `sensing_result.status=stored/unchanged/empty/unavailable`；拉取失败不使 Intent 失败。后续页面每 3 秒调用 NEF 的 `POST /api/v1/services/robot_patrol/result`，需账号 Key 及该场景权益，也可点“刷新感知结果”。切换场景、页签、账号或取消开通停止循环。轮询只拉结果，不重复发送 Intent。
 
-响应格式待确认，不预设任务 ID、进度或完成字段。当前转发将 2xx 响应的 JSON 值或 UTF-8 文本保存在 `upstream.body`，HTTP 状态保存在 `upstream.http_status`；页面展开“接口原始回执”可查看，未知字段不要求先写解析代码。非 2xx 当前返回上游错误状态，不透传其响应正文；响应超过 1 MiB 会拒绝。收到 200/202 不等于巡检完成，后续异步结果仍可使用第一节的统一回传接口。真实机器狗地址、参数名、鉴权与完成判据均待同事确认；模板及本地测试不代表已接通机器狗。
+后端规范化内容后去重，与上次拉取内容相同则不重复存入；`final_result` 存文字事件，其它对象/数组存数据事件，纯文本存文字。拉取地址也支持 `method=POST`、`body={"user_request":"$text"}`，使用当前账号最近一次成功发送的该场景 Intent。GET 不带请求体；`delay_seconds` 最多 5 秒。
 
-### 2. 可选的 API / Tool：接收业务参数
+`GET /api/v1/services` 每个场景含 `result_pull`，决定页面是否显示刷新按钮。没有配置 result URL 就不自动拉取。
 
-端网协同也保留参数化调用，例如：
+### 端网协同与通用 Intent
 
-```json
-{
-  "device_id": "terminal-01",
-  "video_source": "camera-01",
-  "target": "指定移动目标"
-}
-```
+`bridge.scenes.collaborative_tracking.intent` 仍缺同事地址，模板 `body={"user_request":"$text"}`。不指定场景的 Intent 使用独立 `bridge.intent`。端网协同参数化 API / Tool 保留 `device_id/video_source/target` 三个字符串；实际执行路由另填 `invoke`。
 
-`video_source` 在这个示例中是视频源标识，不是视频文件。
+## 三、回执与部署边界
 
-外部的 **API 和 Tool 调用由 NEF 转成普通 HTTP 业务请求**，可以共用你们的一个执行接口，**不需要另做 MCP 接口**。
-
-耗时任务建议先返回受理结果，再通过回传接口发送后续反馈。当前转发默认超时 8 秒，可配置；请提前说明接口是否需要更长时间。收到受理响应不等于业务已经完成。
-
-## 三、联调顺序与注意事项
-
-1. 我们提供回传地址和 Key，你们先发一条状态或数据，确认页面能看到。
-2. 再发一张图片或一个短视频，确认展示正常。
-3. 你们提供执行接口，我们发起真实调用，核对请求和回传结果。
-
-- **大小限制**：单条 JSON 不超过 64 KiB，单个图片 / 视频文件不超过 16 MiB。
-- **地址与密钥**：使用双方可访问的部署地址；场景 Key 只用于回传，不用于执行接口。当前演示环境重启后，Key 需要重新提供。
-- **请求关联**：可按第 5 节回送 NEF 请求编号；内部任务 ID、真实进度和完成判据仍由场景方提供，不由 NEF 推算。
+- 转发默认 8 秒超时，配置限制在 1–30 秒；响应最多 1 MiB。JSON 或 UTF-8 文本保存在 `upstream.body`，状态在 `upstream.http_status`。200/202 只表示响应，不等于任务完成。
+- 非 2xx 返回 502，超时返回 504；不盲目重发 Intent，先确认现场是否已受理。结果拉取失败可再刷新。
+- `GET /api/v1/instance` 无 Key 返回进程随机 16 位十六进制 ID。页面启动时检查，收到旧 Key 的 401 时也检查，实例变化则清空浏览器旧账号并提示重新注册。
+- 启动用 `python start.py`，监听 `0.0.0.0:8069`；同事使用网卡 IP，不用 `0.0.0.0`。不要关闭整个防火墙或公司代理；可用获准内网直连方式检查。完整排查顺序见 curl 手册。

@@ -7,6 +7,19 @@ function purchaseCapabilitySelector(ids){
 function purchaseCapabilityIds(){
   return Array.from(document.querySelectorAll('#purchase-capabilities input:checked'),input=>input.value);
 }
+function purchaseUnitPrice(id){
+  const value=String(CAPS.find(c=>c.id===id)?.unit_price||'').match(/\d+(?:\.\d+)?/);
+  return value?Number(value[0]):0;
+}
+function purchaseQuote(scene,ids){
+  const original=ids.reduce((sum,id)=>sum+Math.round(purchaseUnitPrice(id)*100),0)/100;
+  const discount=scene.discount;
+  return {price:discount==null?scene.price:Math.round((original*discount+Number.EPSILON)*100)/100,original,discount};
+}
+function purchaseQuoteText(q){
+  if(q.price==null)return '价格待配置';
+  return '¥'+q.price+' / 月'+(q.discount==null?'':' · 原价 ¥'+q.original+' · '+Number((q.discount*10).toFixed(2))+' 折');
+}
 async function purchaseBootstrap(){
   const params=new URLSearchParams(location.search),values=params.getAll('account_id');
   if(!values.length)return;
@@ -22,14 +35,14 @@ async function purchaseBootstrap(){
 function purchaseNotice(notification){
   const box=$('#purchase-notice'),text=$('#purchase-notice-text'),button=$('#purchase-notice-retry');
   box.hidden=false;button.hidden=true;
-  const labels={delivered:'订购完成，套餐已发送',submitted:'订购完成，对接平台尚未确认接收',not_configured:'订购完成，通知配置待补全',failed:'订购完成，通知发送失败',sending:'订购完成，通知发送中',not_applicable:'订阅完成'};
-  text.textContent=labels[notification?.status]||'订购完成，通知功能待加载';
-  if(notification?.event_id)text.textContent+=' · '+notification.event_id;
+  text.textContent=notification?.action==='delete'?'已取消开通':notification?.status==='delivered'?'订购完成，已同步至合作平台':'订购完成';
+  const detail=$('#purchase-notice-detail');
+  detail.textContent=[notification?.status,notification?.code,notification?.http_status,notification?.event_id].filter(x=>x!=null).join(' · ');
   if(notification?.event_id&&['failed','submitted','not_configured'].includes(notification.status)){
     button.hidden=false;const account=current;
     button.onclick=async()=>{button.disabled=true;try{
       const result=await api('/api/v1/integration/notifications/'+encodeURIComponent(notification.event_id)+'/retry',{method:'POST'});
       if(current===account)purchaseNotice(result);
-    }catch(e){if(current===account)text.textContent='通知重试失败：'+wbMessage(e);}finally{button.disabled=false;}};
+    }catch(e){if(current===account)detail.textContent='通知重试失败：'+wbMessage(e);}finally{button.disabled=false;}};
   }
 }

@@ -1,6 +1,6 @@
 # 农场平台双向联调
 
-分类：接口参考 / 联调流程。更新：2026-09-17。面向农场平台、NEF 和网络侧开发同事。
+分类：接口参考 / 联调流程。更新：2026-09-20。面向农场平台、NEF 和网络侧开发同事。
 
 ## 1. 本次范围
 
@@ -13,7 +13,7 @@
 调用：网络客户端 --> NEF 代理入口 --> 农场 MCP --> 原路返回结果
 ```
 
-当天使用内存测试数据，重启后重新准备账号、订阅和 MCP 登记。换电脑首选 `python start.py`，地址为 `http://<NEF电脑IP>:8069`，无需旧域名或 Cloudflare 头；步骤见 [README](../../README.md#二换电脑启动与配置)。旧 Tunnel 部署仍可使用 `https://nef.2012wtlab.com` 和 Access。上传不会重启已有服务；真实农场回调地址和价格待提供。
+当天使用内存测试数据，重启后重新准备账号、订阅和 MCP 登记。换电脑首选 `python start.py`，地址为 `http://<NEF电脑IP>:8069`，无需旧域名或 Cloudflare 头；步骤见 [README](../../README.md#二换电脑启动与配置)。旧 Tunnel 部署仍可使用 `https://nef.2012wtlab.com` 和 Access。上传不会重启已有服务；回调路径和价格规则见 [curl 手册](manual-curl.md)，实际 IP 在本机配置填写，本机尚未访问真实对端。
 
 真实农场 MCP 地址、鉴权和网络目录发布地址尚未提供。现有自动测试通过真实本地 TCP 验证完整流程，但农场和目录都是模拟对端，不代表生产网络已经接通。
 
@@ -23,7 +23,7 @@
 
 | 提供方 | 必须提供 |
 |---|---|
-| NEF | 公网地址、约定账号编号、Access 机器凭据；注册 MCP 时另提供该账号的 NEF Key |
+| NEF | 内网地址、约定账号编号；仅旧公网入口需要 Access。6.0 开放登记无需 NEF Key，私有分步登记另提供账号 Key |
 | 农场平台 | 可访问的 `/business/v1/service-plans` 完整 POST 地址、鉴权及业务响应；另提供完整 MCP HTTP URL、鉴权、工具/schema、测试参数及预期结果 |
 | 网络侧 | 接收 MCP 登记的完整 HTTP POST 地址、鉴权方式、成功确认格式；哪个客户端将调用农场工具 |
 | NEF 运维 | 精确 URL 允许列表、NEF 对农场的凭据、目录发布配置、网络调用方独立凭据和可访问 AF 账号范围 |
@@ -44,16 +44,17 @@ CF-Access-Client-Secret: <NEF单独提供>
 | 操作方向 | 额外 Authorization |
 |---|---|
 | 农场查询已购套餐 | 不需要，只传 `account_id` |
+| 农场开放登记 MCP（6.0） | 不需要 NEF Key；归属配置的开放登记账号 |
 | 农场登记 / 发现 / 发布自己的 MCP | `Bearer <账号1的NEF Key>`，需要 `af:register` scope |
 | 网络客户端经 NEF 调用农场 | `Bearer <独立网络调用Key>`；不能用账号1的 NEF Key |
 | NEF 连接农场 MCP | 运维设置的农场 Bearer Key，NEF 服务端读取 |
 | NEF 向网络目录发布 | 运维设置的目录 Bearer Key，NEF 服务端读取 |
 
-编号是数据定位符，不是授权凭据。只读查询通过共享 Access 入口后可查询其他约定演示编号；不将其用于生产租户数据。MCP 注册使用凭据确定 `source_account`，不接受请求体自报编号替代身份。
+编号是数据定位符，不是授权凭据。只读查询可查询其他约定演示编号；不将其用于生产租户数据。私有 MCP 登记通过凭据确定 `source_account`，开放登记则取服务端 `open_registration_account`，均不接受正文伪造来源。无 Key 接口只适用于获准测试网络。
 
 ## 4. 第一条链路：订购通知与查询
 
-农场按钮导航到 `http://<NEF电脑IP>:8069/?account_id=1`；使用旧公网域名时需通过 Access 登录。订购通知结构为 `subscriberId` + `servicePlan`，套餐包含 UUID、名称、描述和显式价格；默认勾选全部可用组成能力并附加 `networkCapabilities`。用户可缩小范围，全部取消才省略该字段并交给 PA 自主编排。NEF 不实现 PA/CA 决策，四字段平铺旧格式不再使用。
+农场按钮导航到 `http://<NEF电脑IP>:8069/?account_id=1`；使用旧公网域名时需通过 Access 登录。订购通知结构为 `subscriberId` + `servicePlan`，套餐包含 UUID、名称、描述和价格；默认勾选全部可用组成能力并附加 `networkCapabilities`。页面可缩小范围但至少选一项，后端仍兼容空数组并省略该字段。NEF 不实现 PA/CA 决策，四字段平铺旧格式不再使用。
 
 本次外发 `subscriberId` 固定为 `"subscriber-001"`，本地账号 `1/2/3` 和跳转链接不变；不同本地账号的通知在农场侧都属于同一个测试订购者。字段、选能力/不选能力两种完整示例、价格配置与重试见[套餐订购通知](subscription-query.md#10-跳转订购与套餐通知)。接收方按事件头去重；HTTP 2xx 仅表示通知送达，业务入库响应待确认。浏览器跳转不要携带机器 Secret。
 
@@ -117,6 +118,8 @@ CF-Access-Client-Secret: <Client Secret>
 | `token_env` | NEF 向目录发送 Bearer Key 所用环境变量名 |
 | `nef_base_url` | 网络客户端能访问的 NEF 地址，发布时由此生成代理 URL |
 | `mcp_servers` | 精确匹配登记 URL 的允许列表；页面登记不会自动加入允许列表 |
+| `open_registration_account` | 开放登记来源账号，默认 `1` |
+| `allow_unlisted_mcp_servers` | 默认 false；获准隔离测试网才可放宽，风险见 6.0 |
 | `mcp_servers.<url>.token_env` | NEF 连接该农场 MCP 使用的 Bearer Key 环境变量名 |
 | `network_clients` | 独立网络调用者配置；每个调用者绑定一个 Key 环境变量及允许的 AF 账号 |
 | `af_accounts` | 精确允许访问的农场账号名，本例只允许 `1`，不是所有账号 |
@@ -126,6 +129,18 @@ CF-Access-Client-Secret: <Client Secret>
 配置文件中的 URL 等变动会在相关请求时重新读取；启动时没有设置的进程环境变量，需要安排重启后才能生效。实际秘密不要写进 JSON、文档或登记请求。登记 URL 必须由 NEF 主机可达；农场电脑的 `127.0.0.1` 不是 NEF 可用地址。不要为联调关闭 Access、整个防火墙或允许任意出向 URL。
 
 ## 6. 第二条链路：农场 MCP 注册到网络
+
+### 6.0 无 Key 一步注册（内网）
+
+`POST /api/v1/af/mcp-servers`，JSON 为 `{"name":"农场管理平台","url":"http://<农场IP>:<端口>/mcp","description":"..."}`。参数限制与 6.1 相同，无需 NEF Key；同一 URL 重复调用更新开放登记，不重复创建，不修改同 URL 的私有登记。
+
+NEF 以 `registry.open_registration_account`（默认 `1`）登记并标记 `registered_via:open`，立即执行 initialize、notifications/initialized、tools/list。有 `registry.publish_url` 时再发布到 ARF/TRF，始终发布 NEF 代理入口，不直接把农场原始地址作为网络调用入口。
+
+返回登记记录、`created`、`discovery_status=ok|failed`、`sync_status=accepted|failed|pending`；失败附 sync_error，未配置目录或未明确确认附 sync_note。发现失败返回 502/504（允许列表拒绝为 403/503），detail 保留登记 ID 和失败状态。目录发布失败不撤销已发现工具。列表接口沿用原有 discovered/synced/submitted 状态词。
+
+开放登记对所有登录账号可见，任意具备 `af:register` scope 的账号可 discover、publication、sync；私有登记不变。`registry.allow_unlisted_mcp_servers` 默认 false，只有精确允许列表 URL 可连接；获准隔离测试网可设 true，允许无 Key 调用者让 NEF 连接任意合法 HTTP(S) URL，存在内网探测风险，勿对不可信网络启用。此开关不取消网络反向调用的独立凭据与 af_accounts 校验。
+
+农场 MCP URL 和 ARF/TRF publish_url 仍待提供。本机只验证本地模拟对端，具体命令见 [curl 手册](manual-curl.md)。以下 6.1 起保留带 Key 的分步流程。
 
 以下路径均相对于 NEF 公网 Base URL，所有请求携带第 3 节 Access 头。除特别说明外再带：
 
@@ -240,7 +255,7 @@ POST /api/v1/network/servers/{server_id}/sync
 | HTTP 200，`accepted=true`，`sync_status=synced` | 目录明确确认接收 |
 | HTTP 200，`accepted=false`，`sync_status=submitted` | 上游有成功 HTTP 响应，但未给出明确接收确认 |
 | 503 | 发布地址或 NEF 网关配置缺失/无效 |
-| 502 | 上游错误、超时、重定向或响应异常 |
+| 502 / 504 | 上游错误、重定向或响应异常 / 上游超时 |
 
 `synced` 只证明收到目录确认，不证明目录已完成生产发布、网络已发现或调用成功。代码允许发现前先同步空工具登记，但本次验收要求**先发现工具再发布**。当前只配置一个发布 URL，不会自动分别发送到 TRF 与 ARF；网络侧接收适配由双方确认。
 
@@ -250,7 +265,7 @@ POST /api/v1/network/servers/{server_id}/sync
 GET /api/v1/network/servers
 ```
 
-返回 `{"servers":[...]}`，仅包含当前认证账号的登记。查看 `registration_status`、`discovery_status`、`sync_status`、`tools`、`gateway_path` 和调用后的 `last_call`。不存在独立 `GET /servers/{id}` 接口；从列表按 `id` 选择。
+返回 `{"servers":[...]}`，包含当前账号私有登记及所有 `registered_via:open` 登记。查看 `registration_status`、`discovery_status`、`sync_status`、`tools`、`gateway_path` 和调用后的 `last_call`。不存在独立 `GET /servers/{id}` 接口；从列表按 `id` 选择。
 
 ## 7. 网络经 NEF 调用农场
 
@@ -327,7 +342,7 @@ NEF 保留农场实际 `CallToolResult`，不伪造业务完成。`isError=true`
 | HTTP 409 | 正在发现/同步/调用、未先发现工具，或达到登记数量上限 |
 | HTTP 422 | 登记字段或请求格式错误 |
 | HTTP 503 | 服务端配置缺失或无效；检查 `detail.code` |
-| HTTP 502 | 上游协议、网络或响应异常；查看固定 `detail.code`，不索取明文 Key |
+| HTTP 502 / 504 | 上游协议、网络或响应异常 / 超时；查看固定 `detail.code`，不索取明文 Key |
 | JSON-RPC `-32602` | 工具名或参数不符合已发现 schema |
 | JSON-RPC `-32601` | 方法未实现 |
 | JSON-RPC `-32001` | 农场代理忙，避免并发重复执行 |
@@ -347,7 +362,7 @@ HTTP 错误通常为 `{"detail":{"code":"...","message":"..."}}`；NEF 账号认
 | 6 | 查看 publication | 只公布 NEF 代理 URL，不泄露农场地址/Key |
 | 7 | 调用 sync，网络目录确认 | accepted=true、synced，目录侧能找到同一 registration_id |
 | 8 | 网络客户端访问发布的 URL | tools/list 与登记一致；只读 tools/call 返回农场实际数据 |
-| 9 | 检查异常 | 错账号不能操作登记；错网络 Key 拒绝；参数错误不触发农场执行 |
+| 9 | 检查异常 | 错账号不能操作私有登记，开放登记可跨账号操作；错网络 Key 拒绝；参数错误不触发农场执行 |
 
 每步记录时间、请求方法/路径、账号编号或登记 ID、状态码和脱敏响应；不要把任何 Key、客户现场数据写入共享截图或日志。步骤 1–2 可以先做，不依赖 MCP 服务或网络目录上线。
 

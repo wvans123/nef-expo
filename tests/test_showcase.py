@@ -73,10 +73,14 @@ def test_feedback_only_invocations_and_simplified_handoff():
     assert "if(tab==='intent')" in js and "if(tab==='api')" in js
     assert "if(tab==='mcp'&&wbMcp.state.selected)" in js
     assert 'NefStory.feedbackHandoff(c,location.origin)' in js
-    assert "+'/feedback-access'" in js and 'URL.revokeObjectURL' in js
+    assert "+'/feedback-access'" in js and 'URL.revokeObjectURL' not in js
     assert 'wb-feedback-source' not in html and 'wb-source-name' not in js
-    assert '场景专用回传接口' in js
+    assert 'handoff.open_url' in js
     assert 'c.events_endpoint' not in js
+    assert 'id="wb-feedback-media"' not in html and 'id="wb-ops"' not in html
+    assert 'id="wb-feedback-data-wrap" hidden' in html
+    assert 'class="primary ops-only"' in html
+    assert '/api/v1/instance' in html and 'checkInstance().then(purchaseBootstrap)' in js
 
 def test_original_theme_and_reduced_motion():
     html=client.get('/').text

@@ -24,7 +24,14 @@ vm.createContext(ctx);vm.runInContext(fs.readFileSync('static/purchase.js','utf8
   ctx.purchaseNotice({status:'failed',event_id:'sub-test'});
   assert.equal(ctx.$('#purchase-notice-retry').hidden,false);
   await ctx.$('#purchase-notice-retry').onclick();
-  assert.match(ctx.$('#purchase-notice-text').textContent,/套餐已发送/);
+  assert.match(ctx.$('#purchase-notice-text').textContent,/订购完成，已同步至合作平台/);
   assert.equal(ctx.$('#purchase-notice-retry').hidden,true);
+  ctx.purchaseNotice({status:'failed',action:'delete',event_id:'sub-delete'});
+  assert.equal(ctx.$('#purchase-notice-text').textContent,'已取消开通');
+  assert.match(ctx.$('#purchase-notice-detail').textContent,/failed.*sub-delete/);
+  ctx.CAPS[0].unit_price='19.9/月';
+  assert.equal(ctx.purchaseQuote({discount:0.8},['target_detection']).price,15.92);
+  assert.equal(ctx.purchaseQuote({price:29,discount:null},['target_detection']).price,29);
+  assert.match(ctx.purchaseQuoteText(ctx.purchaseQuote({discount:0.8},['target_detection'])),/15.92.*19.9.*8 折/);
   console.log('Purchase handoff, exact numeric identity and retry display passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

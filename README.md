@@ -8,7 +8,7 @@
 > 状态全部存于内存，重启服务即清零——演示从"新 AF 入驻"讲起即可。
 
 
-## 当前展示更新（2026-09-17）
+## 当前展示更新（2026-09-20）
 
 入口：`/`（`static/index.html`）。直接在原版工作台上增量修改，保留原有布局、能力详情弹窗、订阅、拖拽排序、参数表单和逐级鉴权；不再维护第二套活动展示页。原 `/static/showcase.html` 书签自动跳转到这里。
 
@@ -19,9 +19,9 @@
 - **自助编排**选择能力、调整步骤、检查配置冲突；可选 LLM 根据需求推荐组合，经采用和确认后保存声明式套餐，再发布至网络目录。NEF 不因此成为自主 Agent，也不会在保存时执行步骤；网络执行与参数绑定由内部对接。
 - **双向开放**通过名称、URL、说明组成的 JSON 注册 MCP Server；经运维批准的地址可真实连接并发现工具，再同步至 TRF / ARF。登记、发现、发布确认分别显示；后端记录 `source: AF` 与认证账号，随发布报文传给网络，能力超市同时展示 AF 来源及同步状态。
 - **网络经 NEF 调用 AF**：ARF / TRF 是网络内部目录，接收 AF 工具声明与 NEF MCP 入口，而不是可绕过 NEF 的 AF 原始 URL。内部网元以独立凭证访问 NEF，NEF 按 AF 账号授权范围与 URL 允许列表校验、验证工具参数，再向 AF 真实发送 `tools/call`，保持实际 `CallToolResult` 与 `isError`。页面可查看发布报文和最近网络调用状态。
-- **调用与鉴权**展示实际身份、入口权限和订阅校验回执；文字业务结果优先，图片 / 视频按需展开。场景回传仍只在具体调用页出现。
+- **调用与鉴权**展示实际身份、入口权限和订阅校验回执；页面显示文字与结构化数据，媒体仅保留后端接收。场景回传仍只在具体调用页出现。
 - **真实调用**：活动页面直接发送 live 请求，移除执行方式和示例意图；Intent 可选“不指定场景”，走单独配置的通用接收地址。未配置返回待对接，不回落到模拟结果。旧后端 demo 契约仅保留兼容，HTTP 受理不等于业务完成。
-- **简化回传**：自动准备并复用当前场景接口；“接口信息”可查看对接资料。同事只接收一个 `/api/v1/scene-feedback` 地址与场景 Key；车流量支持 `{"final_result":"文字结果"}`，其他文字、数据、图片、视频也通过同一接口提交。
+- **简化回传**：同事无需 NEF Key，向 `/api/v1/scene-feedback/{scene_id}` POST `{"final_result":"文字结果"}`，GET 同一路径即可自查。三场景通道共享，页面不登录也可读；旧带接收 Key 接口保留备用。`?ops=1` 显示“回传地址”和通知诊断，只是显示开关，不是鉴权。命令见 [curl 手册](docs/reference/manual-curl.md)。
 - **目录展示**：主页不再强调 Intent 标签，场景卡展示可点击的基础能力组合与套餐设计来源；网络导入和自助编排定义分别标明来源。浏览器进入目录页、以及停留超市 / 双向开放时每 30 秒自动同步，不再提供手动同步网络目录按钮。
 - **边界**：当前目录契约是本项目的对接约定，不是 TRF / ARF 标准协议。生产网络接口仍待同事提供；本地账号、权益、登记与回传保存在内存。mTLS / OAuth、资源级策略、生产持久化未接入。
 - **本期隐藏**：对外 Skill / 场景方案、AF 智能终端不进入展示动线。对应页签隐藏，旧后端接口保留兼容但不进入本期演示。
@@ -64,11 +64,18 @@ python start.py
 | 用途 | JSON 字段 | 填什么 |
 |---|---|---|
 | 订购套餐后发给农场 | `subscriptions.callback_url` | 完整地址，例如 `http://<农场IP>:<端口>/business/v1/service-plans` |
-| 套餐价格 | `subscriptions.plan_prices` | 将对应套餐的 `null` 改为双方确认的数字；测试免费也要明确填 `0`，否则不发送通知 |
+| 套餐折扣 | `subscriptions.discount` | 模板为 `0.8`：所选能力月价之和 × 折扣，保留两位小数 |
+| 固定套餐价格 | `subscriptions.plan_prices` | 未配置 discount 时使用；将对应 `null` 改为双方确认的数字，免费明确填 `0` |
+| 通知范围 | `subscriptions.account_ids` / `notify_plans` | `null` 表示全部；否则填账号列表 / `scene:robot_patrol` 等完整套餐键列表 |
+| 启动清理对端套餐 | `subscriptions.reset_partner_plans_on_start` | 默认 `false`；仅在确认可删除固定测试订购者的套餐后设 `true` |
 | 外部 MCP 登记及选定 NEF 目录发布到 ARF/TRF | `registry.publish_url` | 对方接收登记的完整 POST 地址；当前只支持一个接收方 |
 | 对方访问本 NEF 的地址 | `registry.nef_base_url` | `http://<NEF电脑IP>:8069`，用于生成 MCP 代理入口 |
 | 允许连接的外部 MCP | `registry.mcp_servers` | 按[农场联调](docs/reference/farm-integration.md#5-nef-运维配置)填精确 URL 允许列表；只登记不代表已经发布 |
-| 车流量 Intent | `bridge.scenes.traffic_flow_detection.intent.url` | 已填 `http://10.70.113.122:5432/car/start`，按部署实际修改 |
+| 开放 MCP 登记归属 | `registry.open_registration_account` | 无 Key 登记的来源账号，默认 `1` |
+| 放宽 MCP 允许列表 | `registry.allow_unlisted_mcp_servers` | 默认 `false`；仅获准隔离测试网可启用，存在任意地址探测风险 |
+| 车流量 Intent | `bridge.scenes.traffic_flow_detection.intent.url` | 填 `http://<车流服务IP>:5432/car/start`；发布模板留空，避免误连现场 |
+| 机器狗 Intent / 结果 | `bridge.scenes.robot_patrol.intent` / `result` | 分别填 text/plain POST 地址与 GET latest 地址；模板 URL 留空，详见[场景接口](docs/reference/integration.md) |
+| 端网协同 Intent | `bridge.scenes.collaborative_tracking.intent.url` | 等待对方提供完整地址 |
 | 不指定场景的 Intent | `bridge.intent` | 将 `null` 改成 `{"url":"http://<接收方IP>:<端口>/<路径>","method":"POST","body":{"user_request":"$text"}}` |
 | 原子能力 API / MCP | `bridge.capabilities.<能力ID>` | route 对象，结构见 `config/bridge.example.json` |
 
@@ -116,7 +123,7 @@ node tests/test_purchase.cjs
 3. 自助编排中拖入或点击能力、拖拽调整顺序。交付方式、GPU 上限及目标来源收在“可选约束”中，默认不填。可选模型推荐经采用进入草稿，填写名称并确认保存；发布按钮交付目录定义，不表示执行完成。
 4. 双向开放提交 MCP Server JSON；连接并发现工具后展开参数声明，按需同步 TRF / ARF。无配置时明确待对接。
 5. MCP 接口先连接 / 发现、再选工具；API 直调从已知能力开始。两者保留原版请求、参数、鉴权和响应两栏。
-6. 实际接口配置后直接调用；场景数据源仅需一个回传地址与 Key。文字优先，媒体按需展开。
+6. 实际接口配置后直接调用；场景数据源用无 Key POST/GET 回传地址。机器狗配置结果地址后，发送 Intent 自动拉取并每 3 秒检查最新结果。
 
 ## 四、接口和执行边界
 
@@ -124,14 +131,14 @@ node tests/test_purchase.cjs
 - **Intent 原文转发**：三个场景调用 `/api/v1/services/{service_id}/intent`；网络侧负责解析与执行。没有内部 Intent ID 也可回文字，不虚构 Planning Agent 轨迹。
 - **API / MCP 并行**：已知能力走 HTTP API；AF 通过 `/mcp` 初始化、发现、选用和调用工具。两者可以映射同一内部 HTTP 服务，不要求网络内部都重写为 MCP。
 - **套餐定义不是执行计划引擎**：NEF 保存有序能力引用，发布至 TRF / ARF；真实部署、参数绑定和失败处理仍需网络侧契约。
-- **双向开放**：外部 MCP Server 先登记，运维批准后才实际发现工具；发现与同步分别显示，不自动授予外部工具执行权。
+- **双向开放**：页面保留带 Key 分步登记；农场可通过无 Key `/api/v1/af/mcp-servers` 一步登记、发现并按配置发布。默认仍检查 URL 允许列表，不自动授予网内调用权。
 - **结果证据**：demo 明确标注；live 无配置返回 503、不回落；HTTP 受理不等于业务完成。场景级回传与某次调用不自动关联。
 
 对接地址统一读取 `config/integration.local.json`，字段与旧配置兼容规则见第二节。智能推荐默认读取 `config/composer.local.json`（可由 `NEF_COMPOSER_CONFIG` 覆盖），模板为 `config/composer.example.json`；远程 Base URL `https://sub2api.2012wtlab.com/v1`、模型 `gpt-6-astra`、Responses 协议及 `low` 档位已填写。模型 Key 使用 `NEF_COMPOSER_API_KEY`，不读取 Codex 密钥、不依赖本机 CPA。此前 `high` 档位通过一次真实推荐；`low` 的真实响应尚待验证。每次请求内嵌可用原子能力池与参数 schema；新代码按超时、上游错误、连接失败和响应格式错误分类，并返回排查用 request_id，不暴露密钥或上游正文。历史运行证据见[演示运行手册](docs/demo-playbook.md#智能编排准备与现场操作)。
 
 跨应用读取订阅：`GET /api/v1/integration/subscriptions?account_id=1`，其中 `1` 是在 NEF 注册的账号名，不是自动编号。1.1 响应的 `purchased_packages` 直接提供已购场景/能力套餐及详情，适合农场平台展示“已购网络套餐”；原子工具、参数 schema、权益来源等旧字段仍保留，不返回 API Key。公网仍需 Access 机器凭据，接口详细契约见[订阅查询接口](docs/reference/subscription-query.md)。农场查询套餐、MCP 注册发现、发布网络和网络回调的步骤见[农场平台联调](docs/reference/farm-integration.md)。场景开通不要求组件逐一订阅，但组件单独调用仍校验各自权益；订阅数据仍为内存态，重启后需恢复。
 
-订购主流程：农场按钮跳转 `/?account_id=1`，用户开通后由 NEF 向配置的 `/business/v1/service-plans` POST `subscriberId` + `servicePlan`。套餐内含 `planId/showName/description/price`；默认发送套餐可用能力组成 `networkCapabilities`，用户全部取消勾选才省略并交给 PA 自主编排。NEF 不实现 PA/CA 决策。价格必须明确配置；失败保留订阅并支持同事件手动重试。真实农场地址及接收回执待联调；本次上传不重启已有进程。唯一契约见[套餐订购通知与订阅查询](docs/reference/subscription-query.md#10-跳转订购与套餐通知)，新部署使用统一配置模板 `config/integration.example.json`。
+订购主流程：农场按钮跳转 `/?account_id=1`，用户开通任一场景后由 NEF 向配置的 `/business/v1/service-plans` POST `subscriberId` + `servicePlan`。套餐内含 `planId/showName/description/price`；页面默认全选能力，至少保留一项；后端兼容显式空选择并省略 `networkCapabilities`，PA/CA 决策由网络侧实现。价格按折扣计算，未配折扣才用固定价；失败保留订阅，`?ops=1` 可查看请求/回包并重试。取消开通会删除本地权益并向农场发送 DELETE。现场地址来自另一台记录，本机未访问验证或重启加载。唯一契约见[套餐订购通知与订阅查询](docs/reference/subscription-query.md#10-跳转订购与套餐通知)，新部署使用统一配置模板 `config/integration.example.json`。
 
 当前联调的外发 `subscriberId` 固定为 `subscriber-001`，定义在 `subscription_notifications.py` 的 `SUBSCRIBER_ID`，无需新增配置。跳转和查询仍使用本地账号 `1/2/3`；对方会将这些账号的通知都归入同一个测试订购者。
 
@@ -163,7 +170,7 @@ static/showcase-mcp.js / showcase-story.js  共用发现与回执语义
 config/               内部执行、网络目录配置模板
 ```
 
-所有业务状态保存在单进程内存。重启清除账号 Key、订阅、套餐定义、注册、目录及回传数据；浏览器中保存的账号记录会失效，需重新注册。
+所有业务状态保存在单进程内存。重启清除账号 Key、订阅、套餐定义、注册、目录及回传数据；浏览器通过 `/api/v1/instance` 在加载或 401 后识别重启并清除旧账号，需重新注册。
 
 ## 六、能力目录与标准复核
 

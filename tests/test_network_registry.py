@@ -6,6 +6,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Any, Callable
 
 import pytest
@@ -57,6 +58,9 @@ class LocalHTTPFixture:
             def do_POST(self):  # noqa: N802
                 outer.handle(self, "POST")
 
+            def do_DELETE(self):
+                outer.handle(self, "DELETE")
+
             def log_message(self, *_args):
                 return
 
@@ -80,12 +84,13 @@ class LocalHTTPFixture:
         body = request.rfile.read(length)
         entry = {
             "method": method,
-            "path": request.path,
+            "path": urlsplit(request.path).path,
+            "query": urlsplit(request.path).query,
             "headers": {key.lower(): value for key, value in request.headers.items()},
             "body": body,
         }
         self.requests.append(entry)
-        callback = self.routes.get((method, request.path))
+        callback = self.routes.get((method, entry["path"]))
         if callback is None:
             status, headers, response_body = 404, {}, b"not found"
         else:
@@ -224,6 +229,48 @@ def register_server(client: TestClient, url: str, *, key: str = "caller-a") -> d
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def test_open_registration_discovers_publishes_and_is_shared(client, http_fixture, monkeypatch):
+    url = http_fixture.url('/mcp')
+    calls = install_mcp_fixture(http_fixture, '/mcp', pages=[{'tools': [tool('inspect')]}])
+    http_fixture.add('POST','/publish',lambda r:json_response({'accepted': True}))
+    cfg = configure(monkeypatch, publish_url=http_fixture.url('/publish'), mcp_servers={url:{}})
+    cfg['open_registration_account']='1'
+    monkeypatch.setenv('NEF_REGISTRY_CONFIG',json.dumps(cfg))
+    payload={'name':'Farm','url':url,'description':'Open registration'}
+    response=client.post('/api/v1/af/mcp-servers',json=payload)
+    assert response.status_code==200,response.text
+    result=response.json();sid=result['id']
+    assert result['created'] and result['discovery_status']=='ok' and result['sync_status']=='accepted'
+    assert [c['method'] for c in calls]==['initialize','notifications/initialized','tools/list']
+    assert result['registered_via']=='open'
+    again=client.post('/api/v1/af/mcp-servers',json={**payload,'name':'Updated'}).json()
+    assert again['id']==sid and not again['created']
+    for key in ['caller-a','caller-b']:
+        listing=client.get('/api/v1/network/servers',headers=headers(key)).json()['servers']
+        assert len(listing)==1 and listing[0]['name']=='Updated'
+        assert client.post(f'/api/v1/network/servers/{sid}/discover',headers=headers(key)).status_code==200
+        publication=client.get(f'/api/v1/network/servers/{sid}/publication',headers=headers(key)).json()
+        assert publication['source_account']=='1'
+        assert client.post(f'/api/v1/network/servers/{sid}/sync',headers=headers(key)).status_code==200
+    private=register_server(client,url)
+    assert client.get(f"/api/v1/network/servers/{private['id']}/publication",headers=headers('caller-b')).status_code==404
+
+
+def test_open_registration_allowlist_and_unreachable_records_survive(client,http_fixture,monkeypatch):
+    url=http_fixture.url('/mcp')
+    cfg=configure(monkeypatch)
+    denied=client.post('/api/v1/af/mcp-servers',json={'name':'Farm','url':url})
+    assert denied.status_code in (403,503) and not http_fixture.requests
+    sid=denied.json()['detail']['id']
+    cfg['allow_unlisted_mcp_servers']=True
+    monkeypatch.setenv('NEF_REGISTRY_CONFIG',json.dumps(cfg))
+    failed=client.post('/api/v1/af/mcp-servers',json={'name':'Farm','url':url})
+    assert failed.status_code==502 and failed.json()['detail']['id']==sid
+    install_mcp_fixture(http_fixture,'/mcp',pages=[{'tools':[]}])
+    result=client.post('/api/v1/af/mcp-servers',json={'name':'Farm','url':url}).json()
+    assert result['id']==sid and result['sync_status']=='pending' and 'sync_note' in result
 
 
 def test_missing_config_is_explicit_and_local_state_survives(client):

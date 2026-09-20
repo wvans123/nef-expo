@@ -1,6 +1,6 @@
 # 套餐订购通知与订阅查询
 
-分类：接口参考。协议版本：1.1。更新：2026-09-17。
+分类：接口参考。协议版本：1.1。更新：2026-09-20。
 
 交付状态：代码包含 1.1 查询与第 10 节订购通知，通知通过本地模拟对端验证，真实农场接收仍待联调。换电脑按 [README](../../README.md#二换电脑启动与配置) 运行 `python start.py` 并填写统一配置。本次上传不重启已有进程；旧机器状态属于运行手册中的历史检查快照，不是新机器预置账号或交付保证。
 
@@ -310,8 +310,8 @@ for tool in snapshot["tools"]:
 | `servicePlan.planId` | string (UUID) | 是 | 服务套餐标识；同一套餐跨账号、跨重启稳定，不是订单 ID |
 | `servicePlan.showName` | string | 是 | 套餐名称，取 NEF 当前目录 |
 | `servicePlan.description` | string | 是 | 套餐描述，取 NEF 当前目录 |
-| `servicePlan.price` | number (float) | 是 | 显式配置的套餐价格；非负有限数值，不能为字符串或 null |
-| `servicePlan.networkCapabilities` | object[] | 否 | 默认附带套餐内全部可用能力，用户可调整；全部取消时字段省略，不传 null 或空数组 |
+| `servicePlan.price` | number (float) | 是 | 所选能力总价 × discount，保留两位小数；无 discount 时取 plan_prices；必须非负有限数值 |
+| `servicePlan.networkCapabilities` | object[] | 否 | 默认附带全部可用能力，页面至少选一项；后端兼容空选择并省略字段，不传 null 或空数组 |
 
 每个 `networkCapabilities` 元素：
 
@@ -320,11 +320,11 @@ for tool in snapshot["tools"]:
 | `capabilityName` | string | 是 | 能力池稳定标识，如 `target_detection`；作为机器匹配名称，不使用易变中文名 |
 | `showName` | string | 是 | 中文展示名，如“目标检测” |
 | `description` | string | 是 | 该网络能力的描述，来自同一能力池 |
-| `price` | number (float) | 否 | 可选单项价格；当前未约定数值，因此不发送，不解析目录中的“元/月”等展示字符串 |
+| `price` | number (float) | 否 | 本版发送能力目录单价的数字部分，例如 `19.9/月` 转成 `19.9`；免费能力为 0 |
 
 **编排语义：** 存在 `networkCapabilities` 时，网络内部 Planning Agent（PA）与 Computing Agent（CA）应在该列表范围内编排；不存在时交给 PA 自主选择能力。NEF 只传套餐和约束，不实现 PA 自主编排，也不声明已经完成 PA/CA 对这些约束的接收或执行验证。列表不是有序执行步骤，不发送整个能力池替代所选项。
 
-示例只展示请求格式；`19.9` 是测试值，**不是已确认报价**，币种和计价周期仍需约定：
+以下示例只选择目标检测，按当前模板 8 折计价为 `15.92`，原子能力单价 `19.9`：
 
 ```http
 POST /business/v1/service-plans HTTP/1.1
@@ -341,12 +341,13 @@ X-NEF-Event-ID: sub_<本次通知标识>
     "planId": "36b3d800-2774-5e2d-a647-c26194fba4ae",
     "showName": "机器狗巡检",
     "description": "巡检任务下发、异常信息与巡检结果回传。",
-    "price": 19.9,
+    "price": 15.92,
     "networkCapabilities": [
       {
         "capabilityName": "target_detection",
         "showName": "目标检测",
-        "description": "检测指定区域内的目标。"
+        "description": "检测指定区域内的目标。",
+        "price": 19.9
       }
     ]
   }
@@ -355,7 +356,7 @@ X-NEF-Event-ID: sub_<本次通知标识>
 
 示例 UUID 对应场景 `robot_patrol`，能力描述为简写；实际正文来自目录。UUID 规则为 Python `uuid5(NAMESPACE_URL, "urn:nef:service-plan:" + kind + ":" + id)`，其中 `kind` 是查询响应中的 `scene` 或 `capability_package`。因此同名旧套餐和新场景不会撞号。`planId` 标识套餐模板，不随用户所选范围改变；接收方将本次选择归入固定测试订购者 `subscriber-001`，并按事件头去重。同一套餐从不同本地账号购买仍属于该测试订购者，需按双方业务约定处理更新。GET 查询仍按本地账号返回内部 `kind/id`，不含价格或本次通知的能力选择。
 
-未选择网络能力的请求如下，同一订购者仍有明确身份，不需要另加账号请求头：
+旧接口仍兼容显式空能力选择，页面现在要求至少一项。以下为未配置 discount 且固定 plan_prices 为 19.9 的兼容请求；配置折扣时空选择价格为 0，同一订购者无需另加账号头：
 
 ```json
 {
@@ -369,7 +370,7 @@ X-NEF-Event-ID: sub_<本次通知标识>
 }
 ```
 
-订购弹窗提供当前套餐内的可用网络能力复选框，默认全部勾选，优先发送能力组合。所选项只是交给网络侧的范围约束，不自动开通原子工具的独立调用权益，也不改变本地场景执行实现。
+订购弹窗提供当前套餐内的可用网络能力复选框，默认全部勾选，页面至少保留一项，并按选择实时重算报价。所选项只是交给网络侧的范围约束，不自动开通原子工具的独立调用权益，也不改变本地场景执行实现。
 
 页面调用 NEF 的场景订购接口可带 `{"network_capability_ids":["target_detection"]}`；省略请求体或传 `{}` 默认发送套餐能力组合，只有显式 `{"network_capability_ids":[]}` 表示不限定范围。仅接受当前套餐已开放的能力 ID，重复、未知或越出套餐的能力返回 422，且不产生订购。NEF 仍从认证账号确认本地权益和通知归属，但外发 `subscriberId` 使用固定值；不接受场景请求体覆盖该字段。
 
@@ -383,14 +384,19 @@ X-NEF-Event-ID: sub_<本次通知标识>
 {
   "callback_url": "http://<实际IP:端口>/business/v1/service-plans",
   "token_env": null,
-  "account_ids": ["1", "2", "3"],
+  "account_ids": null,
+  "notify_plans": null,
+  "discount": 0.8,
+  "reset_partner_plans_on_start": false,
   "plan_prices": {
     "scene:robot_patrol": 19.9
   }
 }
 ```
 
-以上价格只用于说明配置结构，正式测试前替换为双方确认值。其他价格键为 `scene:traffic_flow_detection`、`scene:collaborative_tracking`；旧套餐用 `capability_package:<内部套餐ID>`。缺少某项价格时不会自动发零元，返回 `price_not_configured`。账号不在显式 `account_ids` 列表时不通知。
+`account_ids=null` 允许所有本地账号通知；数组仅允许指定账号，空数组不发送。`notify_plans=null` 通知所有套餐；数组按完整价格键限制，例如 `["scene:collaborative_tracking"]`。旧套餐键为 `capability_package:<内部套餐ID>`。
+
+`discount` 必须为有限数且 `0<d<=1`，配置后价格为所选能力目录单价之和乘折扣，四舍五入保留两位。全选月价：机器狗 115.68、车流量 119.76、端网协同 119.6。`GET /api/v1/services` 返回全选 `price` 和 `discount`；不配置折扣时回退 `plan_prices`，缺失固定价格则 `price_not_configured`，不自动报价为零。
 
 带凭证的非回环地址必须用 HTTPS；当天获准局域网测试可配置不带凭证的 HTTP，仍会明文发送套餐和 `subscriberId`。地址不允许内嵌用户名/密码、query 或 fragment。不从浏览器传入地址或密钥，不修改现有 Tunnel。
 
@@ -402,12 +408,16 @@ NEF 先记录本地开通权益，再同步尝试通知。通知失败不撤销�
 
 | `notification.status` | 含义 |
 |---|---|
-| `delivered` | 收到 HTTP 2xx；只确认 HTTP 送达，不代表对方业务入库 |
+| `delivered` | HTTP 2xx，或约定的 400/2053 已存在、DELETE 404/2051 不存在；不证明新价格已覆盖旧套餐 |
 | `not_configured` | 未设置回调地址、账号未启用或价格未配置；未发送 |
 | `failed` | 配置无效、缺凭据、连接/超时/3xx/4xx/5xx 或响应超限 |
-| `not_applicable` | 本次只订原子工具，没有套餐通知 |
+| `not_applicable` | 只订原子工具，或套餐不在 notify_plans 中 |
 
-状态记录含 `event_id`、`account_id`、`plan_id`、`status`、`code`、`attempts`、`http_status`、`last_attempt_at`，不返回回调 URL 或任何密钥。配置失败的具体 `code` 可为 `not_configured`、`account_not_enabled`、`price_not_configured`、`invalid_config`、`callback_key_missing`；实际发送失败为 `callback_failed`。
+状态记录含 `event_id/account_id/plan_id/status/code/attempts/http_status/last_attempt_at`，并新增 `action=create|delete`、`price`、`capability_ids`、`request={method,path,headers,body}`、`response={http_status,body}`。request 不含 host 或 Authorization；response 保留最多 64 KiB 的实际回包，已知配置 token 与 host 会脱敏，不展示上游凭据。仍应避免对端将其它秘密写入业务响应。记录只允许所属账号读取。
+
+POST 400 且顶层 `errorCode=2053` 记 `delivered/already_exists`；DELETE 404 且 `errorCode=2051` 记 `delivered/not_found`。其它 4xx 不冒充成功。配置代码为 `not_configured/account_not_enabled/price_not_configured/invalid_config/callback_key_missing`，范围过滤为 `plan_not_enabled`，实际发送失败为 `callback_failed`。
+
+页面客户文案仅显示“订购完成”“订购完成，已同步至合作平台”或“已取消开通”。事件编号、HTTP 状态和重试按钮在 `?ops=1` 时显示，这个查询参数仅控制 UI，不提供额外权限。
 
 两个运维/页面接口均使用所属账号的 `Authorization: Bearer <NEF账号Key>`，公网另加 Access 机器凭据：
 
@@ -421,6 +431,22 @@ NEF 先记录本地开通权益，再同步尝试通知。通知失败不撤销�
 请用重试接口，不要用“再订购一次”代替重试：后者创建新的事件标识。网络超时可能发生在对方已保存之后，因此仅靠 NEF 重试不能保证 exactly-once。对方需提供成功/失败响应示例；若 HTTP 200 内还有业务失败码，需要另补响应解析规则，当前不猜测。
 
 全进程最多保留 1000 条内存通知，没有后台自动重试或持久队列；重启会丢失记录和未送达事件。它只适合本次约定的短期联调。
+
+### 取消开通与启动重置
+
+页面账号发送 `DELETE /api/v1/services/{scene_id}/subscribe`，需账号 Key，未开通返回 404“该场景尚未开通”。NEF 先删除本地权益，再发 `DELETE {callback_url}/{planId}?subscriberId=subscriber-001`，无正文，带同样的事件/幂等头。响应为 `{service_id,subscribed:false,account,notification}`。通知失败不恢复权益；在运维视图重试原 delete 事件。
+
+所有账号外发订购者与套餐 ID 都相同，因此取消影响农场侧同一测试套餐；其它本地账号的权益不会随之清除。这不是多用户生产语义。不要重试已经被后续开通/取消替代的历史通知。
+
+固定 planId：
+
+| 场景 | planId |
+|---|---|
+| robot_patrol | 36b3d800-2774-5e2d-a647-c26194fba4ae |
+| traffic_flow_detection | 896e300c-72cf-5c47-8801-fa39c7ff207b |
+| collaborative_tracking | 7e49ca9c-d2b9-57a3-b8d0-f956041d215a |
+
+另一台电脑的版本每次启动自动 DELETE 三个套餐。本机同步版为避免普通重启误删对端数据，采用 **`subscriptions.reset_partner_plans_on_start=false` 默认关闭**；明确需要清理时设 true，下次启动按相同取消规则逐项发送并打印 `Partner plan reset scene:xxx: HTTP ...`。仍受 account_ids、notify_plans、callback_url 和凭据配置约束，空 account_ids 不发送。该操作不启动本地订阅，也不证明对端业务数据已重建。
 
 ### 10.5 本次验收清单
 

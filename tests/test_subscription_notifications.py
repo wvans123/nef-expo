@@ -166,11 +166,12 @@ def test_only_explicitly_selected_network_capabilities_are_sent(client, peer, mo
     plan = body["servicePlan"]
     assert set(plan) == {"planId", "showName", "description", "price", "networkCapabilities"}
     expected = [
-        {"capabilityName": cid, "showName": server.CAP_INDEX[cid].name, "description": server.CAP_INDEX[cid].description}
+        {"capabilityName": cid, "showName": server.CAP_INDEX[cid].name, "description": server.CAP_INDEX[cid].description,
+         "price": float(server.subscription_notifications.unit_price(cid))}
         for cid in payload["network_capability_ids"]
     ]
     assert plan["networkCapabilities"] == expected
-    assert all("price" not in cap for cap in plan["networkCapabilities"])
+    assert all(cap["price"] > 0 for cap in plan["networkCapabilities"])
     assert "sensing_fusion" not in [cap["capabilityName"] for cap in plan["networkCapabilities"]]
 
 
@@ -193,3 +194,66 @@ def test_invalid_selection_or_forged_subscriber_rejected_before_purchase(client,
     response = client.post("/api/v1/services/robot_patrol/subscribe", headers=account(client), json=payload)
     assert response.status_code == 422 and peer.requests == []
     assert client.get("/api/v1/integration/subscriptions?account_id=1").json()["scene_subscriptions"] == []
+
+
+def test_discount_prices_selected_capabilities_and_unsubscribe_deletes_at_partner(client, peer, monkeypatch, tmp_path):
+    configure(monkeypatch, tmp_path, peer, discount=0.8, account_ids=None)
+    headers = account(client, 'named-test-account')
+    scenes = client.get('/api/v1/services').json()['services']
+    assert [s['price'] for s in scenes] == [115.68, 119.76, 119.6]
+    assert all(s['discount'] == 0.8 for s in scenes)
+    event = client.post('/api/v1/services/robot_patrol/subscribe', headers=headers,
+                        json={'network_capability_ids': ['target_detection']}).json()['notification']
+    assert event['price'] == 15.92 and event['action'] == 'create'
+    assert event['capability_ids'] == ['target_detection']
+    peer.add('DELETE', '/business/v1/service-plans/'+event['plan_id'], lambda r: json_response({'removed': True}))
+    response = client.delete('/api/v1/services/robot_patrol/subscribe', headers=headers)
+    assert response.status_code == 200 and response.json()['subscribed'] is False
+    assert response.json()['notification']['action'] == 'delete'
+    assert response.json()['notification']['status'] == 'delivered'
+    assert peer.requests[-1]['query'] == 'subscriberId=subscriber-001' and peer.requests[-1]['body'] == b''
+    assert client.delete('/api/v1/services/robot_patrol/subscribe', headers=headers).status_code == 404
+    assert client.post('/api/v1/services/robot_patrol/result', headers=headers).status_code == 403
+
+
+def test_notify_plans_limits_farm_notifications_to_listed_plans(client, peer, monkeypatch, tmp_path):
+    configure(monkeypatch, tmp_path, peer, discount=0.8, notify_plans=['scene:collaborative_tracking'])
+    headers = account(client)
+    event = client.post('/api/v1/services/robot_patrol/subscribe', headers=headers).json()['notification']
+    assert event['code'] == 'plan_not_enabled' and not peer.requests
+    assert client.post('/api/v1/services/collaborative_tracking/subscribe', headers=headers).json()['notification']['status'] == 'delivered'
+    assert len(peer.requests) == 1
+
+
+def test_operator_sees_request_reply_and_idempotent_partner_errors(client, peer, monkeypatch, tmp_path):
+    configure(monkeypatch, tmp_path, peer)
+    peer.add('POST', '/business/v1/service-plans', lambda r: (400, {}, b'{"errorCode":2053,"message":"SERVICE_PLAN_ALREADY_EXISTS"}'))
+    headers = account(client)
+    event = client.post('/api/v1/services/robot_patrol/subscribe', headers=headers).json()['notification']
+    assert event['status'] == 'delivered' and event['code'] == 'already_exists'
+    assert event['request']['method'] == 'POST' and event['response']['http_status'] == 400
+    assert event['response']['body']['errorCode'] == 2053
+    assert 'Authorization' not in event['request']['headers'] and peer.base_url not in json.dumps(event)
+    peer.add('DELETE', '/business/v1/service-plans/'+event['plan_id'], lambda r: (404, {}, b'{"errorCode":2051}'))
+    deleted = client.delete('/api/v1/services/robot_patrol/subscribe', headers=headers).json()['notification']
+    assert deleted['status'] == 'delivered' and deleted['code'] == 'not_found'
+
+
+def test_startup_reset_is_opt_in_and_deletes_every_scene_plan(peer, monkeypatch, tmp_path):
+    path = configure(monkeypatch, tmp_path, peer)
+    assert server.subscription_notifications.reset_partner_plans() == [] and peer.requests == []
+    cfg = json.loads(path.read_text());cfg['reset_partner_plans_on_start'] = True
+    path.write_text(json.dumps(cfg))
+    for sid in server.SCENES:
+        peer.add('DELETE', '/business/v1/service-plans/'+server.subscription_notifications.scene_plan_id(sid), lambda r: json_response({}))
+    with TestClient(server.app):
+        pass
+    assert len(peer.requests) == 3
+    assert all(r['method'] == 'DELETE' and r['query'] == 'subscriberId=subscriber-001' for r in peer.requests)
+
+
+@pytest.mark.parametrize('discount',[0,-1,1.1,True,'0.8',float('inf')])
+def test_invalid_discount_never_sends(client, peer, monkeypatch, tmp_path, discount):
+    configure(monkeypatch, tmp_path, peer, discount=discount)
+    result=client.post('/api/v1/services/robot_patrol/subscribe',headers=account(client)).json()
+    assert result['notification']['code']=='invalid_config' and peer.requests==[]

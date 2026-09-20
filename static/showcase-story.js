@@ -30,8 +30,8 @@
     return channels.filter(c=>serviceId?c.service_id===serviceId:!c.service_id);
   }
   function feedbackHandoff(channel,origin){
-    return {url:origin+channel.feedback_endpoint,receiver_key:channel.receiver_key,
-      json_example:channel.service_id==='traffic_flow_detection'?{final_result:'今天下午3点十字路口东南侧的车流量处于中等水平。'}:{kind:'status',text:'正在处理'},
+    return {url:origin+channel.feedback_endpoint,open_url:channel.open_endpoint?origin+channel.open_endpoint:null,receiver_key:channel.receiver_key,
+      json_example:{final_result:channel.service_id==='traffic_flow_detection'?'今天下午3点十字路口东南侧的车流量处于中等水平。':'正在处理'},
       media:'同一地址上传文件原始字节；Content-Type 使用 image/png、image/jpeg、image/webp、video/mp4 或 video/webm'};
   }
   const api={path,receipt,businessResult,feedbackChannels,feedbackHandoff};
