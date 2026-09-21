@@ -143,7 +143,16 @@ fs.mkdirSync(output,{recursive:true});
       const getCount=(await probe()).filter(r=>r.path==='/latest').length;
       await page.locator('#intent-input').fill('Test traffic intent');
       await page.locator('#intent-send').click();
-      await page.waitForFunction(()=>document.querySelector('#wb-feedback-text').textContent.includes('【本地验证回传】车流量中等'));
+      try{
+        await page.waitForFunction(()=>document.querySelector('#wb-feedback-text').textContent.includes('【本地验证回传】车流量中等'));
+      }catch(error){
+        console.error('Traffic feedback diagnostic',await page.evaluate(()=>({
+          scene:wb.sceneId,channel:wb.channel,busy:wb.feedbackBusy,invocation:wbInvocation(),
+          text:$('#wb-feedback-text').textContent,note:$('#wb-feedback-note').textContent,
+          receipt:$('#intent-result').textContent
+        })));
+        throw error;
+      }
       assert.equal(await page.evaluate(()=>wb.resultTimer),null);
       const trafficRequests=await probe();
       assert.deepEqual(JSON.parse(trafficRequests.findLast(r=>r.path==='/traffic-intent').body),{user_request:'Test traffic intent'});
@@ -191,7 +200,7 @@ fs.mkdirSync(output,{recursive:true});
       await page.waitForFunction(id=>wb.servers.find(s=>s.id===id)?.sync_status==='synced',serverId);
       assert.equal((await publishedTool()).name,'inspect_frame');
       const publication=JSON.parse((await probe()).findLast(r=>r.path===trfPath&&r.method==='POST').body);
-      assert.deepEqual(publication,{serverName,serverType:'Steamable HTTP',toolType:'third-party tool',
+      assert.deepEqual(publication,{serverName,serverType:'Streamable HTTP',toolType:'third-party tool',
         description:await page.locator('#wb-server-description').inputValue(),url:peer+'/mcp',serverStatus:'active'});
       assert.equal((await publishedTool()).serverName,serverName);
       assert.equal((await publishedTool()).toolType,'third-party tool');

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import asyncio
+import hashlib
 import secrets
 import time
 import json
@@ -96,6 +97,7 @@ _STATE_LOCK = threading.RLock()
 # fetched items and status belong to the authenticated account.
 _CATALOGS: dict[str, dict[str, Any]] = {}
 _ACCOUNTS: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
+_MARKET_SUBSCRIPTIONS: dict[str, dict[str, dict[str, Any]]] = {}
 
 
 def reset_state_for_tests() -> None:
@@ -103,6 +105,7 @@ def reset_state_for_tests() -> None:
     with _STATE_LOCK:
         _CATALOGS.clear()
         _ACCOUNTS.clear()
+        _MARKET_SUBSCRIPTIONS.clear()
 
 
 def _http_error(status_code: int, code: str, message: str) -> None:
@@ -741,7 +744,7 @@ def _trf_publication(server: dict[str, Any]) -> dict[str, Any]:
         )
     return {
         "serverName": server_name,
-        "serverType": "Steamable HTTP",
+        "serverType": "Streamable HTTP",
         "toolType": "third-party tool",
         "description": server.get("description", ""),
         "url": server["url"],
@@ -919,7 +922,12 @@ def _owned_tool_refs(account: str) -> set[str]:
 def _validate_package_steps(account: str, value: Any) -> list[dict[str, str]]:
     if not isinstance(value, list) or not 1 <= len(value) <= MAX_PACKAGE_STEPS:
         _http_error(422, "invalid_request", "steps 数量必须在 1 到 12 之间")
-    allowed = _existing_capability_keys() | _synced_catalog_ids(account) | _owned_tool_refs(account)
+    allowed = (
+        _existing_capability_keys()
+        | _synced_catalog_ids(account)
+        | _owned_tool_refs(account)
+        | _subscribed_external_tool_refs(account)
+    )
     result: list[dict[str, str]] = []
     seen: set[str] = set()
     for step in value:
@@ -1063,6 +1071,294 @@ def _local_schema_only(value: Any) -> bool:
     return not isinstance(value, list) or all(_local_schema_only(v) for v in value)
 
 
+def _external_tool_ref(server_id: str, tool_name: str) -> str:
+    return f"{server_id}:{tool_name}"
+
+
+def _external_mcp_name(server_id: str, tool_name: str) -> str:
+    digest = hashlib.sha256(tool_name.encode("utf-8")).hexdigest()[:10]
+    return f"external_{server_id}_{digest}"
+
+
+def _find_server_locked(server_id: str) -> dict[str, Any] | None:
+    for state in _ACCOUNTS.values():
+        server = state["servers"].get(server_id)
+        if server is not None:
+            return server
+    return None
+
+
+def _find_tool_locked(
+    server_id: str,
+    tool_name: str,
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    server = _find_server_locked(server_id)
+    if server is None:
+        return None
+    tool = next(
+        (
+            item
+            for item in server.get("tools", [])
+            if isinstance(item, dict) and item.get("name") == tool_name
+        ),
+        None,
+    )
+    if tool is None:
+        return None
+    return server, tool
+
+
+def _market_tool_snapshot(
+    server: dict[str, Any],
+    tool: dict[str, Any],
+    *,
+    available: bool,
+) -> dict[str, Any]:
+    tool_id = _external_tool_ref(server["id"], tool["name"])
+    return {
+        "id": tool_id,
+        "server_id": server["id"],
+        "serverName": server.get("serverName", server["name"]),
+        "name": tool["name"],
+        "description": tool.get("description", ""),
+        "inputSchema": copy.deepcopy(tool["inputSchema"]),
+        "mcp_name": _external_mcp_name(server["id"], tool["name"]),
+        "toolType": "third-party tool",
+        "price": 0,
+        "billing": "demo_free",
+        "available": bool(available),
+    }
+
+
+def _all_market_tools_locked(*, published_only: bool) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for state in _ACCOUNTS.values():
+        for server in state["servers"].values():
+            if published_only and server.get("publication_status") != "published":
+                continue
+            for tool in server.get("tools", []):
+                if isinstance(tool, dict) and isinstance(tool.get("name"), str):
+                    items.append(
+                        _market_tool_snapshot(
+                            server,
+                            tool,
+                            available=server.get("publication_status") == "published",
+                        )
+                    )
+    return items
+
+
+def market_tools() -> list[dict[str, Any]]:
+    """Return the secret-free projection of all published external tools."""
+    with _STATE_LOCK:
+        return copy.deepcopy(_all_market_tools_locked(published_only=True))
+
+
+def market_tool_by_mcp_name(mcp_name: str) -> dict[str, Any] | None:
+    with _STATE_LOCK:
+        item = next(
+            (
+                candidate
+                for candidate in _all_market_tools_locked(published_only=False)
+                if candidate["mcp_name"] == mcp_name
+            ),
+            None,
+        )
+        return copy.deepcopy(item) if item is not None else None
+
+
+def _subscription_snapshot_locked(
+    account: str,
+    tool_id: str,
+) -> dict[str, Any] | None:
+    stored = _MARKET_SUBSCRIPTIONS.get(account, {}).get(tool_id)
+    if stored is None:
+        return None
+    try:
+        server_id, tool_name = tool_id.split(":", 1)
+    except ValueError:
+        result = copy.deepcopy(stored)
+        result["available"] = False
+        return result
+    found = _find_tool_locked(server_id, tool_name)
+    if found is None:
+        result = copy.deepcopy(stored)
+        result["available"] = False
+        return result
+    server, tool = found
+    return _market_tool_snapshot(
+        server,
+        tool,
+        available=server.get("publication_status") == "published",
+    )
+
+
+def market_subscriptions(account: str) -> list[dict[str, Any]]:
+    with _STATE_LOCK:
+        return [
+            snapshot
+            for tool_id in sorted(_MARKET_SUBSCRIPTIONS.get(account, {}))
+            if (snapshot := _subscription_snapshot_locked(account, tool_id)) is not None
+        ]
+
+
+def market_subscription(account: str, tool_id: str) -> dict[str, Any] | None:
+    with _STATE_LOCK:
+        return _subscription_snapshot_locked(account, tool_id)
+
+
+def subscribe_market_tool(account: str, tool_id: str) -> dict[str, Any]:
+    with _STATE_LOCK:
+        try:
+            server_id, tool_name = tool_id.split(":", 1)
+        except ValueError:
+            _http_error(422, "invalid_tool_id", "tool_id 必须是 server_id:toolName")
+        found = _find_tool_locked(server_id, tool_name)
+        if found is None:
+            _http_error(404, "tool_not_found", "外部工具不存在")
+        server, tool = found
+        if server.get("publication_status") != "published":
+            _http_error(409, "tool_unavailable", "外部工具当前未发布")
+        record = _market_tool_snapshot(server, tool, available=True)
+        _MARKET_SUBSCRIPTIONS.setdefault(account, {})[tool_id] = record
+        return copy.deepcopy(record)
+
+
+def unsubscribe_market_tool(account: str, tool_id: str) -> None:
+    with _STATE_LOCK:
+        _MARKET_SUBSCRIPTIONS.get(account, {}).pop(tool_id, None)
+
+
+def _subscribed_external_tool_refs(account: str) -> set[str]:
+    with _STATE_LOCK:
+        return {
+            tool_id
+            for tool_id in _MARKET_SUBSCRIPTIONS.get(account, {})
+            if (
+                (snapshot := _subscription_snapshot_locked(account, tool_id))
+                is not None
+                and snapshot.get("available") is True
+            )
+        }
+
+
+def _remove_market_subscriptions_for_server_locked(server_id: str) -> None:
+    prefix = f"{server_id}:"
+    for subscriptions in _MARKET_SUBSCRIPTIONS.values():
+        for tool_id in list(subscriptions):
+            if tool_id.startswith(prefix):
+                subscriptions.pop(tool_id, None)
+
+
+async def call_external_tool(
+    account: str,
+    mcp_name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    with _STATE_LOCK:
+        tool_item = next(
+            (
+                item
+                for item in _all_market_tools_locked(published_only=False)
+                if item["mcp_name"] == mcp_name
+            ),
+            None,
+        )
+        if tool_item is None:
+            _http_error(404, "tool_not_found", "外部工具不存在")
+        subscription = _subscription_snapshot_locked(account, tool_item["id"])
+        if subscription is None:
+            _http_error(403, "subscription_required", "请先订阅该外部工具")
+        if not subscription.get("available"):
+            _http_error(409, "tool_unavailable", "外部工具当前未发布")
+        server_id, tool_name = tool_item["id"].split(":", 1)
+        found = _find_tool_locked(server_id, tool_name)
+        if found is None:
+            _http_error(404, "tool_not_found", "外部工具不存在")
+        server, tool = found
+        try:
+            config = _load_config()
+        except _ConfigError:
+            _http_error(503, "invalid_config", "网络调用配置无效")
+        approved = _approved_server(config, server["url"])
+        if approved is None:
+            _http_error(
+                403,
+                "not_approved",
+                "外部 MCP 服务器不在 registry.mcp_servers allowlist 中",
+            )
+        if not _local_schema_only(tool["inputSchema"]):
+            _http_error(422, "unsupported_schema", "外部工具 schema 含不支持的外部引用")
+        try:
+            Draft202012Validator(tool["inputSchema"]).validate(arguments)
+        except Exception:
+            _http_error(422, "invalid_arguments", "arguments 不符合外部工具 inputSchema")
+        current = _find_server_locked(server_id)
+        if current is None or current.get("publication_status") != "published":
+            _http_error(409, "tool_unavailable", "外部工具当前未发布")
+        if current.get("gateway_busy"):
+            _http_error(409, "busy", "外部工具正在处理另一项调用")
+        server_url = current["url"]
+        token_env = approved.get("token_env")
+        current["gateway_busy"] = True
+        current["last_call"] = {
+            "caller": f"account:{account}",
+            "tool": tool_name,
+            "status": "calling",
+            "via": "NEF northbound MCP",
+        }
+    started = time.monotonic()
+    outcome = "failed"
+    try:
+        async with asyncio.timeout(30):
+            session = await _start_mcp(server_url, token_env)
+            response, _ = await _mcp_request(
+                server_url,
+                token_env,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": arguments},
+                },
+                expected_id=2,
+                session_id=session,
+            )
+            result = _result_from_message(response)
+            if not isinstance(result.get("content"), list):
+                raise _RemoteSchemaFailure("invalid_call_result")
+            if "isError" in result and not isinstance(result["isError"], bool):
+                raise _RemoteSchemaFailure("invalid_call_result")
+            outcome = "tool_error" if result.get("isError") else "returned"
+            return copy.deepcopy(result)
+    except _RemoteFailure as exc:
+        status, message = _upstream_failure_status(exc.code)
+        _http_error(status, exc.code, message)
+    except _RemoteSchemaFailure as exc:
+        _http_error(502, exc.code, "外部 MCP 服务器响应未通过协议或调用结果校验")
+    except TimeoutError:
+        _http_error(504, "upstream_timeout", "外部 MCP 工具调用超时，执行结果可能未知")
+    finally:
+        with _STATE_LOCK:
+            current = _find_server_locked(server_id)
+            if current is not None:
+                current["gateway_busy"] = False
+                last_call = current.get("last_call")
+                if isinstance(last_call, dict):
+                    last_call.update(
+                        status=outcome,
+                        elapsed_ms=round((time.monotonic() - started) * 1000),
+                    )
+
+
+def call_external_tool_sync(
+    account: str,
+    mcp_name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    return asyncio.run(call_external_tool(account, mcp_name, arguments))
+
+
 def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> APIRouter:
     """Build the isolated router using the host application's auth function."""
     router = APIRouter()
@@ -1185,6 +1481,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                     if server.get("publication_status") != "published":
                         continue
                     for tool in server["tools"]:
+                        market = _market_tool_snapshot(server, tool, available=True)
                         items.append({
                             "id": server["id"] + ":" + tool["name"],
                             "name": tool["name"], "description": tool.get("description", ""),
@@ -1192,6 +1489,9 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                             "server_id": server["id"], "inputSchema": copy.deepcopy(tool["inputSchema"]),
                             "serverName": server.get("serverName", server["name"]),
                             "toolType": "third-party tool",
+                            "mcp_name": market["mcp_name"],
+                            "price": 0,
+                            "billing": "demo_free",
                         })
                 for package in state["packages"].values():
                     if package.get("publication_status") == "published":
@@ -1201,6 +1501,40 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                             "source": "local", "steps": copy.deepcopy(package["steps"]),
                         })
             return {"items": items}
+
+    @router.get("/api/v1/network/market/subscriptions")
+    async def list_market_subscriptions(
+        authorization: str | None = Header(default=None),
+    ):
+        _, identity = auth(authorization, None)
+        account = _account_from_record(identity)
+        return {"subscriptions": market_subscriptions(account)}
+
+    @router.post("/api/v1/network/market/subscriptions")
+    async def subscribe_market(
+        payload: dict[str, Any] = Body(...),
+        authorization: str | None = Header(default=None),
+    ):
+        _, identity = auth(authorization, "capabilities:invoke")
+        if not isinstance(payload, dict) or set(payload) != {"tool_id"}:
+            _http_error(422, "invalid_request", "请求仅允许 tool_id 字段")
+        tool_id = _require_text(payload.get("tool_id"), "tool_id", MAX_ID_LENGTH)
+        account = _account_from_record(identity)
+        subscribe_market_tool(account, tool_id)
+        return {"subscribed": True, "tool_id": tool_id, "billing": "demo_free"}
+
+    @router.delete("/api/v1/network/market/subscriptions")
+    async def unsubscribe_market(
+        payload: dict[str, Any] = Body(...),
+        authorization: str | None = Header(default=None),
+    ):
+        _, identity = auth(authorization, "capabilities:invoke")
+        if not isinstance(payload, dict) or set(payload) != {"tool_id"}:
+            _http_error(422, "invalid_request", "请求仅允许 tool_id 字段")
+        tool_id = _require_text(payload.get("tool_id"), "tool_id", MAX_ID_LENGTH)
+        account = _account_from_record(identity)
+        unsubscribe_market_tool(account, tool_id)
+        return {"subscribed": False, "tool_id": tool_id, "billing": "demo_free"}
 
     @router.post("/api/v1/network/servers")
     async def register_network_server(
@@ -1730,6 +2064,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                     "withdraw_required",
                     "TRF 记录可能仍存在，请先重试撤回并确认缺席",
                 )
+            _remove_market_subscriptions_for_server_locked(server_id)
             del state["servers"][server_id]
         return {"deleted": True, "id": server_id}
 

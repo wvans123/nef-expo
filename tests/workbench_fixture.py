@@ -18,7 +18,7 @@ sys.path.insert(0,str(ROOT))
 
 class Peer(BaseHTTPRequestHandler):
     requests=[]
-    servers={name:{'serverName':name,'serverType':'Steamable HTTP','toolType':kind,
+    servers={name:{'serverName':name,'serverType':'Streamable HTTP','toolType':kind,
                    'description':'本地 TRF 服务登记，未发现工具','url':'http://127.0.0.1/mcp','serverStatus':'active'}
              for name,kind in [('fixture-nf','nf tool'),('fixture-computing','computing tool'),
                                ('fixture-sensing','sensing tool'),('fixture-third-party','third-party tool')]}

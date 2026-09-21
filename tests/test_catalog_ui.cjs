@@ -57,7 +57,7 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {
       await page.route('**/api/v1/network/trf/servers',async route=>{
         started.resolve();await release.promise;
         await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({status:'loaded',servers:[
-          {serverName:'stale-account-server',serverType:'Steamable HTTP',toolType:'third-party tool',description:'stale',url:'http://127.0.0.1/mcp',serverStatus:'active'}
+          {serverName:'stale-account-server',serverType:'Streamable HTTP',toolType:'third-party tool',description:'stale',url:'http://127.0.0.1/mcp',serverStatus:'active'}
         ]})});
       });
       await page.evaluate(()=>{window.pendingTrf=document.querySelector('#wb-refresh-trf').onclick();});

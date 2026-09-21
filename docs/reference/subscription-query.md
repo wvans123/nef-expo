@@ -43,7 +43,7 @@
 
 原有名为 `alice` 的账号可以直接传 `account_id=alice`，不会自动映射到编号 `1`。`1` 和 `01` 不同，英文字母大小写有区别。不存在的编号返回 404，不会自动创建账号或代替它查第一个账号。
 
-**存储说明：** 订阅数据存于 `server.py` 的 `API_KEYS` 账号记录；`ACCOUNT_KEYS` 将账号名映射到该记录。记录中的 `subscriptions`、`packages`、`scene_subscriptions` 和 `plan` 分别维护直订、旧套餐、场景及等级。浏览器只保存演示账号凭据，不是订阅数据源。当前没有数据库持久化；NEF 重启后，须重新注册相同编号并恢复订阅。未恢复账号时查询返回 404，重新注册但未订阅时返回 200 空列表。
+**存储说明：** 订阅数据存于 `server.py` 的 `API_KEYS` 账号记录；`ACCOUNT_KEYS` 将账号名映射到该记录。记录中的 `subscriptions`、`packages`、`scene_subscriptions` 和 `plan` 分别维护直订、旧套餐、场景及等级。第三方 MCP 工具的账号订阅另存于 network_registry.py 的内存状态，查询统一汇总至 external_tool_subscriptions。浏览器只保存演示账号凭据，不是订阅数据源。当前没有数据库持久化；NEF 重启后，须重新注册相同编号并恢复订阅。未恢复账号时查询返回 404，重新注册但未订阅时返回 200 空列表。
 
 不要在联调中途重启 NEF；不要使用多 worker 部署，因为各进程内存不共享。场景套餐支持取消开通及对端 DELETE 通知，详见第 10 节；原子能力和旧基础套餐仍无取消接口。此版本没有订阅有效期或订阅查询增量游标。代码支持单套餐订购 / 取消通知和手动重试，不是完整订阅变更事件流。
 
@@ -94,6 +94,7 @@ CF-Access-Client-Secret: <单独交付>
 | `scene_subscriptions` | string[] | 独立开通的场景服务 ID |
 | `tools` | object[] | 可供“我的工具”展示的原子工具及参数定义；不混入未订阅的按次付费工具 |
 | `scene_services` | object[] | 已开通场景、内部组成和其支持的入口 |
+| `external_tool_subscriptions` | object[] | 已订阅第三方 MCP 工具；含 available 可用标志和准确 mcp_name，不混入 purchased_packages |
 | `purchased_packages` | object[] | 农场平台首选：合并已购场景套餐和旧能力套餐的详情；不包含未购商品、纯等级赠送能力或编排草稿 |
 
 ### purchased_packages 每项
@@ -109,7 +110,13 @@ CF-Access-Client-Secret: <单独交付>
 | `intent_example` | string 或 null | 场景的意图请求示例；旧能力套餐为 null |
 | `tool` | object 或 null | 支持 Tool 的场景定义 `{name, description, inputSchema}`；其他为 null |
 
-此处“已购”指演示账号已开通的权益，不表示真实支付成功，也没有订单号或到期日。网络目录中的未购套餐和自助编排保存的定义不进入此列表；当前没有导入目录商品的购买接口，不能把同步目录当成已经购买。场景开通后组件可以用于该场景，但 `standalone_entitled=false` 表示组件不能因为该场景开通就被当成独立获权工具。
+此处“已购”指演示账号已开通的权益，不表示真实支付成功，也没有订单号或到期日。网络目录中的未购套餐和自助编排保存的定义不进入此列表；TRF 查询记录没有购买接口，不能把同步目录当成已经购买；显式发布的第三方 MCP 工具支持独立演示订阅，记录在 external_tool_subscriptions。场景开通后组件可以用于该场景，但 `standalone_entitled=false` 表示组件不能因为该场景开通就被当成独立获权工具。
+
+### external_tool_subscriptions 每项
+
+`id` 是 serverId:toolName，另含 `server_id/serverName/name/description/inputSchema/mcp_name/toolType/price/billing/available`。`mcp_name` 是经 NEF `/mcp` 调用的准确名称，不应以原工具 name 替代。没有订阅返回 []；提供方下架后保留记录但 available=false，删除登记清理记录。当前 price=0、billing=demo_free，不增加估算月费。
+
+此字段按查询的精确账号独立返回，不携带上游 URL、来源账号或密钥；无 Key 编号查询仍仅供获准演示网，调用必须另带本账号 Key 与有效订阅。订阅/取消的唯一接口契约见 [第三方工具订阅](network-catalog.md#5-第三方工具的账号订阅与调用)，该操作不触发农场套餐通知或 TRF 发布。
 
 ### tools 每项
 
@@ -192,7 +199,8 @@ CF-Access-Client-Secret: <单独交付>
     }
   ],
   "scene_services": [],
-  "purchased_packages": []
+  "purchased_packages": [],
+  "external_tool_subscriptions": []
 }
 ```
 

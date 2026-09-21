@@ -19,7 +19,7 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 
 双向开放只填服务名称（`serverName`）、描述（`description`）、MCP 地址（`url`）。默认名称 `patrol-car-managementx`，描述为巡检任务、预检测开关、图像采样频率管理，URL 留空。名称最长 128 字符，匹配 `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`，本进程内不可与其他登记重名。
 
-点击“连接并发现工具”只登记、握手、读取工具；发现失败也保留“删除记录”。点击“发布”才上首页并发给 TRF；“取消发布”先本地下架，再撤回远端。远端撤回尚未确认时保留记录与重试入口，不能直接删除而丢失撤回信息。
+表单“连接并发现工具”负责首次登记、握手、读取工具；已有记录的“重新发现工具”只重读该服务的工具，需先取消发布再操作；发现失败也保留“删除记录”。点击“发布”才上首页并发给 TRF；“取消发布”先本地下架，再撤回远端。远端撤回尚未确认时保留记录与重试入口，不能直接删除而丢失撤回信息。
 
 普通页面隐藏 TRF 管理。`/?ops=1#afreg` 中“TRF 服务登记 · 运维”可手动查询四类服务；此参数只是显示开关，接口仍要求账号 Key 与 `af:register` scope。页面的 30 秒本地刷新不自动请求 TRF。
 
@@ -46,7 +46,7 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 ```json
 {
   "serverName": "patrol-car-managementx",
-  "serverType": "Steamable HTTP",
+  "serverType": "Streamable HTTP",
   "toolType": "third-party tool",
   "description": "管理巡检小车，如在巡检小车上启动或关闭巡检任务、配置目标预检测开关、图像采样频率等。",
   "url": "http://<巡检小车IP>:<端口>/mcp",
@@ -54,7 +54,7 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 }
 ```
 
-`serverType` 按本次给定枚举原样发送 `Steamable HTTP`；对方若修正枚举，再集中修改 `_trf_publication()`。三项固定值由后端生成，前端不能覆盖。不附加工具数组、source_account、NEF Key 或套餐字段。
+`serverType` 按更正后的枚举发送 `Streamable HTTP`，由 `_trf_publication()` 生成。三项固定值由后端生成，前端不能覆盖。不附加工具数组、source_account、NEF Key 或套餐字段。
 
 ### 查询与确认
 
@@ -90,13 +90,33 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 
 发现失败、未发布、确认撤回后的记录可删除；open 登记可由具备该 scope 的其他账号管理，私有登记仅所有者可管理。
 
-## 5. 旧目录兼容边界
+## 5. 第三方工具的账号订阅与调用
+
+发布决定所有账号能否在商城看到工具；订阅决定当前账号能否经 NEF 调用。点击商城工具卡可“订阅工具”，订阅后可“取消订阅”或“去 MCP 调用”；订阅与鉴权页另列第三方工具订阅。不同账号互不继承，PRO/MAX 与发布者身份均不自动开通。价格暂为演示免费（price=0、billing=demo_free），不增加月费用，不代表商业定价。
+
+| 方法 / 路径 | 请求与响应 |
+|---|---|
+| GET `/api/v1/network/market/subscriptions` | 账号 Bearer；`{subscriptions:[...]}`，只读当前账号 |
+| POST `/api/v1/network/market/subscriptions` | 账号 Bearer + capabilities:invoke；`{"tool_id":"<公开市场items中的id>"}`，订阅已发布的实际工具，幂等 |
+| DELETE `/api/v1/network/market/subscriptions` | 同一 Key/scope 和正文，取消当前账号该工具权益，已下架也可取消 |
+| GET `/api/v1/auth/info` | 新增 external_tool_subscriptions；不混入原基础能力列表 |
+| GET `/api/v1/integration/subscriptions?account_id=1` | 在原 1.1 响应追加 external_tool_subscriptions；演示编号查询，无 Key；不改变 purchased_packages |
+
+订阅写接口只接受 tool_id，不接受 account、价格或上游 URL，返回 `{tool_id,subscribed,billing:"demo_free"}`。记录字段含 id、server_id、serverName、name、description、inputSchema、mcp_name、toolType、price、billing、available，不含上游 URL、来源账号或凭据。
+
+公开市场工具项新增 mcp_name、price、billing。调用者通过 NEF `/mcp` 初始化和 tools/list，找到准确 mcp_name 后 tools/call；`/api/v1/mcp/tools/call` 兼容入口做相同校验。名称按服务与原工具名生成，避免不同服务同名冲突。tools/list 中已发布外部工具附 subscribed 标志；可见不代表有权调用。参数按实际发现的 inputSchema 校验，返回上游原始 CallToolResult，isError 不被改写；不会自动执行或重试有副作用的工具。
+
+服务端逐项校验账号、mcp:tools、此工具订阅、仍已发布、实际工具存在、URL 允许列表和参数；任一不满足均不向外部发起调用。JSON-RPC tools/call 通知不执行工具。NEF 使用服务端配置的 MCP 凭据连接上游，不透传消费者 Key。独立 network_clients 网关继续按原网内授权，不能用商城订阅替代它。
+
+取消订阅拒绝后续调用；提供方下架时保留订阅但 available=false，重发同一工具可恢复可用；删除服务登记会清理其订阅。正在执行的请求不承诺被撤销。已订阅且可用的外部工具可进入编排能力池，保存套餐仍只是声明。订阅只保存在 NEF 进程内，重启清空；不通知农场、不重复发布 TRF、不创造真实订单。
+
+## 6. 旧目录兼容边界
 
 旧 `catalog_url`、`publish_url`、`withdraw_url` 仅为已有部署保留，不是本次 TRF MCP Server 契约。旧 `/catalog/refresh` 导入 `items` 工具/套餐快照；旧 `/catalog/publication` 与 `/catalog/publish` 接受 `capability_ids` / `service_ids`，生成 `type=nef_catalog_publication` 元数据，发送到旧 publish_url。它们不会发送到新的 trf_mcp_servers_url，活动页已移除旧目录导出入口。
 
 显式旧 publish_url 模式保留 `mcp_server_registration`（NEF 代理地址 + tools）、`network_package_declaration` 及 POST withdraw_url 撤回，`accepted:true` 才确认。新配置模式自助套餐仅本地发布，`sync_status=not_required`。不要把旧报文发到 `/trf/api/v1/mcp-servers`。
 
-## 6. 联调与维护验证
+## 7. 联调与维护验证
 
 1. 同事提供实际 TRF 集合地址、GET 完整回包、认证方式和重复 serverName 的行为。
 2. 将巡检小车地址加入允许列表，页面填写三个字段并发现真实工具。
@@ -104,3 +124,5 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 4. 真实工具调用单独验收；查询 TRF 不授予订阅或执行权限。
 
 `tests/test_trf_mcp_registry.py` 覆盖 HTTP 契约和失败边界；`tests/test_integration_ui.cjs` 与 `tests/test_catalog_ui.cjs` 在 `tests/workbench_fixture.py --port 8071` 隔离服务上验证桌面/手机页面，后者现在验证运维查询而非旧目录导出。截图在忽略上传的 `.runtime/` 中。测试不访问真实 TRF 或正式 8069 账号。
+
+账号订阅验收由 `tests/test_market_subscriptions.py` 与 `tests/test_market_subscriptions_ui.cjs` 覆盖：三个账号隔离、订阅/取消、两个 MCP 入口、真实本地 AF 回执、下架和删除；后者同样只用隔离测试端口。

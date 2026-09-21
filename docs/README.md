@@ -17,10 +17,10 @@
 - [基础能力标准复核](../README.md#六能力目录与标准复核)：逐项分类及官方依据；产品接口不能等同于标准北向 API。
 - [智能推荐配置](../config/composer.example.json)：远程服务、模型和 Responses 协议沿用既有配置，项目推理档位降为 low；Key 使用服务端环境变量。能力池提示词、可选约束、新错误分类及运行代码加载边界见[演示手册](demo-playbook.md#智能编排准备与现场操作)。
 - [场景接口对接说明](reference/integration.md)：无 Key 共享回传、自查、状态 / 数据 / 后端媒体接收、机器狗 text/plain Intent 与 GET/POST 结果拉取；接口格式来自使用者记录，本机仅做模拟对端验证。
-- [套餐订购通知与订阅查询](reference/subscription-query.md)：固定 `subscriberId=subscriber-001`、折扣计价、取消 DELETE、通知过滤、2053/2051、请求回包与可选启动重置；后端兼容空选择，页面至少选一项。
+- [套餐订购通知与订阅查询](reference/subscription-query.md)：固定 `subscriberId=subscriber-001`、折扣计价、取消 DELETE、通知过滤、2053/2051、请求回包与可选启动重置；后端兼容空选择，页面至少选一项；查询另含 external_tool_subscriptions。
 - [统一对接配置](../config/integration.example.json)：`start.py` 自动生成本地配置，集中设置订购、折扣、开放 MCP、TRF 发布及 Intent / 结果地址；已有 local 文件不覆盖、不上传。
 - [旧订购通知配置](../config/subscription.example.json)：兼容独立配置模式，新部署优先使用统一文件。
-- [TRF MCP Server 契约与能力映射](reference/network-catalog.md)：六字段 POST、集合 GET、按名 DELETE、删除本地登记、四类服务与 NF 能力/套餐的边界；实现已对齐本次约定，真实 IP/回包待提供。
+- [TRF MCP Server 契约与能力映射](reference/network-catalog.md)：六字段 POST、集合 GET、按名 DELETE、删除本地登记、四类服务与 NF 能力/套餐的边界、第三方工具账号订阅及北向 MCP 调用；实现已对齐本次约定，真实 IP/回包待提供。
 - [农场平台联调](reference/farm-integration.md)：套餐查询、无 Key MCP 登记发现、显式发布/撤回及网络代理调用；同一接入流程用于巡检小车，真实地址待提供。
 - [网络目录配置](../config/registry.example.json)：运维侧 TRF MCP 集合地址和独立 NEF 代理入口、内部调用方授权及 MCP 服务允许列表示例；不含实际密钥。
 - [配置模板](../config/bridge.example.json)：从接口契约配套维护的可复制配置；示例域名不可用，必须按实际接口替换。

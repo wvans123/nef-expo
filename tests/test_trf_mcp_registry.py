@@ -28,7 +28,7 @@ def trf_server(
 ) -> dict:
     return {
         "serverName": name,
-        "serverType": "Steamable HTTP",
+        "serverType": "Streamable HTTP",
         "toolType": tool_type,
         "description": description,
         "url": url,

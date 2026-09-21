@@ -183,7 +183,7 @@ th{background:var(--card);color:var(--muted)}
 </style>
 <link rel="stylesheet" href="/static/workbench.css?v=20260921-2">
 <script src="/static/showcase-story.js?v=20260921-1"></script>
-<script src="/static/showcase-mcp.js?v=20260909-1"></script>
+<script src="/static/showcase-mcp.js?v=20260921-3"></script>
 </head>
 <body>
 
@@ -548,10 +548,11 @@ window.doSubscribe = async (kind, id) => {
 
 /* ============ 我的订阅 ============ */
 async function renderSubs(){
-  const el = $('#subs-content');
+  const epoch=wb.epoch,el = $('#subs-content');
   if(!apiKey()){ el.innerHTML = '<p class="muted">请先在顶栏「注册账号」——注册即签发 API Key，订阅只是记录权益。</p>'; return; }
   try{
     const info = await api('/api/v1/auth/info');
+    if(epoch!==wb.epoch)return;
     wbRenderSceneSubscriptions(info);
     const subs = info.subscribed_capabilities, direct = info.direct_subscriptions||[], entitled = info.entitled_capabilities||[];
     const capCards = entitled.map(cid=>{
@@ -597,7 +598,9 @@ async function renderSubs(){
       showModal(`<h2>${capability.icon||'⚙️'} ${esc(capability.name)}</h2><p>${esc(capability.description)}</p><p class="muted">${esc(capability.unit_price)} · 当前账号已可用</p><div class="wb-modal-actions"><button id="wb-subs-detail-close">关闭</button></div>`);
       $('#wb-subs-detail-close').onclick=hideModal;
     });
+    wbRenderToolSubscriptions(info,el);
   }catch(e){
+    if(epoch!==wb.epoch)return;
     if(e && e.status === 401){
       el.innerHTML = `<div class="agent-block" style="border-left-color:var(--red)">
         <b class="err">API Key 已失效</b>
@@ -959,7 +962,7 @@ $('#term-send').onclick = ()=>termRequest($('#term-input').value.trim());
 $('#term-input').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#term-send').click(); });
 </script>
 <script src="/static/purchase.js?v=20260921-1"></script>
-<script src="/static/workbench.js?v=20260921-2"></script>
+<script src="/static/workbench.js?v=20260921-3"></script>
 <script src="/static/composer.js?v=20260917-3"></script>
 </body>
 </html>

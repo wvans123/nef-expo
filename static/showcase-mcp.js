@@ -95,7 +95,7 @@
       const service=services.find(s=>s.tool_name===tool.name);
       const cap=caps.find(c=>c.id===tool.name);
       return {tool,serviceId:service?.id||'',capId:cap?.id||tool.name,
-        title:service?.name||cap?.name||tool.name,group:service?'scene':'capability'};
+        title:service?.name||cap?.name||tool.title||tool.name,group:service?'scene':'capability'};
     }).filter(row=>!needle||(row.title+' '+row.tool.name+' '+(row.tool.description||'')).toLowerCase().includes(needle));
   }
   function selectedBusiness(selected,services){

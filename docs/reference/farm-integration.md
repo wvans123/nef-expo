@@ -254,6 +254,8 @@ GET /api/v1/network/servers
 
 返回 `{"servers":[...]}`，包含当前账号私有登记及所有 `registered_via:open` 登记。查看 `registration_status`、`discovery_status`、`publication_status`、`sync_status`、`tools`、`gateway_path` 和调用后的 `last_call`。不存在独立 `GET /servers/{id}` 接口；从列表按 `id` 选择。公开首页读取 `/api/v1/network/market`，仅包含已发布内容，不暴露来源账号和上游 URL。
 
+消费端账号可在首页订阅发布的单个 MCP 工具，经北向 `/mcp` 使用；与下节网内代理的 network_clients 凭据分开。订阅/取消与准确 mcp_name 见 [第三方工具订阅](network-catalog.md#5-第三方工具的账号订阅与调用)。
+
 ## 7. 网络经 NEF 调用农场
 
 由网络侧客户端操作，不是用农场账号 Key。选择独立 NEF 代理链路时，使用登记列表的 gateway_path 拼接 NEF Base URL，公网 Access 头仍必需。新 TRF 的 url 是外部 MCP 原始地址，直接访问它不经过下面的 NEF 代理鉴权：

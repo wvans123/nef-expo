@@ -50,6 +50,20 @@ class PurchasedPackage(BaseModel):
     tool: SceneTool | None
 
 
+class ExternalToolSubscription(BaseModel):
+    id: str
+    server_id: str
+    serverName: str
+    name: str
+    description: str
+    inputSchema: dict[str, Any]
+    mcp_name: str
+    toolType: Literal["third-party tool"]
+    price: Literal[0] = 0
+    billing: Literal["demo_free"] = "demo_free"
+    available: bool
+
+
 class SubscriptionSnapshot(BaseModel):
     schema_version: Literal["1.1"] = "1.1"
     account_id: str = Field(description="Exact NEF demo account name, e.g. the string '1'.")
@@ -66,4 +80,8 @@ class SubscriptionSnapshot(BaseModel):
     purchased_packages: list[PurchasedPackage] = Field(
         description="Purchased scene services and legacy capability bundles with details; "
         "excludes unsold catalog entries, composition drafts and plan-only atomic grants."
+    )
+    external_tool_subscriptions: list[ExternalToolSubscription] = Field(
+        default_factory=list,
+        description="Explicit account subscriptions to individually published external MCP tools.",
     )

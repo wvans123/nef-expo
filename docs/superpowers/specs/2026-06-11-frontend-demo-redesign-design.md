@@ -63,6 +63,7 @@ NEF 承担目录汇聚、接入授权、能力和场景开放、套餐定义与�
 - TRF 登记 MCP 服务，NEF 管对外能力与套餐；NF 不必是 MCP Server。server description 不能冒充可调用工具，实际工具来自 tools/list。
 - 首页现有 NF 能力模型保持；外部工具需发现并显式发布，按 toolType 分类并标明 serverName。TRF 查询只在 `?ops=1` 运维视图显示，不自动导入工具或套餐。
 - 新配置 `registry.trf_mcp_servers_url` 统一 GET、POST、DELETE；发布六字段并 GET 匹配，撤回 DELETE 后 GET 确认缺席。本地发布状态与远端同步状态分别记录。
+- 发布只增加可见性；消费者按账号显式订阅单个工具后，北向 MCP 才可调用。当前为演示免费，不产生农场通知或 TRF 重复发布。提供方下架暂停调用，删除登记清理订阅。完整接口见 TRF 契约第 5 节。
 - 失败/草稿记录可删除；已发布或远端撤回未确认时须先撤回，不能丢失记录。注册状态仍是内存态，重启清空。
 - 自助套餐只本地发布，旧能力/场景不推送到 MCP Server 集合。若未来开放 NEF 自身为一个网络可发现 MCP 服务，需另行明确身份、分类、认证及公开范围。
 - 旧 catalog_url/publish_url/withdraw_url 与本地元数据导出保留后端兼容，活动页不再加载 catalog-ui.js，不将旧报文混入新 TRF 接口。
@@ -81,7 +82,7 @@ NEF 承担目录汇聚、接入授权、能力和场景开放、套餐定义与�
 
 无 Key `POST /api/v1/af/mcp-servers` 使用相同正文，以 `open_registration_account`（默认 `1`）登记，标记 `registered_via:open`，同 URL 重复请求更新。立即发现但不发布；失败保留登记。所有登录账号可见，具备 af:register 可管理并显式发布；网络调用仍检查独立凭据及原来源账号授权。完整契约见[农场联调](../../reference/farm-integration.md#60-无-key-一步注册内网)。
 
-`POST /servers/{id}/publish` 要求已发现至少一个工具；已发布时重新发现或修改登记须先取消发布。后端从认证账号写入 `source: "AF"`、`source_account`、`registration_status: "registered"`，不接受调用方伪造来源。首页 `/api/v1/network/market` 仅返回已发布工具的名称、描述、参数等公开信息，不暴露来源账号或上游 URL。注册服务不挂到北向 `/mcp` 中，内部网元可单独使用 NEF 代理入口；TRF 登记的原始 URL 直连是另一条路径。
+`POST /servers/{id}/publish` 要求已发现至少一个工具；已发布时重新发现或修改登记须先取消发布。后端从认证账号写入 `source: "AF"`、`source_account`、`registration_status: "registered"`，不接受调用方伪造来源。首页 `/api/v1/network/market` 仅返回已发布工具的名称、描述、参数等公开信息，不暴露来源账号或上游 URL。已发布外部工具以独立 mcp_name 加入北向 `/mcp`，消费者需显式订阅，PRO/MAX 不自动授权；内部网元可单独使用 NEF 代理入口；TRF 登记的原始 URL 直连是另一条路径。
 
 ### 4.1 网络目录登记什么
 

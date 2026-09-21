@@ -941,6 +941,9 @@ def integration_subscriptions(
                       "capability_ids": list(PKG_INDEX[pid]["capabilities"])} for pid in package_ids],
         "scene_subscriptions": scene_ids, "tools": tools, "scene_services": scenes,
         "purchased_packages": purchased_packages,
+        "external_tool_subscriptions": network_registry_runtime.market_subscriptions(
+            account_id
+        ),
     }
 
 
@@ -953,6 +956,9 @@ def auth_info(authorization: str = Header(None)):
             "subscribed_capabilities": caps,
             "scene_subscriptions": sorted(rec.get("scene_subscriptions", set())),
             "direct_subscriptions": sorted(rec["subscriptions"]),
+            "external_tool_subscriptions": network_registry_runtime.market_subscriptions(
+                rec["account"]
+            ),
             "packages": sorted(rec["packages"]),
             "estimated_monthly_cost": _estimated_monthly_cost(rec),
             "plan": rec.get("plan", "free"),
@@ -1296,6 +1302,19 @@ def mcp_tools_list(req: McpCallReq = None, authorization: str = Header(None)):
                           "description": f"运行自助编排 Pipeline「{pipe['name']}」：按序执行 {' → '.join(pipe['steps'])}",
                           "inputSchema": _union_input_schema(pipe["steps"]),
                           "subscribed": True})
+    subscribed_ids = {
+        item["id"]
+        for item in network_registry_runtime.market_subscriptions(rec["account"])
+    }
+    for item in network_registry_runtime.market_tools():
+        tools.append({
+            "name": item["mcp_name"],
+            "title": item["name"],
+            "serverName": item["serverName"],
+            "description": item["description"],
+            "inputSchema": item["inputSchema"],
+            "subscribed": item["id"] in subscribed_ids,
+        })
     return {"jsonrpc": "2.0", "id": (req.id if req else 1), "result": {"tools": tools}}
 
 
@@ -1308,6 +1327,15 @@ def mcp_tools_call(req: McpCallReq, authorization: str = Header(None), x_nef_exe
     live = exhibition.live_requested(x_nef_execution)
     if not isinstance(name, str) or not isinstance(args, dict):
         raise HTTPException(422, "工具名称需为字符串，arguments 需为对象")
+    if network_registry_runtime.market_tool_by_mcp_name(name) is not None:
+        if "id" not in req.model_fields_set:
+            return Response(status_code=202)
+        result = network_registry_runtime.call_external_tool_sync(
+            rec["account"],
+            name,
+            dict(args),
+        )
+        return {"jsonrpc": "2.0", "id": req.id, "result": result}
     if name.startswith("scene_"):
         scene = next((s for s in SCENES.values() if s.get("tool_name") == name), None)
         if not scene:
@@ -1592,6 +1620,12 @@ async def mcp_endpoint(request: Request, authorization: str = Header(None), x_ne
                 if not t["name"].startswith(("scenario_", "pipeline_"))]
         return result
     if method == "tools/call":
+        params = body.get("params", {})
+        name = params.get("name") if isinstance(params, dict) else None
+        if rid is None and isinstance(name, str) and (
+            network_registry_runtime.market_tool_by_mcp_name(name) is not None
+        ):
+            return Response(status_code=202)
         try:
             return await run_in_threadpool(mcp_tools_call, McpCallReq(id=rid if rid is not None else 1, params=body.get("params", {})), authorization, x_nef_execution)
         except HTTPException as exc:
@@ -1772,8 +1806,8 @@ def build_internal_skill(pkg):
 # ===== 静态文件 =====
 exhibition.mount_routes(app, _auth)
 
-from network_registry import build_router as build_network_router
-app.include_router(build_network_router(_auth))
+import network_registry as network_registry_runtime
+app.include_router(network_registry_runtime.build_router(_auth))
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
