@@ -61,9 +61,9 @@ def test_mcp_discovery_remains_before_tool_selection():
 
 def test_simple_server_registration_and_network_directory():
     html=client.get('/').text;js=client.get('/static/workbench.js').text
-    assert all(f'id="{x}"' in html for x in ['wb-server-json','wb-server-list','wb-catalog-status','wb-network-market'])
+    assert all(f'id="{x}"' in html for x in ['wb-server-name','wb-server-description','wb-server-url','wb-server-list','wb-network-market'])
     assert 'af-param-rows' not in html
-    assert 'JSON.parse($(\'#wb-server-json\').value)' in js
+    assert "serverName:$('#wb-server-name').value.trim()" in js
     assert '/api/v1/network/servers' in js
     assert "'discover'" in js and "'publish'" in js and "'unpublish'" in js
 
@@ -91,10 +91,10 @@ def test_original_theme_and_reduced_motion():
 
 def test_compact_scenes_manual_trf_management_and_published_market():
     html=client.get('/').text;js=client.get('/static/workbench.js').text
-    assert html.index('id="wb-refresh-catalog"') > html.index('id="pane-afreg"')
+    assert html.index('id="wb-refresh-trf"') > html.index('id="pane-afreg"')
     assert 'Intent 驱动 · 按场景开通' not in html and '>INTENT</span>' not in js
     assert '基础能力组合' in js and 'data-scene-cap' in js
-    assert "'/api/v1/network/catalog/refresh'" in js and '30000' in js
+    assert "'/api/v1/network/trf/servers'" in js and '30000' in js
     assert '自助编排套餐' in js and 'const items=wb.market' in js
     assert 'wbToolIcon' in js
     scenes=client.get('/api/v1/services').json()['services']
@@ -106,15 +106,13 @@ def test_network_gateway_story_and_publication_are_visible():
     market=html.split('id="pane-market"')[1].split('<!-- Tab 2')[0]
     assert 'TRF' not in market and 'registry-strip' not in market
     assert 'ARF' not in html and 'ARF' not in js
-    assert 'TRF 同步管理' in html and '"name": "巡检小车服务"' in html
+    assert '<div class="ops-only"><details class="wb-trf-management">' in html
+    assert 'value="patrol-car-managementx"' in html
     assert 'data-preview-server' not in js and '取消发布' in js
+    assert 'data-delete-server' in js and '删除记录' in js
 
 
-def test_selected_catalog_publication_is_a_separate_explicit_action():
+def test_legacy_catalog_publication_not_offered_as_trf_mcp_registration():
     html=client.get('/').text
-    assert 'id="wb-open-catalog-publication"' in html
-    js=client.get('/static/catalog-ui.js').text
-    assert "CAPS.filter(c=>c.status==='available')" in js
-    assert 'wb.catalog' not in js and 'wb.servers' not in js
-    assert 'capability_ids:' in js and 'service_ids:' in js
-    assert "'/api/v1/network/catalog/'" in js
+    assert 'id="wb-open-catalog-publication"' not in html
+    assert '/static/catalog-ui.js' not in html

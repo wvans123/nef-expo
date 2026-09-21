@@ -5,6 +5,7 @@
 .wb-network-item .tname{white-space:normal;overflow-wrap:anywhere}.wb-network-item .ticon{font-size:28px}
 .wb-trf-management{margin-top:24px;border-top:1px solid var(--border);padding-top:16px}.wb-trf-management summary{font-size:13px;color:var(--muted);cursor:pointer}
 .wb-sync-note,.wb-sync-retry{font-size:12px}.wb-sync-detail{margin:8px 0;color:var(--muted);font-size:12px}
+.wb-server-form input,.wb-server-form textarea{display:block;width:100%;box-sizing:border-box}.wb-server-form p{font-size:12px;line-height:1.6}.wb-delete-record{color:#ffada6;border-color:#ffada655}.wb-record-url{display:block;font-size:11px;color:var(--muted);overflow-wrap:anywhere;margin:8px 0}.wb-trf-row{border:1px solid var(--border);border-radius:8px;padding:12px;margin:10px 0}.wb-trf-row p{font-size:12px}.wb-trf-row code{font-size:11px;overflow-wrap:anywhere}
 .wb-price{font-size:16px;color:var(--green);margin:8px 0;letter-spacing:0}.wb-price small{font-size:12px;color:var(--muted);margin-left:8px}
 .wb-feedback-grid:has(>[hidden]){grid-template-columns:1fr}
 #purchase-capabilities{border:0;padding:0;margin:16px 0;min-width:0}

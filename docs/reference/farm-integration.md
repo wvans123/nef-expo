@@ -9,8 +9,8 @@
 ```text
 订购：农场页面 --跳转并带账号编号--> NEF --POST subscriberId + servicePlan--> 农场后端
 查询：农场平台后端 --账号编号--> NEF --已购套餐及详情--> 农场页面
-开放：农场 MCP --> NEF 登记并发现工具 --> 网络目录接收 NEF 代理入口
-调用：网络客户端 --> NEF 代理入口 --> 农场 MCP --> 原路返回结果
+开放：农场 MCP --> NEF 登记并发现工具 --> 显式发布六字段登记至 TRF（原始 MCP 地址）
+可选代理调用：网络客户端 --> NEF 代理入口 --> 农场 MCP --> 原路返回结果
 ```
 
 当天使用内存测试数据，重启后重新准备账号、订阅和 MCP 登记。换电脑首选 `python start.py`，地址为 `http://<NEF电脑IP>:8069`，无需旧域名或 Cloudflare 头；步骤见 [README](../../README.md#二换电脑启动与配置)。旧 Tunnel 部署仍可使用 `https://nef.2012wtlab.com` 和 Access。上传不会重启已有服务；回调路径和价格规则见 [curl 手册](manual-curl.md)，实际 IP 在本机配置填写，本机尚未访问真实对端。
@@ -91,9 +91,7 @@ CF-Access-Client-Secret: <Client Secret>
 
 ```json
 {
-  "catalog_url": null,
-  "publish_url": "https://directory.example.invalid/mcp-registrations",
-  "withdraw_url": null,
+  "trf_mcp_servers_url": "http://<TRF-IP>:<端口>/trf/api/v1/mcp-servers",
   "token_env": "NEF_DIRECTORY_TOKEN",
   "nef_base_url": "https://nef.2012wtlab.com",
   "mcp_servers": {
@@ -114,11 +112,9 @@ CF-Access-Client-Secret: <Client Secret>
 
 | 字段 | 说明 |
 |---|---|
-| `catalog_url` | 网络能力目录拉取地址；本次只登记农场 MCP 时可为 null |
-| `publish_url` | TRF 接收登记的完整 POST 地址，不是农场 MCP 地址 |
-| `withdraw_url` | TRF 接收撤回的完整 POST 地址；未配置时仅本地下架并提示待配置 |
+| `trf_mcp_servers_url` | TRF MCP 集合地址，发布 POST、查询 GET、撤回 DELETE 追加 serverName；空时不外发 |
 | `token_env` | NEF 向目录发送 Bearer Key 所用环境变量名 |
-| `nef_base_url` | 网络客户端能访问的 NEF 地址，发布时由此生成代理 URL |
+| `nef_base_url` | 网络客户端能访问的 NEF 地址，用于独立代理链路；新六字段 TRF 发布不依赖此字段 |
 | `mcp_servers` | 精确匹配登记 URL 的允许列表；页面登记不会自动加入允许列表 |
 | `open_registration_account` | 开放登记来源账号，默认 `1` |
 | `allow_unlisted_mcp_servers` | 默认 false；获准隔离测试网才可放宽，风险见 6.0 |
@@ -134,15 +130,15 @@ CF-Access-Client-Secret: <Client Secret>
 
 ### 6.0 无 Key 一步注册（内网）
 
-`POST /api/v1/af/mcp-servers`，JSON 为 `{"name":"农场管理平台","url":"http://<农场IP>:<端口>/mcp","description":"..."}`。参数限制与 6.1 相同，无需 NEF Key；同一 URL 重复调用更新开放登记，不重复创建，不修改同 URL 的私有登记。
+`POST /api/v1/af/mcp-servers`，JSON 为 `{"serverName":"farm-management","url":"http://<农场IP>:<端口>/mcp","description":"..."}`。参数限制与 6.1 相同，无需 NEF Key；同一 URL 重复调用更新开放登记，不重复创建，不修改同 URL 的私有登记。
 
-NEF 以 `registry.open_registration_account`（默认 `1`）登记并标记 `registered_via:open`，立即执行 initialize、notifications/initialized、tools/list。登记与发现不会发布，即使已配置 `publish_url` 也保持草稿；随后由页面账号显式发布。发布时使用 NEF 代理入口，不直接把农场原始地址作为网络调用入口。
+NEF 以 `registry.open_registration_account`（默认 `1`）登记并标记 `registered_via:open`，立即执行 initialize、notifications/initialized、tools/list。登记与发现不会发布，即使已配置 `trf_mcp_servers_url` 也保持草稿；随后由页面账号显式发布。按新 TRF 契约发布原始 MCP URL，独立 NEF 代理入口继续保留。
 
 成功返回登记记录、`created`、`discovery_status=ok`、`publication_status=draft`、`sync_status=pending`，提示等待显式发布。发现失败返回 502/504（允许列表拒绝为 403/503），detail 保留登记 ID 和 `discovery_status=failed`。列表接口发现成功的状态词仍为 `discovered`。
 
-开放登记对所有登录账号可见，任意具备 `af:register` scope 的账号可 discover、publication、publish、unpublish；私有登记不变。`registry.allow_unlisted_mcp_servers` 默认 false，只有精确允许列表 URL 可连接；获准隔离测试网可设 true，允许无 Key 调用者让 NEF 连接任意合法 HTTP(S) URL，存在内网探测风险，勿对不可信网络启用。此开关不取消网络反向调用的独立凭据与 af_accounts 校验。
+开放登记对所有登录账号可见，任意具备 `af:register` scope 的账号可 discover、publication、publish、unpublish、delete；私有登记不变。`registry.allow_unlisted_mcp_servers` 默认 false，只有精确允许列表 URL 可连接；获准隔离测试网可设 true，允许无 Key 调用者让 NEF 连接任意合法 HTTP(S) URL，存在内网探测风险，勿对不可信网络启用。此开关不取消网络反向调用的独立凭据与 af_accounts 校验。
 
-农场 MCP URL 和 TRF publish_url 仍待提供。本机只验证本地模拟对端，具体命令见 [curl 手册](manual-curl.md)。以下 6.1 起保留带 Key 的分步流程。
+农场 MCP URL、TRF 集合实际地址及 GET 完整响应仍待提供。本机只验证本地模拟对端，具体命令见 [curl 手册](manual-curl.md)。以下 6.1 起保留带 Key 的分步流程。
 
 以下路径均相对于 NEF 公网 Base URL，所有请求携带第 3 节 Access 头。除特别说明外再带：
 
@@ -160,7 +156,7 @@ Content-Type: application/json
 
 ```json
 {
-  "name": "农场管理平台",
+  "serverName": "farm-management",
   "url": "https://farm.example.invalid/mcp",
   "description": "提供获准测试地块的只读状态查询"
 }
@@ -168,7 +164,7 @@ Content-Type: application/json
 
 | 参数 | 必填 | 限制 |
 |---|---|---|
-| `name` | 是 | string，去除首尾空白后 1–128 字符 |
+| `serverName` | 是 | 最长 128 字符，匹配 `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`；本进程内全局唯一；旧 name 仅兼容 |
 | `url` | 是 | 完整 HTTP(S) URL，最长 2048 字符，不能在 URL 中带用户名密码或片段 |
 | `description` | 否 | string，最长 2000 字符 |
 
@@ -190,7 +186,7 @@ HTTP 200 响应关键字段：
 
 以上为字段摘录，实际还返回名称、URL、说明。后续请求使用真实返回的 `id`，不要使用示例字符串。登记成功只表示 NEF 保存记录，没有连接农场，也没有发布网络。
 
-同账号、同 URL、同登记类型重复 POST 更新原记录，不创建重复项。已发布时须先取消发布再更新或重新发现；否则返回 409。每账号最多 64 个登记，取消发布不是删除登记。
+同账号、同 URL、同登记类型重复 POST 更新原记录，不创建重复项。已发布时须先取消发布再更新或重新发现；否则返回 409。每账号最多 64 个登记，取消发布不是删除登记；另用 DELETE 删除未发布且无需远端撤回的本地记录。
 
 ### 6.2 发现工具
 
@@ -226,53 +222,29 @@ initialize -> notifications/initialized -> tools/list（必要时继续分页）
 
 ### 6.3 查看将发布什么
 
-```http
-GET /api/v1/network/servers/{server_id}/publication
-```
+`GET /api/v1/network/servers/{server_id}/publication` 只生成预览，不向网络写入。新协议正文为 `serverName/serverType/toolType/description/url/serverStatus` 六字段，url 就是填写的外部 MCP 地址，不依赖 nef_base_url；三项固定值由服务端生成。
 
-只生成发布内容预览，不向网络写入。要求配置 `nef_base_url`。检查：
+唯一契约、字段示例、GET 包装与确认规则见 [TRF MCP Server 契约](network-catalog.md)。旧 publish_url 部署的 NEF 代理登记格式仅保留兼容，不能发到新 MCP 集合接口。
 
-- `type=mcp_server_registration`。
-- `source=AF`、`source_account=1`、`registration_id` 为本次登记 ID。
-- `server.url` 指向 `https://nef.2012wtlab.com/api/v1/network/af-servers/{server_id}/mcp`。
-- `server.access_via=NEF`，`server.authentication=network-client-bearer`。
-- `server.tools` 是刚发现的工具定义。
+### 6.4 发布与撤回
 
-发布的是 NEF 代理入口，不是农场原始 URL；不包含任何 Key。农场登记、NEF 代理入口与网络目录条目共同保留该注册 ID，便于查错。
+`POST /api/v1/network/servers/{server_id}/publish`，无正文，要求已发现至少一个工具；旧 `/sync` 为兼容别名。工具立即进入本地首页，再向 trf_mcp_servers_url POST 六字段，并 GET 读回确认。
 
-### 6.4 发布到网络目录
-
-```http
-POST /api/v1/network/servers/{server_id}/publish
-```
-
-无需请求体，要求已发现至少一个工具，否则返回 409。旧 `/sync` 保留为兼容别名。显式发布后 `publication_status=published`，工具进入首页“扩展能力”；NEF 同时向配置的 `publish_url` 发送 6.3 的发布 JSON，目录收到后应确认：
-
-```json
-{"accepted": true}
-```
-
-| NEF 返回 | 含义 |
+| sync_status | 含义 |
 |---|---|
-| HTTP 200，`accepted=true`，`sync_status=synced` | 目录明确确认接收 |
-| HTTP 200，`accepted=false`，`sync_status=submitted` | 上游有成功 HTTP 响应，但未给出明确接收确认 |
-| HTTP 200，`sync_status=pending` | 本地已发布，TRF 地址待配置 |
-| HTTP 200，`sync_status=failed` | 本地已发布，但网关配置、上游请求或响应失败；查看 `sync_error` / `sync_note` 后重试 |
-| 503 | 整体 registry 配置无效，未变更发布状态 |
+| synced | 发布后六字段读回匹配；撤回后确认同名记录缺席 |
+| submitted | 写请求已获成功 HTTP 响应，但尚无法读回确认 |
+| pending | 已在本地发布，TRF 地址尚未配置 |
+| failed | 配置、请求或响应格式错误；本地状态不伪装成远端成功 |
+| not_required | 从未外发的记录已下架，或自助套餐只本地发布 |
 
-`synced` 只证明收到 TRF 接收确认，不证明其数据库已持久化或真实执行成功。首页发布与 TRF 同步分别记录；失败不伪装成同步成功，重复 `/publish` 可以重试。
+`POST /api/v1/network/servers/{server_id}/unpublish` 本地下架并阻止新的 NEF 代理调用，随后向首次发布集合地址的 `/{serverName}` 发 DELETE（无正文）并 GET 确认。未知或失败可重复 unpublish 重试；对方 MCP 本身不会因此关闭。目标地址/名称在进程内锁定，配置改址不会让撤回误删新环境。
 
-### 6.4.1 取消发布
+### 6.4.1 删除本地登记
 
-`POST /api/v1/network/servers/{server_id}/unpublish`，相同账号 Key，无请求体。立即置 `publication_status=unpublished`、从首页移除并阻止新的 NEF 网关调用。若曾向 TRF 发出过发布请求，向 `registry.withdraw_url` POST：
+`DELETE /api/v1/network/servers/{server_id}`。发现失败、草稿、确认撤回后的记录可删除，页面对应“删除记录”。已发布、繁忙或 TRF 撤回未确认返回 409，需先完成撤回。私有登记仅归属账号可删，open 登记可由具有 af:register scope 的其他账号管理。
 
-```json
-{"type":"mcp_server_withdrawal","registration_id":"<登记ID>","account":"<来源账号>"}
-```
-
-TRF 返回 `{"accepted":true}` 才确认远端撤回；无明确确认记 `submitted`，失败记 `failed`，未配置地址记 `pending`。上述情况均保持本地下架，可再次 `/unpublish` 重试；从未外发过则 `sync_status=not_required`。对方实际撤回协议待提供，不猜测 DELETE 路径。
-
-自助套餐同样使用 `/api/v1/network/packages/{package_id}/publish` 和 `/unpublish`；撤回正文 `type=network_package_withdrawal`，`registration_id` 为套餐 ID。TRF 发布正文为 `type=network_package_declaration`、`account` 与 `package`。这些均是项目适配契约。
+自助套餐的 `/packages/{id}/publish`、`/unpublish` 在新协议下只更新本地展示，不发到 TRF MCP 集合。旧能力/场景也不自动导出为服务器。
 
 ### 6.5 查看状态
 
@@ -284,7 +256,7 @@ GET /api/v1/network/servers
 
 ## 7. 网络经 NEF 调用农场
 
-由网络侧客户端操作，不是用农场账号 Key。以发布内容中的 `server.url` 为目标，公网 Access 头仍必需：
+由网络侧客户端操作，不是用农场账号 Key。选择独立 NEF 代理链路时，使用登记列表的 gateway_path 拼接 NEF Base URL，公网 Access 头仍必需。新 TRF 的 url 是外部 MCP 原始地址，直接访问它不经过下面的 NEF 代理鉴权：
 
 ```http
 POST /api/v1/network/af-servers/{server_id}/mcp
@@ -374,9 +346,9 @@ HTTP 错误通常为 `{"detail":{"code":"...","message":"..."}}`；NEF 账号认
 | 3 | 农场部署只读 MCP；NEF 配置允许列表 | 地址从 NEF 可达，Key 单独配置 |
 | 4 | 农场用账号1 Key 登记 | 返回真实 server_id，source_account=1 |
 | 5 | 调用 discover | discovered，工具名和参数与农场一致 |
-| 6 | 查看 publication | 只公布 NEF 代理 URL，不泄露农场地址/Key |
-| 7 | 调用 sync，网络目录确认 | accepted=true、synced，目录侧能找到同一 registration_id |
-| 8 | 网络客户端访问发布的 URL | tools/list 与登记一致；只读 tools/call 返回农场实际数据 |
+| 6 | 查看 publication | 六字段；url 是登记的 MCP 地址，不含 Key |
+| 7 | 调用 publish，TRF 读回确认 | synced；GET 中同 serverName 的六字段匹配 |
+| 8 | 单独验收外部 MCP 直连或 NEF gateway_path | tools/list 与登记一致；只读 tools/call 返回实际数据 |
 | 9 | 检查异常 | 错账号不能操作私有登记，开放登记可跨账号操作；错网络 Key 拒绝；参数错误不触发农场执行 |
 
 每步记录时间、请求方法/路径、账号编号或登记 ID、状态码和脱敏响应；不要把任何 Key、客户现场数据写入共享截图或日志。步骤 1–2 可以先做，不依赖 MCP 服务或网络目录上线。
@@ -387,4 +359,4 @@ HTTP 错误通常为 `{"detail":{"code":"...","message":"..."}}`；NEF 账号认
 python -m pytest tests/test_farm_integration.py -q -s -p no:cacheprovider
 ```
 
-预演覆盖两条链路并使用真实 TCP，但所有对端都在本机，农场结果明确 `data_source=mock`；不连接真实农场、不向生产目录发布、不修改现有 8069 账号状态。运行状态与测试记录见[运行手册](../demo-playbook.md#农场双向联调预演)。
+此预演覆盖旧代理发布兼容链路并使用真实 TCP；新六字段契约用 `tests/test_trf_mcp_registry.py` 验证。但所有对端都在本机，农场结果明确 `data_source=mock`；不连接真实农场、不向生产目录发布、不修改现有 8069 账号状态。运行状态与测试记录见[运行手册](../demo-playbook.md#农场双向联调预演)。

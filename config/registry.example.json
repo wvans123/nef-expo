@@ -1,7 +1,5 @@
 {
-  "catalog_url": null,
-  "publish_url": null,
-  "withdraw_url": null,
+  "trf_mcp_servers_url": null,
   "token_env": null,
   "mcp_servers": {},
   "nef_base_url": null,

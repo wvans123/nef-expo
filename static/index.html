@@ -181,7 +181,7 @@ th{background:var(--card);color:var(--muted)}
 .rev-badge{font-size:10px;color:var(--green);border:1px solid #39ffb066;border-radius:8px;padding:0 6px;margin-left:6px}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;border-radius:8px;padding:9px 18px;z-index:200;display:none}
 </style>
-<link rel="stylesheet" href="/static/workbench.css?v=20260921-1">
+<link rel="stylesheet" href="/static/workbench.css?v=20260921-2">
 <script src="/static/showcase-story.js?v=20260921-1"></script>
 <script src="/static/showcase-mcp.js?v=20260909-1"></script>
 </head>
@@ -321,12 +321,13 @@ th{background:var(--card);color:var(--muted)}
     <h3 class="sec">MCP Server 注册 · 双向开放</h3>
     <p class="muted">连接外部服务并发现工具，确认发布后在能力超市展示，并同步至 TRF。</p>
     <div class="afflow"><span class="afnode af-end">🚙 巡检小车<small>MCP 能力源</small></span><span class="afarrow">→</span><span class="afnode nef">NEF<small>发现 · 发布</small></span><span class="afarrow">→</span><span class="afnode nef">TRF<small>网络内工具目录</small></span></div>
-    <div class="wb-two-columns"><div><h3 class="sec">① 接入外部能力</h3><label for="wb-server-json">MCP Server 信息</label><textarea id="wb-server-json" class="mono" rows="9">{
-  "name": "巡检小车服务",
-  "url": "",
-  "description": "提供巡检小车的巡检任务、现场感知与异常检查能力，具体工具以连接后发现的结果为准。"
-}</textarea><p class="muted">收到小车 MCP 地址后填入 url，再连接。</p><button class="primary" id="wb-register-server" style="margin-top:12px;width:100%">连接并发现工具</button><div id="wb-register-message" class="muted" role="status"></div></div><div><h3 class="sec">② 服务与工具</h3><div id="wb-server-list"></div></div></div>
-    <details class="wb-trf-management"><summary>TRF 同步管理</summary><p class="muted">配置对方地址后，可拉取 TRF 能力，或选择本平台能力与场景发送至 TRF。</p><div class="registry-strip"><span id="wb-catalog-status" class="muted">等待接入</span><button id="wb-refresh-catalog">从 TRF 同步</button><button id="wb-open-catalog-publication">发布本平台能力至 TRF</button></div></details>
+    <div class="wb-two-columns"><div class="wb-server-form"><h3 class="sec">① 接入外部能力</h3>
+      <label for="wb-server-name">服务名称</label><input id="wb-server-name" value="patrol-car-managementx" maxlength="128" autocomplete="off"><p class="muted">作为服务的唯一名称，使用英文字母、数字、点、下划线或短横线。</p>
+      <label for="wb-server-description">服务描述</label><textarea id="wb-server-description" rows="5" maxlength="2000">管理巡检小车，如在巡检小车上启动或关闭巡检任务、配置目标预检测开关、图像采样频率等。</textarea>
+      <label for="wb-server-url">MCP 服务地址</label><input id="wb-server-url" type="url" placeholder="http://主机:端口/mcp" autocomplete="off">
+      <p class="muted">连接后可查看实际工具；点击发布才对外展示。</p><button class="primary" id="wb-register-server" style="margin-top:12px;width:100%">连接并发现工具</button><div id="wb-register-message" class="muted" role="status"></div>
+    </div><div><h3 class="sec">② 服务与工具</h3><div id="wb-server-list"></div></div></div>
+    <div class="ops-only"><details class="wb-trf-management"><summary>TRF 服务登记 · 运维</summary><p class="muted">只查询服务注册信息；服务描述不是可调用工具，查询不会自动开放给 AF 或写入套餐。</p><button id="wb-refresh-trf">查询 TRF 服务</button><p id="wb-trf-status" class="muted" role="status">尚未查询</p><div id="wb-trf-servers"></div></details></div>
   </div>
 
   <!-- Tab 9 AF 智能终端 -->
@@ -958,8 +959,7 @@ $('#term-send').onclick = ()=>termRequest($('#term-input').value.trim());
 $('#term-input').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#term-send').click(); });
 </script>
 <script src="/static/purchase.js?v=20260921-1"></script>
-<script src="/static/workbench.js?v=20260921-1"></script>
-<script src="/static/catalog-ui.js?v=20260917-1"></script>
+<script src="/static/workbench.js?v=20260921-2"></script>
 <script src="/static/composer.js?v=20260917-3"></script>
 </body>
 </html>

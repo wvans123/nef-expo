@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 from integration_config import section as integration_section
@@ -52,6 +52,15 @@ MAX_CURSOR_LENGTH = 1_024
 REQUEST_TIMEOUT_SECONDS = 10.0
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_TRF_SERVER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_TRF_FIELDS = (
+    "serverName",
+    "serverType",
+    "toolType",
+    "description",
+    "url",
+    "serverStatus",
+)
 
 
 class _ConfigError(Exception):
@@ -106,6 +115,9 @@ def _http_error(status_code: int, code: str, message: str) -> None:
 def _public_record(record: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(record)
     result.pop("gateway_busy", None)
+    result.pop("_server_name_explicit", None)
+    result.pop("_trf_target_url", None)
+    result.pop("_trf_target_name", None)
     if result.get("source") == "AF":
         result["gateway_path"] = _gateway_path(result["id"])
         result["access_via"] = "NEF"
@@ -188,7 +200,13 @@ def _load_config() -> dict[str, Any]:
     if type(unlisted) is not bool:
         raise _ConfigError("invalid_config")
     normalized.update(open_registration_account=account, allow_unlisted_mcp_servers=unlisted)
-    for name in ("catalog_url", "publish_url", "withdraw_url", "nef_base_url"):
+    for name in (
+        "catalog_url",
+        "publish_url",
+        "withdraw_url",
+        "trf_mcp_servers_url",
+        "nef_base_url",
+    ):
         value = data.get(name)
         if value in (None, ""):
             normalized[name] = None
@@ -200,6 +218,11 @@ def _load_config() -> dict[str, Any]:
 
     base = normalized.get("nef_base_url")
     if base and (urlsplit(base).query or urlsplit(base).fragment):
+        raise _ConfigError("invalid_config")
+    trf_collection = normalized.get("trf_mcp_servers_url")
+    if trf_collection and (
+        urlsplit(trf_collection).query or urlsplit(trf_collection).fragment
+    ):
         raise _ConfigError("invalid_config")
     clients = data.get("network_clients", {})
     if not isinstance(clients, dict):
@@ -291,12 +314,10 @@ async def _remote_request(
             follow_redirects=False,
             trust_env=False,
         ) as client:
-            async with client.stream(
-                method,
-                url,
-                json=payload,
-                headers=request_headers,
-            ) as response:
+            request_args: dict[str, Any] = {"headers": request_headers}
+            if payload is not None:
+                request_args["json"] = payload
+            async with client.stream(method, url, **request_args) as response:
                 body = await _read_response_body(response)
                 content_type = response.headers.get("content-type", "")
                 response_headers = {
@@ -699,6 +720,143 @@ def _approved_server(config, url):
     return approved
 
 
+def _require_trf_server_name(value: Any, field: str = "serverName") -> str:
+    name = _require_text(value, field, MAX_NAME_LENGTH)
+    if not _TRF_SERVER_NAME.fullmatch(name):
+        _http_error(
+            422,
+            "invalid_request",
+            f"{field} 必须匹配 [a-zA-Z0-9][a-zA-Z0-9._-]{{0,127}}",
+        )
+    return name
+
+
+def _trf_publication(server: dict[str, Any]) -> dict[str, Any]:
+    server_name = server.get("serverName", server.get("name"))
+    if not isinstance(server_name, str) or not _TRF_SERVER_NAME.fullmatch(server_name):
+        _http_error(
+            422,
+            "invalid_server_name",
+            "serverName 必须匹配 [a-zA-Z0-9][a-zA-Z0-9._-]{0,127}",
+        )
+    return {
+        "serverName": server_name,
+        "serverType": "Steamable HTTP",
+        "toolType": "third-party tool",
+        "description": server.get("description", ""),
+        "url": server["url"],
+        "serverStatus": "active",
+    }
+
+
+def _decode_json_value(response: _RemoteResponse) -> Any:
+    if response.content_type and not (
+        response.content_type == "application/json"
+        or response.content_type.endswith("+json")
+    ):
+        raise _RemoteFailure("unsupported_transport")
+    try:
+        return json.loads(response.body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _RemoteFailure("invalid_json") from exc
+
+
+def _validate_trf_servers(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, dict) and set(value) == {"items"} and isinstance(value["items"], list):
+        items = value["items"]
+    elif isinstance(value, dict) and set(value) == {"data"} and isinstance(value["data"], list):
+        items = value["data"]
+    else:
+        # Pagination and other envelopes have not been specified by the TRF contract.
+        raise _RemoteSchemaFailure("trf_schema_invalid")
+    if len(items) > MAX_CATALOG_ITEMS:
+        raise _RemoteSchemaFailure("trf_too_many_servers")
+    result: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict) or any(field not in item for field in _TRF_FIELDS):
+            raise _RemoteSchemaFailure("trf_schema_invalid")
+        try:
+            server_name = item["serverName"]
+            if not isinstance(server_name, str) or not _TRF_SERVER_NAME.fullmatch(server_name):
+                raise ValueError("serverName")
+            server_type = _checked_catalog_text(item["serverType"], MAX_NAME_LENGTH)
+            tool_type = _checked_catalog_text(item["toolType"], MAX_NAME_LENGTH)
+            description = _checked_catalog_text(item["description"], MAX_DESCRIPTION_LENGTH)
+            url = _checked_url(item["url"])
+            server_status = _checked_catalog_text(item["serverStatus"], MAX_NAME_LENGTH)
+            if not server_type or not tool_type or not server_status:
+                raise ValueError("empty")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise _RemoteSchemaFailure("trf_schema_invalid") from exc
+        # The known categories are nf/computing/sensing/third-party tool.
+        # Bounded unknown values are preserved rather than misclassified.
+        result.append({
+            "serverName": server_name,
+            "serverType": server_type,
+            "toolType": tool_type,
+            "description": description,
+            "url": url,
+            "serverStatus": server_status,
+        })
+    return result
+
+
+async def _read_trf_servers(
+    collection_url: str,
+    *,
+    token_env: str | None,
+) -> list[dict[str, Any]]:
+    response = await _remote_request("GET", collection_url, token_env=token_env)
+    return _validate_trf_servers(_decode_json_value(response))
+
+
+def _same_trf_server(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return all(left.get(field) == right.get(field) for field in _TRF_FIELDS)
+
+
+def _trf_delete_url(collection_url: str, server_name: str) -> str:
+    return collection_url.rstrip("/") + "/" + quote(server_name, safe="")
+
+
+async def _delete_trf_server(
+    collection_url: str,
+    server_name: str,
+    *,
+    token_env: str | None,
+) -> int:
+    url = _trf_delete_url(collection_url, server_name)
+    request_headers = {"Accept": "application/json", **_token_header(token_env)}
+    timeout = httpx.Timeout(
+        connect=REQUEST_TIMEOUT_SECONDS,
+        read=REQUEST_TIMEOUT_SECONDS,
+        write=REQUEST_TIMEOUT_SECONDS,
+        pool=REQUEST_TIMEOUT_SECONDS,
+    )
+    try:
+        async with asyncio.timeout(REQUEST_TIMEOUT_SECONDS), httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            async with client.stream("DELETE", url, headers=request_headers) as response:
+                await _read_response_body(response)
+                if 200 <= response.status_code < 300 or response.status_code == 404:
+                    return response.status_code
+                if 300 <= response.status_code < 400:
+                    raise _RemoteFailure("redirect_not_allowed")
+                raise _RemoteFailure("upstream_http_error")
+    except _RemoteFailure:
+        raise
+    except (httpx.TimeoutException, TimeoutError) as exc:
+        raise _RemoteFailure("upstream_timeout") from exc
+    except (httpx.HTTPError, OSError) as exc:
+        raise _RemoteFailure("upstream_request_failed") from exc
+    except Exception as exc:
+        raise _RemoteFailure("upstream_request_failed") from exc
+
+
 def _get_owned_package(account: str, package_id: str) -> dict[str, Any]:
     with _STATE_LOCK:
         record = _ACCOUNTS.get(account, {}).get("packages", {}).get(package_id)
@@ -842,7 +1000,20 @@ def _gateway_path(server_id: str) -> str:
     return f"/api/v1/network/af-servers/{server_id}/mcp"
 
 
+def _uses_trf_server_contract(config: dict, server: dict) -> bool:
+    return bool(
+        config.get("trf_mcp_servers_url")
+        or server.get("_trf_target_url")
+        or (
+            server.get("_server_name_explicit")
+            and not config.get("publish_url")
+        )
+    )
+
+
 def _publication(config: dict, account: str, server: dict) -> dict:
+    if _uses_trf_server_contract(config, server):
+        return _trf_publication(server)
     base = config.get("nef_base_url")
     if not base:
         _http_error(503, "gateway_not_configured", "请配置网络可访问的 NEF 入口 nef_base_url")
@@ -982,6 +1153,28 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                        if owner == account or s.get("registered_via") == "open"]
             return {"servers": [_public_record(item) for item in servers]}
 
+    @router.get("/api/v1/network/trf/servers")
+    async def list_trf_servers(authorization: str | None = Header(default=None)):
+        auth(authorization, "af:register")
+        try:
+            config = _load_config()
+        except _ConfigError:
+            _http_error(503, "invalid_config", "网络登记配置无效")
+        collection_url = config.get("trf_mcp_servers_url")
+        if not collection_url:
+            return {"status": "not_configured", "servers": []}
+        try:
+            servers = await _read_trf_servers(
+                collection_url,
+                token_env=config.get("token_env"),
+            )
+        except _RemoteSchemaFailure as exc:
+            _http_error(502, exc.code, "TRF MCP 服务器列表响应未通过 schema 校验")
+        except _RemoteFailure as exc:
+            status, message = _upstream_failure_status(exc.code)
+            _http_error(status, exc.code, message)
+        return {"status": "loaded", "servers": servers}
+
     @router.get("/api/v1/network/market")
     async def published_market():
         # Customer-facing projection: no AF addresses, credentials, or account IDs.
@@ -997,6 +1190,8 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                             "name": tool["name"], "description": tool.get("description", ""),
                             "kind": "tool", "source": "AF", "provider": server["name"],
                             "server_id": server["id"], "inputSchema": copy.deepcopy(tool["inputSchema"]),
+                            "serverName": server.get("serverName", server["name"]),
+                            "toolType": "third-party tool",
                         })
                 for package in state["packages"].values():
                     if package.get("publication_status") == "published":
@@ -1017,7 +1212,16 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
         return register_server(payload, account)
 
     def register_server(payload, account, opened=False):
-        name = _require_text(payload.get("name"), "name", MAX_NAME_LENGTH)
+        explicit_server_name = "serverName" in payload
+        if explicit_server_name:
+            server_name = _require_trf_server_name(payload.get("serverName"))
+            if "name" in payload:
+                alias = _require_text(payload.get("name"), "name", MAX_NAME_LENGTH)
+                if alias != server_name:
+                    _http_error(422, "invalid_request", "name 与 serverName 必须一致")
+        else:
+            server_name = _require_text(payload.get("name"), "name", MAX_NAME_LENGTH)
+        name = server_name
         url = _require_url(payload.get("url"))
         description = _require_text(
             payload.get("description", ""),
@@ -1029,12 +1233,54 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
             state = _set_account_state(account)
             existing = next((s for s in state["servers"].values()
                              if s["url"] == url and s.get("registered_via") == ("open" if opened else "account")), None)
+            enforce_global_name = (
+                explicit_server_name
+                or bool(_TRF_SERVER_NAME.fullmatch(server_name))
+                or bool(existing and existing.get("_server_name_explicit"))
+            )
+            if enforce_global_name:
+                if not _TRF_SERVER_NAME.fullmatch(server_name):
+                    _http_error(
+                        422,
+                        "invalid_server_name",
+                        "serverName 必须匹配 [a-zA-Z0-9][a-zA-Z0-9._-]{0,127}",
+                    )
+                conflict = next(
+                    (
+                        candidate
+                        for owner_state in _ACCOUNTS.values()
+                        for candidate in owner_state["servers"].values()
+                        if candidate is not existing
+                        and candidate.get("serverName", candidate.get("name")) == server_name
+                    ),
+                    None,
+                )
+                if conflict is not None:
+                    _http_error(409, "server_name_conflict", "serverName 已由其他 MCP URL 使用")
             if existing:
                 if existing.get("discovery_status") == "discovering" or existing.get("sync_status") == "syncing" or existing.get("gateway_busy"):
                     _http_error(409, "busy", "服务正在处理另一项操作")
                 if existing.get("publication_status") == "published":
                     _http_error(409, "already_published", "请先取消发布，再更新服务")
-                existing.update(name=name, description=description)
+                if existing.get("trf_may_exist"):
+                    _http_error(409, "withdraw_required", "请先重试撤回 TRF 记录，再更新服务")
+                if (
+                    existing.get("_trf_target_name")
+                    and existing["_trf_target_name"] != server_name
+                ):
+                    _http_error(
+                        409,
+                        "server_name_locked",
+                        "首次 TRF 发布名称已锁定，不能在该记录上改名",
+                    )
+                existing.update(
+                    name=name,
+                    serverName=server_name,
+                    description=description,
+                    _server_name_explicit=bool(
+                        explicit_server_name or existing.get("_server_name_explicit")
+                    ),
+                )
                 return {**_public_record(existing), "created": False}
             if len(state["servers"]) >= MAX_SERVERS_PER_ACCOUNT:
                 _http_error(409, "limit_exceeded", "每个账号最多注册 64 个网络服务器")
@@ -1042,6 +1288,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
             server = {
                 "id": server_id,
                 "name": name,
+                "serverName": server_name,
                 "url": url,
                 "description": description,
                 "tools": [],
@@ -1053,6 +1300,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                 "publication_status": "draft",
                 "trf_may_exist": False,
                 "registered_via": "open" if opened else "account",
+                "_server_name_explicit": explicit_server_name,
             }
             state["servers"][server_id] = server
             return {**_public_record(server), **({"created": True} if opened else {})}
@@ -1101,9 +1349,17 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                 or config.get("mcp_servers")
             ):
                 _mark_discovery_failure(account, server_id)
-                _http_error(503, "not_configured", "MCP 服务器 allowlist 未配置")
+                _http_error(
+                    503,
+                    "not_configured",
+                    "请在配置中填写 registry.mcp_servers allowlist",
+                )
             _mark_discovery_failure(account, server_id)
-            _http_error(403, "not_approved", "MCP 服务器 URL 未获运营方批准")
+            _http_error(
+                403,
+                "not_approved",
+                "该 MCP 服务器 URL 不在 registry.mcp_servers allowlist 中",
+            )
 
         with _STATE_LOCK:
             current = _ACCOUNTS[account]["servers"].get(server_id)
@@ -1168,11 +1424,220 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                 _http_error(409, "not_discovered", "请先连接并发现至少一个工具")
         return await change_publication(account, "servers", server_id, True)
 
+    async def change_trf_server_publication(account, record_id, publish, config):
+        with _STATE_LOCK:
+            record = _ACCOUNTS[account]["servers"][record_id]
+            if (
+                record.get("sync_status") == "syncing"
+                or record.get("discovery_status") == "discovering"
+                or record.get("gateway_busy")
+            ):
+                _http_error(409, "busy", "服务正在处理另一项操作")
+            record["publication_status"] = "published" if publish else "unpublished"
+            record["sync_status"] = "pending"
+            record.pop("sync_error", None)
+            record.pop("sync_note", None)
+
+            if not publish and not record.get("trf_may_exist"):
+                record.update(
+                    sync_status="not_required",
+                    sync_note="已从首页下架，未向 TRF 发布过",
+                )
+                return _public_record(record)
+
+            if publish:
+                try:
+                    payload = _trf_publication(record)
+                except HTTPException as exc:
+                    record.update(
+                        sync_status="failed",
+                        sync_error=exc.detail,
+                        sync_note="已在首页发布，但 serverName 不符合 TRF 契约",
+                    )
+                    return _public_record(record)
+                target_url = record.get("_trf_target_url") or config.get(
+                    "trf_mcp_servers_url"
+                )
+                target_name = record.get("_trf_target_name") or payload["serverName"]
+                if not target_url:
+                    record["sync_note"] = "已在首页发布，TRF MCP 服务器集合地址待配置"
+                    return _public_record(record)
+                payload["serverName"] = target_name
+                conflict = next(
+                    (
+                        candidate
+                        for owner_state in _ACCOUNTS.values()
+                        for candidate in owner_state["servers"].values()
+                        if candidate is not record
+                        and candidate.get("_trf_target_url") == target_url
+                        and candidate.get("_trf_target_name") == target_name
+                        and (
+                            candidate.get("trf_may_exist")
+                            or candidate.get("sync_status") == "syncing"
+                        )
+                    ),
+                    None,
+                )
+                if conflict is not None:
+                    _http_error(
+                        409,
+                        "server_name_conflict",
+                        "该 TRF 集合中已有同名 MCP 服务器发布任务",
+                    )
+                record["_trf_target_url"] = target_url
+                record["_trf_target_name"] = target_name
+                # POST 超时也可能已经送达，必须保留撤回责任。
+                record["trf_may_exist"] = True
+            else:
+                target_url = record.get("_trf_target_url")
+                target_name = record.get("_trf_target_name")
+                if not target_url or not target_name:
+                    record.update(
+                        sync_status="failed",
+                        sync_error="trf_target_unknown",
+                        sync_note="已从首页下架，但首次 TRF 发布目标不可用",
+                    )
+                    return _public_record(record)
+                payload = None
+            record["sync_status"] = "syncing"
+
+        if publish:
+            try:
+                await _remote_request(
+                    "POST",
+                    target_url,
+                    token_env=config.get("token_env"),
+                    payload=payload,
+                )
+            except _RemoteFailure as exc:
+                with _STATE_LOCK:
+                    record.update(
+                        sync_status="failed",
+                        sync_error=exc.code,
+                        sync_note="首页已发布，TRF POST 失败或结果未知，可重试",
+                    )
+                    return _public_record(record)
+            with _STATE_LOCK:
+                record.update(
+                    sync_status="syncing",
+                    sync_note="已提交 TRF，正在以集合 GET 结果确认",
+                )
+            try:
+                remote_servers = await _read_trf_servers(
+                    target_url,
+                    token_env=config.get("token_env"),
+                )
+            except _RemoteSchemaFailure as exc:
+                with _STATE_LOCK:
+                    record.update(
+                        sync_status="failed",
+                        sync_error=exc.code,
+                        sync_note="TRF POST 已提交，但集合 GET schema 无法用于确认",
+                    )
+                    return _public_record(record)
+            except _RemoteFailure as exc:
+                with _STATE_LOCK:
+                    record.update(
+                        sync_status="submitted",
+                        sync_error=exc.code,
+                        sync_note="TRF POST 已提交，但集合 GET 暂时无法确认",
+                    )
+                    return _public_record(record)
+            confirmed = any(
+                _same_trf_server(candidate, payload) for candidate in remote_servers
+            )
+            with _STATE_LOCK:
+                if confirmed:
+                    record.update(sync_status="synced", sync_note="TRF 集合已读回确认")
+                    record.pop("sync_error", None)
+                else:
+                    record.update(
+                        sync_status="submitted",
+                        sync_error="trf_confirmation_unknown",
+                        sync_note="TRF POST 已提交，但集合 GET 未读回匹配的六字段记录",
+                    )
+                return _public_record(record)
+
+        try:
+            await _delete_trf_server(
+                target_url,
+                target_name,
+                token_env=config.get("token_env"),
+            )
+        except _RemoteFailure as exc:
+            with _STATE_LOCK:
+                record.update(
+                    sync_status="failed",
+                    sync_error=exc.code,
+                    sync_note="首页已下架，TRF DELETE 失败或结果未知，可重试",
+                )
+                return _public_record(record)
+        with _STATE_LOCK:
+            record.update(
+                sync_status="syncing",
+                sync_note="已提交 TRF DELETE，正在以集合 GET 结果确认",
+            )
+        try:
+            remote_servers = await _read_trf_servers(
+                target_url,
+                token_env=config.get("token_env"),
+            )
+        except _RemoteSchemaFailure as exc:
+            with _STATE_LOCK:
+                record.update(
+                    sync_status="failed",
+                    sync_error=exc.code,
+                    sync_note="TRF DELETE 已提交，但集合 GET schema 无法用于确认",
+                )
+                return _public_record(record)
+        except _RemoteFailure as exc:
+            with _STATE_LOCK:
+                record.update(
+                    sync_status="submitted",
+                    sync_error=exc.code,
+                    sync_note="TRF DELETE 已提交，但集合 GET 暂时无法确认",
+                )
+                return _public_record(record)
+        still_present = any(
+            candidate["serverName"] == target_name for candidate in remote_servers
+        )
+        with _STATE_LOCK:
+            if still_present:
+                record.update(
+                    sync_status="submitted",
+                    sync_error="trf_confirmation_unknown",
+                    sync_note="TRF DELETE 已提交，但集合 GET 仍发现同名记录",
+                )
+            else:
+                record.update(
+                    sync_status="synced",
+                    sync_note="TRF 集合已确认同名记录缺席",
+                    trf_may_exist=False,
+                )
+                record.pop("sync_error", None)
+            return _public_record(record)
+
     async def change_publication(account, collection, record_id, publish):
         try:
             config = _load_config()
         except _ConfigError:
             _http_error(503, "invalid_config", "NEF_REGISTRY_CONFIG 无效")
+        with _STATE_LOCK:
+            current = _ACCOUNTS[account][collection][record_id]
+            use_new_trf = (
+                collection == "servers"
+                and (
+                    (publish and _uses_trf_server_contract(config, current))
+                    or (not publish and bool(current.get("_trf_target_url")))
+                )
+            )
+        if use_new_trf:
+            return await change_trf_server_publication(
+                account,
+                record_id,
+                publish,
+                config,
+            )
         with _STATE_LOCK:
             record = _ACCOUNTS[account][collection][record_id]
             if record.get("sync_status") == "syncing" or record.get("discovery_status") == "discovering" or record.get("gateway_busy"):
@@ -1183,6 +1648,19 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
             record.pop("sync_note", None)
             if not publish and not record.get("trf_may_exist"):
                 record.update(sync_status="not_required", sync_note="已从首页下架，未向 TRF 发布过")
+                return _public_record(record)
+            if (
+                collection == "packages"
+                and publish
+                and (
+                    config.get("trf_mcp_servers_url")
+                    or not config.get("publish_url")
+                )
+            ):
+                record.update(
+                    sync_status="not_required",
+                    sync_note="自助套餐仅在本地发布，不同步到 TRF MCP 服务器集合",
+                )
                 return _public_record(record)
             url = config.get("publish_url" if publish else "withdraw_url")
             if not url:
@@ -1223,6 +1701,37 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
         _, identity = auth(authorization, "af:register")
         record = _get_owned_server(_account_from_record(identity), server_id)
         return await change_publication(record["source_account"], "servers", server_id, False)
+
+    @router.delete("/api/v1/network/servers/{server_id}")
+    async def delete_network_server(
+        server_id: str,
+        authorization: str | None = Header(default=None),
+    ):
+        _, identity = auth(authorization, "af:register")
+        account = _account_from_record(identity)
+        owned = _get_owned_server(account, server_id)
+        source_account = owned["source_account"]
+        with _STATE_LOCK:
+            state = _ACCOUNTS.get(source_account, {})
+            record = state.get("servers", {}).get(server_id)
+            if record is None:
+                _http_error(404, "not_found", "网络服务器不存在")
+            if (
+                record.get("sync_status") == "syncing"
+                or record.get("discovery_status") == "discovering"
+                or record.get("gateway_busy")
+            ):
+                _http_error(409, "busy", "服务正在处理另一项操作，暂不能删除")
+            if record.get("publication_status") == "published":
+                _http_error(409, "unpublish_required", "请先取消发布，再删除本地记录")
+            if record.get("trf_may_exist"):
+                _http_error(
+                    409,
+                    "withdraw_required",
+                    "TRF 记录可能仍存在，请先重试撤回并确认缺席",
+                )
+            del state["servers"][server_id]
+        return {"deleted": True, "id": server_id}
 
     @router.post("/api/v1/network/af-servers/{server_id}/mcp")
     async def af_tool_gateway(server_id: str, request: Request,

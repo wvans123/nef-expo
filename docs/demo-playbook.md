@@ -6,11 +6,11 @@
 
 ## 当前验收与 Windows 后台（2026-09-21）
 
-本轮已通过 Windows 任务 `NEF-Expo` 重启，监听 `127.0.0.1:8069`，PID `29432`，`pythonw.exe` 父进程为 Windows `svchost.exe`（PID `3252`），任务 `Running`；实例为 `e31bbc9fdfd1567f`。首页和实例接口 200，Tunnel `/ready` 200、4 条就绪连接。Chrome 正式页面已刷新，旧内存账号及订阅清空；关闭 Codex 不会停止该任务。进程信息为本次检查快照，后续操作前仍须核对。
+2026-09-21 15:05 左右已通过 Windows 任务 `NEF-Expo` 重启加载六字段 TRF 契约与删除入口，监听 `127.0.0.1:8069`，PID `28380`，`pythonw.exe` 父进程为 Windows `svchost.exe`（PID `3252`），任务 `Running`；实例为 `97ef1584017355d0`。首页和实例接口 200，Tunnel `/ready` 200。Chrome 正式双向开放页面已刷新，三字段表单已生效，普通页不显示 TRF 运维查询。旧内存账号、订阅与登记清空；关闭 Codex 不会停止该任务。上述进程信息是检查快照，后续操作前仍须核对。
 
-71 项后端定向测试及 11 项界面契约测试通过，Node purchase/story 通过；1440px 与 390px 的 integration UI、catalog UI 均通过。验证开通留在原页、费用与 PRO/MAX 用途弹窗、发现不发布、发布上首页并 POST TRF、撤回下架及禁止调用、机器狗 POST 后每 3 秒 GET、车流量异步 POST 回传。对端均为本地模拟服务，测试结束已关闭 8071 夹具；不代表真实现场已联调。已有模型提示词修复及其 58 项测试沿用下方历史证据，本轮未重复调用远程模型。
+本轮 81 项后端/页面契约定向测试通过（TRF MCP、network registry、market publication、network gateway、legacy catalog publication、integration config、showcase），未跑全量测试。1440px 与 390px 的 integration UI、TRF operations UI 均通过：发现失败可删除、三字段登记、严格六字段 POST + GET 确认、按名 DELETE + GET 确认、首页来源与分类、普通页隐藏运维、查询不变成工具、失败与切账号的旧响应隔离；同时回归费用、开通不跳转、机器狗 GET 轮询及车流量 POST 回传。对端均为本地模拟服务，8071 夹具已关闭，不代表真实现场已联调。本轮未重复调用远程模型，既有模型验收见历史证据。
 
-当前仅对接 TRF：内部目录不在首页展示，拉取和选定 NEF 目录发布位于“双向开放 → TRF 同步管理”。外部能力默认巡检小车，URL 留空；连接发现后必须显式发布，取消发布立即本地下架。配置入口与撤回字段见 [README](../README.md#2-post-地址只改这一份文件)。实际 TRF 拉取/发布/撤回地址、巡检小车 MCP、现场 Intent/结果地址仍待提供；旧 IP 未恢复。公网 Access 登录后的正向业务访问仍未验收。
+当前仅对接 TRF：普通页隐藏管理入口，`?ops=1` 可查询服务登记；不再提供旧能力/场景目录导出按钮。外部能力默认巡检小车，URL 留空；连接发现后必须显式发布，取消发布立即本地下架。配置入口与撤回字段见 [README](../README.md#2-post-地址只改这一份文件)。实际 TRF 集合地址、GET 完整回包、巡检小车 MCP 和现场 Intent/结果地址仍待提供；旧 IP 未恢复。公网 Access 登录后的正向业务访问仍未验收。
 
 ## Windows 独立后台托管（2026-09-20 历史部署记录）
 
@@ -73,8 +73,8 @@
 入口：`/`。直接在原版工作台上增量修改；`/static/showcase.html` 旧书签自动跳转。保留原能力卡片、弹窗、拖拽编排、参数表单与鉴权步骤，不使用另一套重做的展示页。
 
 1. **能力超市**：场景套餐与基础能力并列供给，卡内显示组成与折扣月价，点击能力复用详情弹窗。扩展能力仅展示已发布的外部工具与自助套餐，采用图标、名称和用途说明；TRF 管理不在首页展示。开通后停留当前页。
-2. **套餐从哪里来**：进入原自助编排，拖入或点击能力、拖拽排序、命名并保存，再同步网络目录。展示 NEF 的配置检查与可选智能推荐；方案需要确认，保存不是部署完成。
-3. **外部能力怎样进入网络**：进入双向开放，填巡检小车 MCP URL，点击“连接并发现工具”，查看工具用途与参数，再点击“发布”。工具才进入首页，并向 TRF POST 工具声明和 NEF 代理入口。点击“取消发布”本地下架并阻止新调用，有撤回地址时通知 TRF；没配置地址或失败时明确显示待同步、可重试。登记和发现不会自动发布。
+2. **套餐从哪里来**：进入原自助编排，拖入或点击能力、拖拽排序、命名并保存，再显式发布到本地首页；套餐不发到 TRF MCP Server 集合。展示 NEF 的配置检查与可选智能推荐；方案需要确认，保存不是部署完成。
+3. **外部能力怎样进入网络**：进入双向开放，填巡检小车 MCP URL，点击“连接并发现工具”，查看工具用途与参数，再点击“发布”。工具才进入首页，并向 TRF POST 六字段服务登记，url 使用填写的外部 MCP 地址。点击“取消发布”本地下架并阻止新调用，向首次发布集合地址追加 serverName 发 DELETE 并 GET 确认；失败可重试。草稿、发现失败、确认撤回后的记录可“删除记录”。登记和发现不会自动发布。
 4. **订阅与鉴权**：接入演示账号，按场景开通。订阅赋予使用权，调用时再次核验，不产生真实费用。
 5. **Intent 主流程**：三个场景都可从套餐进入 Intent，也可选择“不指定场景”。填写业务目标后直接真实转发，未配置则待对接；不指定场景只检查账号与 Intent scope，场景入口仍检查场景订阅。端网协同保留 API / Tool。
 6. **MCP 北向接口**：仍从“连接 NEF 并发现工具 → 选择工具 → tools/call”开始。它是 AF 发现 NEF 的工具，不能与双向开放中“NEF 发现外部 MCP Server”的方向混淆。
@@ -324,20 +324,20 @@ Tunnel 路由已开启 Protect with Access，使用 Team name `spring-cherry-1b5
 5. 已在保存 Access 保护后发布域名路由，目标为 `http://127.0.0.1:8069`，同时开启 Tunnel 的 Access 令牌校验。HTTPS 登录页可达，控制台确认 DNS 已创建。
 6. 缺失及错误凭据的六项外部检查、浏览器登录后原版页面检查已通过。尚需使用有效机器凭据调用接口、回传状态/数据/媒体；不能把登录页或 302 当成后端成功。内部执行接口未配置或未联调时，公网可达也不代表业务已经执行。
 
-回传现优先使用无 NEF Key 的 `POST /api/v1/scene-feedback/{scene_id}`，旧带场景 Key 接口仍兼容；限制与示例见[场景接口说明](reference/integration.md)。无 Key 不绕过 Access，通过受保护域名仍需上述两个 Cloudflare 头。重启清空事件，固定场景路径不变，备用 Key 失效。向目录发布的 NEF 代理入口由 `registry.nef_base_url` 决定，不能使用 localhost；内部调用端使用受 Access 保护域名也需要机器凭据。
+回传现优先使用无 NEF Key 的 `POST /api/v1/scene-feedback/{scene_id}`，旧带场景 Key 接口仍兼容；限制与示例见[场景接口说明](reference/integration.md)。无 Key 不绕过 Access，通过受保护域名仍需上述两个 Cloudflare 头。重启清空事件，固定场景路径不变，备用 Key 失效。新 TRF 登记使用外部 MCP 原始 URL；独立 NEF 代理入口由 `registry.nef_base_url` 决定，跨机不能使用 localhost；内部调用端使用受 Access 保护域名也需要机器凭据。
 
 ## 网络目录与注册配置
 
 - 新部署填写 `config/integration.local.json` 的 `registry`；旧部署通过 `NEF_REGISTRY_CONFIG` 指定独立文件仍兼容。
-- 填写同事提供的实际 `catalog_url` / `publish_url`（模板默认 null），密钥通过 `token_env` 指向环境变量。
+- 填写同事提供的完整 `trf_mcp_servers_url` 集合地址（模板默认 null），密钥通过 `token_env` 指向环境变量。
 - 在 `mcp_servers` 中加入获准的 MCP 地址，和注册 JSON 的 URL 精确匹配。不能通过页面登记任意 URL 后绕过运维批准。
-- 设置 `nef_base_url` 为内部网元能访问的 NEF 地址；否则无法发布 AF 的调用入口。配置 `network_clients` 的独立 `token_env` 与允许访问的 `af_accounts`。AF 账号 Key 不能替代内部调用凭证。
-- 目录接口返回 `{items:[...]}`；发布接口明确 `{accepted:true}` 才显示已同步。其他 2xx 仅表示已提交。
+- 设置 `nef_base_url` 为内部网元能访问的 NEF 地址；用于独立 NEF 代理调用；新 TRF 六字段发布不依赖它。配置 `network_clients` 的独立 `token_env` 与允许访问的 `af_accounts`。AF 账号 Key 不能替代内部调用凭证。
+- TRF 集合 GET 当前支持数组或单字段 items/data 包装；发布后六字段读回一致、撤回后同名记录缺席才显示已同步。其他结构明确报错，等待同事提供实际响应后适配。
 - 目录和发布契约详见展示设计。未配置时可讲本地定义 / 登记，但工具发现和网络同步会明确失败，不伪造演示成功。
 
 ## 本地完整代理链路验收
 
-执行 `python -m pytest tests/test_network_gateway.py -q`，其中真实 TCP 测试由本地 AF、NEF、目录接收端组成，确认从发布的 NEF endpoint 发现 / 调用 AF 工具并取得实际回执。`python tests/workbench_fixture.py --port 8071` 仅用于隔离浏览器验收，配置不会带入 8069；结束后停止。生产网络是否接收并保存记录仍需同事接口与真实环境确认。
+执行 `python -m pytest tests/test_network_gateway.py -q`，其中真实 TCP 测试由本地 AF、NEF、目录接收端组成，该用例保留旧代理发布契约，确认从 NEF endpoint 发现 / 调用 AF 工具并取得实际回执。`python tests/workbench_fixture.py --port 8071` 仅用于隔离浏览器验收，配置不会带入 8069；结束后停止。生产网络是否接收并保存记录仍需同事接口与真实环境确认。
 
 ## 演示准备与验收
 

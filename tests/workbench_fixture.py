@@ -18,6 +18,10 @@ sys.path.insert(0,str(ROOT))
 
 class Peer(BaseHTTPRequestHandler):
     requests=[]
+    servers={name:{'serverName':name,'serverType':'Steamable HTTP','toolType':kind,
+                   'description':'本地 TRF 服务登记，未发现工具','url':'http://127.0.0.1/mcp','serverStatus':'active'}
+             for name,kind in [('fixture-nf','nf tool'),('fixture-computing','computing tool'),
+                               ('fixture-sensing','sensing tool'),('fixture-third-party','third-party tool')]}
     nef_port=8071
     def log_message(self,*args):pass
     def respond(self,value,status=200):
@@ -26,8 +30,13 @@ class Peer(BaseHTTPRequestHandler):
         if self.path=='/probe':return self.respond({'requests':self.requests})
         self.requests.append({'method':'GET','path':self.path,'time':time.monotonic()})
         if self.path=='/latest':return self.respond({'final_result':'Local fixture perception result'})
+        if self.path=='/trf/api/v1/mcp-servers':return self.respond(list(self.servers.values()))
         self.respond({'items':[{'id':'fixture.vision','name':'联调视觉工具','kind':'tool','description':'本地验证目录，不是生产网络数据','inputSchema':{'type':'object','properties':{}}},{'id':'fixture.patrol','name':'联调巡检套餐','kind':'package','description':'本地目录契约验证'}]})
     def do_DELETE(self):
+        raw=self.rfile.read(int(self.headers.get('Content-Length','0')))
+        self.requests.append({'method':'DELETE','path':self.path,'time':time.monotonic(),'body':raw.decode('utf-8')})
+        if self.path.startswith('/trf/api/v1/mcp-servers/'):
+            self.servers.pop(self.path.rsplit('/',1)[-1],None)
         self.respond({'deleted':True})
     def do_POST(self):
         raw=self.rfile.read(int(self.headers.get('Content-Length','0')))
@@ -36,6 +45,9 @@ class Peer(BaseHTTPRequestHandler):
             assert self.headers.get('Content-Type')=='text/plain; charset=utf-8'
             return self.respond({'text':raw.decode('utf-8')})
         body=json.loads(raw)
+        if self.path=='/trf/api/v1/mcp-servers':
+            self.servers[body['serverName']]=body
+            return self.respond(body,201)
         if self.path=='/plans':return self.respond({'accepted':True,'subscriberId':body['subscriberId']})
         if self.path in ('/publish','/withdraw'):return self.respond({'accepted':True})
         if self.path=='/traffic-intent':
@@ -63,7 +75,7 @@ if __name__=='__main__':
     base=f'http://127.0.0.1:{peer.server_port}'
     runtime=ROOT/'.runtime';runtime.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='workbench-fixture-',dir=runtime) as folder:
-        registry=Path(folder)/'registry.json';registry.write_text(json.dumps({'catalog_url':base+'/catalog','publish_url':base+'/publish','withdraw_url':base+'/withdraw','mcp_servers':{base+'/mcp':{}},'nef_base_url':f'http://127.0.0.1:{args.port}','network_clients':{}}),encoding='utf-8')
+        registry=Path(folder)/'registry.json';registry.write_text(json.dumps({'trf_mcp_servers_url':base+'/trf/api/v1/mcp-servers','mcp_servers':{base+'/mcp':{}},'nef_base_url':f'http://127.0.0.1:{args.port}','network_clients':{}}),encoding='utf-8')
         routes={id:{'intent':{'url':base+'/intent','body':{'text':'$text'}},'invoke':{'url':base+'/invoke','body':'$arguments'}} for id in ['robot_patrol','traffic_flow_detection','collaborative_tracking']}
         routes['robot_patrol'].update(intent={'url':base+'/robot-intent','content_type':'text/plain','body':'$text'},result={'url':base+'/latest','method':'GET'})
         routes['traffic_flow_detection']['intent']={'url':base+'/traffic-intent','method':'POST','body':{'user_request':'$text'}}

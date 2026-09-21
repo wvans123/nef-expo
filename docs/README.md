@@ -1,6 +1,6 @@
 # 文档索引
 
-更新：2026-09-21。主线：能力供给 → 套餐定义 / MCP 连接发现 → 显式发布 / 取消发布 → 场景订阅 → Intent 与文字结果。TRF 同步管理位于双向开放折叠区，首页仅展示已发布扩展能力。API / MCP 北向接入作为并行开放方式保留。
+更新：2026-09-21。主线：能力供给 → 套餐定义 / MCP 连接发现 → 显式发布 / 取消发布 → 场景订阅 → Intent 与文字结果。TRF 查询仅在运维视图显示；首页扩展区仅展示已发现并发布的工具及本地自助套餐。API / MCP 北向接入作为并行开放方式保留。
 
 ## 用户指南
 - [项目说明](../README.md)：换电脑下载、前台启动与 Windows 独立后台任务、统一 POST 地址配置和修改接口的文件位置；维护中，部署入口以此为准。
@@ -20,9 +20,9 @@
 - [套餐订购通知与订阅查询](reference/subscription-query.md)：固定 `subscriberId=subscriber-001`、折扣计价、取消 DELETE、通知过滤、2053/2051、请求回包与可选启动重置；后端兼容空选择，页面至少选一项。
 - [统一对接配置](../config/integration.example.json)：`start.py` 自动生成本地配置，集中设置订购、折扣、开放 MCP、TRF 发布及 Intent / 结果地址；已有 local 文件不覆盖、不上传。
 - [旧订购通知配置](../config/subscription.example.json)：兼容独立配置模式，新部署优先使用统一文件。
-- [TRF 目录同步与发布](reference/network-catalog.md)：双向开放「TRF 同步管理」的手动拉取、选择、预览与发布接口；首页公开能力投影；真实 TRF 接口待确认。
+- [TRF MCP Server 契约与能力映射](reference/network-catalog.md)：六字段 POST、集合 GET、按名 DELETE、删除本地登记、四类服务与 NF 能力/套餐的边界；实现已对齐本次约定，真实 IP/回包待提供。
 - [农场平台联调](reference/farm-integration.md)：套餐查询、无 Key MCP 登记发现、显式发布/撤回及网络代理调用；同一接入流程用于巡检小车，真实地址待提供。
-- [网络目录配置](../config/registry.example.json)：运维侧 TRF 拉取 / 发布接口和 NEF 网络可达入口、内部调用方授权及 MCP 服务允许列表示例；不含实际密钥。
+- [网络目录配置](../config/registry.example.json)：运维侧 TRF MCP 集合地址和独立 NEF 代理入口、内部调用方授权及 MCP 服务允许列表示例；不含实际密钥。
 - [配置模板](../config/bridge.example.json)：从接口契约配套维护的可复制配置；示例域名不可用，必须按实际接口替换。
 
 ## 报告 / 快照
@@ -34,6 +34,6 @@
 ## 展示资产
 - [原版活动工作台](../static/index.html)：原能力超市、订阅弹窗、拖拽编排、API / MCP 调试与鉴权交互上的增量更新；七个可见页签，隐藏 Skill / 场景方案和 AF 终端。
 - [增量控制逻辑](../static/workbench.js) / [增量样式](../static/workbench.css) / [订购交接](../static/purchase.js)：场景订阅与 Intent、账号跳转、可选网络能力范围、通知状态与重试、网络目录、自动准备调用页回传接口；沿用 index.html 原样式。
-- [本地目录发布交互](../static/catalog-ui.js)：仅发布明确选中的本地能力和场景；修改选择需重新预览，保留账号隔离和真实接收状态。
+- [旧目录发布交互](../static/catalog-ui.js)：兼容资产，活动页不再加载；新 TRF 操作由 workbench.js 负责。
 - [工具发现客户端](../static/showcase-mcp.js) / [结果语义](../static/showcase-story.js)：活动工作台复用的纯协议和回执模块。
 - [旧展示书签](../static/showcase.html)：兼容跳转至原工作台，不再维护第二套活动界面；其余未引用的 showcase 样式和控制脚本为旧迭代资产。

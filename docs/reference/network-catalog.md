@@ -1,70 +1,106 @@
-# 选定网络能力与场景目录发布
+# TRF MCP Server 契约与能力映射
 
-分类：接口参考。更新：2026-09-21。
+分类：接口参考。更新：2026-09-21。字段和路径按本次联调约定实现；真实 IP、鉴权及 GET 完整回包尚待提供。目前仅验证本地模拟对端。
 
-用途：将 NEF 能力超市中明确选中的本地原子能力或场景元数据交给网络目录。它与农场 MCP 登记、账号订购通知是三个不同方向；本接口不发布账号购买信息，也不调用 PA/CA 执行业务。
+## 1. 服务、工具、能力和套餐
 
-**状态：代码、本地模拟 HTTP 对端及桌面 / 手机尺寸浏览器测试已完成，真实 TRF 的地址、字段及接收规则待同事确认。上传不会更新已有进程，新机器按 README 启动后验收。** 此处是本项目适配契约，不预设对方正式协议。
-
-## 页面入口
-
-在「双向开放 → TRF 同步管理」点击「发布本平台能力至 TRF」，勾选原子能力或场景套餐，先「预览正文」再「发布目录」。首页不展示这个内部管理入口。默认不选任何项，修改选择后需重新预览；切换账号或页签会关闭弹窗，旧请求不会显示到新账号。发布中的请求可能已送出，关闭弹窗不会撤回它。
-
-此操作复用下述接口和 `registry.publish_url`，不增加配置文件。页面仅列出本地已开放能力和内置场景，不包含导入目录或私有 AF 工具。发送后按实际回执区分「已同步 · 对方已确认」和「已提交 · 待对方确认」，不自动重发。
-
-同一折叠区的「从 TRF 同步」调用 `POST /api/v1/network/catalog/refresh`，由 NEF 向 `registry.catalog_url` 发 GET，接收并校验 `{"items":[{"id":"...","name":"...","kind":"tool","description":"...","inputSchema":{}}]}`，`kind` 也可以是 `package`。`GET /api/v1/network/catalog` 只读取本地快照；目录供编排能力池使用，不直接作为首页已发布工具展示。页面定时读取本地状态不会自动拉取 TRF。
-
-外部 MCP 和自助套餐使用各自的显式 `/publish`、`/unpublish`。`GET /api/v1/network/market` 无 Key 返回全平台已发布扩展能力的公开投影，不含来源账号、上游 URL 或凭据。外部 MCP 的发布、撤回正文与状态见[农场联调第 6 节](farm-integration.md#6-第二条链路农场-mcp-注册到网络)。
-
-维护者回归：`tests/test_catalog_publication.py` 验证接口；`tests/test_catalog_ui.cjs` 使用可选的 Playwright，在 `tests/workbench_fixture.py --port 8087` 的隔离服务上运行 `node tests/test_catalog_ui.cjs http://127.0.0.1:8087`，不访问 8069 或真实对端。浏览器截图保存在忽略上传的 `.runtime/catalog-ui/`。换电脑运行项目不需要这些测试依赖。
-
-## 请求
-
-| NEF 路径 | 用途 |
+| 对象 | 当前归属与展示 |
 |---|---|
-| `POST /api/v1/network/catalog/publication` | 只预览发布正文，不联系目录 |
-| `POST /api/v1/network/catalog/publish` | 向运维配置的目录地址实际发送正文 |
+| NF 能力 | NEF 的能力模型与 API / Tool 映射；NF 不必实现 MCP Server，首页现有能力卡不改成服务器卡 |
+| MCP Server | TRF 登记服务名、描述、地址和类型；server description 描述服务，不能替代工具参数与调用定义 |
+| MCP tool | 从获准服务的 `tools/list` 实际发现；显式发布后才上首页，保留所属 `serverName`，按 `toolType` 分类 |
+| 场景 / 自助套餐 | NEF 管理能力组合、价格和权益；不发到 MCP Server 集合接口。已购套餐仍按原契约通知农场 |
 
-两者使用相同 JSON：
+TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`。当前外部接入固定最后一类；查询到其他三类只作运维信息，不会自动成为可调用工具或进入编排能力池。
+
+若以后要让 TRF 发现 NEF 已包装的基础工具，可以另行登记一个真实 NEF MCP 服务，再由消费者发现其工具；必须先确定服务身份、toolType、认证和公开范围。不能把每个 NF description 或套餐虚构成 MCP Server。本轮不自动登记 NEF 自身或导出旧套餐。
+
+## 2. 页面和配置
+
+双向开放只填服务名称（`serverName`）、描述（`description`）、MCP 地址（`url`）。默认名称 `patrol-car-managementx`，描述为巡检任务、预检测开关、图像采样频率管理，URL 留空。名称最长 128 字符，匹配 `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`，本进程内不可与其他登记重名。
+
+点击“连接并发现工具”只登记、握手、读取工具；发现失败也保留“删除记录”。点击“发布”才上首页并发给 TRF；“取消发布”先本地下架，再撤回远端。远端撤回尚未确认时保留记录与重试入口，不能直接删除而丢失撤回信息。
+
+普通页面隐藏 TRF 管理。`/?ops=1#afreg` 中“TRF 服务登记 · 运维”可手动查询四类服务；此参数只是显示开关，接口仍要求账号 Key 与 `af:register` scope。页面的 30 秒本地刷新不自动请求 TRF。
+
+只改 `config/integration.local.json` 中的 `registry`：
 
 ```json
 {
-  "capability_ids": ["target_detection"],
-  "service_ids": ["robot_patrol"]
+  "trf_mcp_servers_url": "http://<TRF-IP>:<端口>/trf/api/v1/mcp-servers",
+  "token_env": null,
+  "mcp_servers": {"http://<巡检小车IP>:<端口>/mcp": {}}
 }
 ```
 
-带 `Authorization: Bearer <NEF账号Key>`，要求 `af:register` scope；公网另需 Access 凭据。只选能力或只选场景均可，但不能全空。能力最多 64 项，场景最多 16 项；重复、未知、规划中能力或额外字段返回 422。无 Key 为 401，scope 不足为 403。
+这是 registry 子对象片段，不要覆盖整个统一配置。一个集合地址用于 GET、POST 以及追加 serverName 的 DELETE；未取得地址时保留 null，不填占位 IP。`mcp_servers` 是精确 URL 允许列表，表单登记不会自动授权。认证如需 Bearer，`token_env` 填服务端环境变量名，不写密钥值。
 
-请求体不能传接收地址、凭据或任意元数据。新部署配置在 `config/integration.local.json` 的 `registry` 中；旧 `NEF_REGISTRY_CONFIG` 显式覆盖仍兼容。`nef_base_url` 指向网络可访问的 NEF 地址，例如 `http://<NEF电脑IP>:8069`，`publish_url` 是目录接收地址，`token_env` 仅引用服务端凭据变量。预览也要求有效 `nef_base_url`；缺失返回 503 `gateway_not_configured`。
+新协议发布原始 MCP 地址，TRF 消费者可能直接访问它；现有 NEF 代理入口仍独立保留，但不会偷偷替换这次约定的 url。取消发布会关闭 NEF 展示和新代理调用，不会关闭外部 MCP 服务本身。
 
-## 发布正文
+## 3. NEF 发给 TRF
 
-| 字段 | 含义 |
+### 发布
+
+`POST {trf_mcp_servers_url}`，`Content-Type: application/json`，严格六字段：
+
+```json
+{
+  "serverName": "patrol-car-managementx",
+  "serverType": "Steamable HTTP",
+  "toolType": "third-party tool",
+  "description": "管理巡检小车，如在巡检小车上启动或关闭巡检任务、配置目标预检测开关、图像采样频率等。",
+  "url": "http://<巡检小车IP>:<端口>/mcp",
+  "serverStatus": "active"
+}
+```
+
+`serverType` 按本次给定枚举原样发送 `Steamable HTTP`；对方若修正枚举，再集中修改 `_trf_publication()`。三项固定值由后端生成，前端不能覆盖。不附加工具数组、source_account、NEF Key 或套餐字段。
+
+### 查询与确认
+
+`GET {trf_mcp_servers_url}`，无正文。目前支持完整数组、单字段 `{"items":[...]}` 或 `{"data":[...]}`，每项包含六字段；额外项字段会从 NEF 投影中去掉。分页或其他外层结构尚未约定，返回明确的 schema 错误，不把未知结构当空列表。
+
+发布的 HTTP 2xx 不直接等于同步成功：随后 GET，读回六字段一致的记录才记 `synced`；查不到匹配项或查询暂不可用记 `submitted`，请求或 schema 错误按实际记录。GET 读取确认不证明后续工具可执行。
+
+### 撤回
+
+`DELETE {首次发布集合地址}/{serverName}`，无请求体。随后 GET 确认同名记录缺席才记 `synced`；DELETE 返回 404 也会读回确认。失败或仍存在时保留撤回责任并可重试。
+
+首次发布的地址及名称保存在进程内；配置改址后该记录仍在原目标重试 / 撤回，避免删除新环境的同名服务。确认撤回后可删除本地登记，再用新配置重新登记。超时可能已经到达对端，不自动声称未发送；当前没有对方幂等规则，重试需核对实际记录。
+
+所有请求不走系统代理、不跟随重定向。登记与状态目前仍在内存，重启会清空；重启前应撤回本进程发布的登记，或由对方按 serverName 清理，NEF 不会在重启后自动猜测并删除 TRF 记录。
+
+## 4. 页面调用 NEF 的接口
+
+均需 `Authorization: Bearer <NEF账号Key>` 与 `af:register` scope，公开市场除外。
+
+| 方法 / 路径 | 正文与行为 |
 |---|---|
-| `type` | 固定 `nef_catalog_publication` |
-| `schema_version` | `1.0` |
-| `source` | `NEF` |
-| `catalog_id` | 从 NEF 公开入口生成的稳定目录标识 |
-| `revision` | 规范化正文的 SHA-256 摘要 |
-| `update_mode` | `upsert_selected`；只更新所选项，不表示删除未选目录项 |
-| `items` | 所选能力和场景的真实目录声明 |
-| `access` | NEF 账号 Bearer、需要权益，以及真实调用头 `X-NEF-Execution: live` |
-| `execution_readiness` | `not_verified`；目录声明不证明真实执行可用 |
+| POST `/api/v1/network/servers` | `{serverName,description,url}`；只保存；旧 `name` 保留兼容 |
+| POST `/api/v1/network/servers/{id}/discover` | 无正文；连接允许列表地址并发现工具 |
+| GET `/api/v1/network/servers/{id}/publication` | 预览六字段，不外发；新协议无需 nef_base_url |
+| POST `/api/v1/network/servers/{id}/publish` | 无正文；要求至少发现一个工具，上首页并 POST / GET TRF |
+| POST `/api/v1/network/servers/{id}/unpublish` | 无正文；下架并 DELETE / GET TRF；旧 `/sync` 为 publish 别名 |
+| DELETE `/api/v1/network/servers/{id}` | 无正文；删除未发布且无需远端撤回的本地记录；繁忙、已发布或待撤回返回 409 |
+| GET `/api/v1/network/servers` | 当前账号私有登记与全部 open 登记；包含 discovery/publication/sync 状态 |
+| GET `/api/v1/network/trf/servers` | 真实请求 TRF；`{status:"loaded",servers:[...]}`，未配置为 `not_configured` / 空数组 |
+| GET `/api/v1/network/market` | 无 Key；只返回显式发布的工具/套餐公开投影，工具带 serverName、toolType，不含上游 URL |
 
-原子能力项包含 `kind=capability`、`id/name/description/status/source/category`、`inputSchema`、`standard_basis` 及 API/Tool 入口。场景项包含 `kind=scene`、`id/name/description/status/source`、`modes/components` 及其实际支持的 Intent/API/Tool 入口。`interfaces` 中带 `mode/method/url`，工具入口带准确 `tool_name`，适用时带 `inputSchema`。
+未授权 401/403；私有记录越权 404；同名冲突/繁忙/未先撤回 409；字段无效 422；配置无效 503；上游协议/HTTP 失败 502、超时 504。发布操作可能 HTTP 200 但 `sync_status=failed`，调用方必须读状态。
 
-不导出其他账号的私有 MCP 工具、用户订阅、模型 Key、上游真实执行地址或任何 Bearer 凭据。AF 登记的目录报文另见[农场平台联调](farm-integration.md)，不把 AF 服务冒充 NEF 原子能力。
+发现失败、未发布、确认撤回后的记录可删除；open 登记可由具备该 scope 的其他账号管理，私有登记仅所有者可管理。
 
-## 接收与重试
+## 5. 旧目录兼容边界
 
-预览返回完整正文；发布时向 `publish_url` POST 同一结构，不跟随重定向。仅当对方 HTTP 成功且 JSON 明确为 `{"accepted":true}` 时，NEF 才返回 `sync_status=synced`；其他成功响应记为 `submitted`。返回另含 `catalog_id/revision/item_count/accepted`，并不宣称目录中的能力可以执行。
+旧 `catalog_url`、`publish_url`、`withdraw_url` 仅为已有部署保留，不是本次 TRF MCP Server 契约。旧 `/catalog/refresh` 导入 `items` 工具/套餐快照；旧 `/catalog/publication` 与 `/catalog/publish` 接受 `capability_ids` / `service_ids`，生成 `type=nef_catalog_publication` 元数据，发送到旧 publish_url。它们不会发送到新的 trf_mcp_servers_url，活动页已移除旧目录导出入口。
 
-配置缺失、无效、凭据缺失或上游失败均不标记成功。请求不是后台自动同步；调用方需先核对实际回执再决定重发，接收方可按 catalog_id 与 revision 识别重复。这个接收规则与订购回调的 2xx 送达判定不同，不能混用。
+显式旧 publish_url 模式保留 `mcp_server_registration`（NEF 代理地址 + tools）、`network_package_declaration` 及 POST withdraw_url 撤回，`accepted:true` 才确认。新配置模式自助套餐仅本地发布，`sync_status=not_required`。不要把旧报文发到 `/trf/api/v1/mcp-servers`。
 
-## 联调顺序
+## 6. 联调与维护验证
 
-1. TRF 同事提供实际 GET 目录地址、POST 发布及撤回地址、认证方式、字段样例和确认格式。
-2. NEF 运维配置地址及凭据，先用预览核对选中的能力、入口 URL 与 schema。
-3. 在获准测试目录发布一项能力和一个场景，核对目录存储及明确接收回执。
-4. 另行验收目录消费者到 NEF 的真实调用与权益。发布成功不替代执行验证，也不授予账号新的订阅。
+1. 同事提供实际 TRF 集合地址、GET 完整回包、认证方式和重复 serverName 的行为。
+2. 将巡检小车地址加入允许列表，页面填写三个字段并发现真实工具。
+3. 发布后核对 TRF 六字段记录、首页工具来源；取消后核对 DELETE 与 GET 缺席，最后删除本地记录。
+4. 真实工具调用单独验收；查询 TRF 不授予订阅或执行权限。
+
+`tests/test_trf_mcp_registry.py` 覆盖 HTTP 契约和失败边界；`tests/test_integration_ui.cjs` 与 `tests/test_catalog_ui.cjs` 在 `tests/workbench_fixture.py --port 8071` 隔离服务上验证桌面/手机页面，后者现在验证运维查询而非旧目录导出。截图在忽略上传的 `.runtime/` 中。测试不访问真实 TRF 或正式 8069 账号。

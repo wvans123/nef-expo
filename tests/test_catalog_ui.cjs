@@ -1,122 +1,76 @@
-/* Run only against tests/workbench_fixture.py, never the live demo service. */
+/* TRF operations UI; run only against tests/workbench_fixture.py. */
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {chromium}=require('playwright');
-const origin=process.argv[2],url=new URL(origin);
-const runId=Date.now().toString(36);
+const origin=process.argv[2],url=new URL(origin),runId=Date.now().toString(36);
 assert.equal(url.hostname,'127.0.0.1');
 assert(url.port&&url.port!=='8069','Use an isolated fixture port');
-const output=path.resolve('.runtime/catalog-ui');
-fs.mkdirSync(output,{recursive:true});
+const output=path.resolve('.runtime/catalog-ui');fs.mkdirSync(output,{recursive:true});
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 
 (async()=>{
   const browser=await chromium.launch({headless:true,...(process.env.NEF_TEST_BROWSER_CHANNEL?{channel:process.env.NEF_TEST_BROWSER_CHANNEL}:{})});
   try{
     for(const viewport of [{width:1440,height:1000},{width:390,height:844}]){
-      const context=await browser.newContext({viewport});
-      const page=await context.newPage(),errors=[],sent=[];
+      const context=await browser.newContext({viewport}),page=await context.newPage(),errors=[],sent=[];
       page.on('pageerror',error=>errors.push(error.message));
-      page.on('request',request=>{
-        if(/\/catalog\/(publication|publish)$/.test(new URL(request.url()).pathname))sent.push({path:new URL(request.url()).pathname,body:request.postDataJSON()});
-      });
-      await page.goto(origin);
-      await page.waitForFunction(()=>wb.scenes.length===3&&CAPS.length>0);
-      assert.equal(await page.locator('#wb-open-catalog-publication').isVisible(),false);
-      await page.evaluate(()=>activateTab('afreg',true));
+      page.on('request',request=>{if(request.url().endsWith('/api/v1/network/trf/servers'))sent.push(request.method());});
+      await page.goto(origin+'/#afreg');
+      await page.waitForFunction(()=>wb.scenes.length===3&&CAPS.length>0&&wbActive()==='afreg');
+      assert.equal(await page.locator('.wb-trf-management').isVisible(),false);
+      assert.equal(sent.length,0);
+      await page.goto(origin+'/?ops=1#afreg');
+      await page.waitForFunction(()=>wb.scenes.length===3&&wbActive()==='afreg');
       await page.locator('.wb-trf-management > summary').click();
-      await page.locator('#wb-open-catalog-publication').click();
-      assert.equal(await page.locator('#modal-bg').evaluate(el=>el.classList.contains('show')),false);
+      await page.locator('#wb-refresh-trf').click();
       assert.match(await page.locator('#toast').innerText(),/注册或选择账号/);
+      assert.equal(sent.length,0);
       await page.locator('#btn-register-acct').click();
-      await page.locator('#wb-account-name').fill('catalog-ui-'+runId+'-'+viewport.width);
+      await page.locator('#wb-account-name').fill('trf-ui-'+runId+'-'+viewport.width);
       await page.locator('#wb-account-create').click();
       await page.waitForFunction(()=>!!apiKey());
-      await page.locator('#wb-refresh-catalog').click();
-      await page.waitForFunction(()=>wb.catalog.length===2);
-      await page.locator('#wb-open-catalog-publication').click();
-      assert.equal(await page.locator('#wb-catalog-preview').isDisabled(),true);
-      assert.equal(await page.locator('#wb-catalog-publish').isDisabled(),true);
-      const capability=page.locator('[data-catalog-kind="capability"][value="target_detection"]');
-      const scene=page.locator('[data-catalog-kind="service"][value="robot_patrol"]');
-      assert.equal(await page.locator('[data-catalog-kind][value^="fixture."]').count(),0);
-      const choices=await page.locator('[data-catalog-kind]').count();
-      assert.equal(choices,await page.evaluate(()=>CAPS.filter(c=>c.status==='available').length+wb.scenes.length));
-      await capability.check();
-      await page.locator('#wb-catalog-preview').click();
-      await page.waitForFunction(()=>document.querySelector('#wb-catalog-message').textContent.includes('预览已生成'));
-      assert.equal(sent.filter(x=>x.path.endsWith('/publish')).length,0);
-      assert.deepEqual(sent.at(-1).body,{capability_ids:['target_detection'],service_ids:[]});
-      await scene.check();
-      assert.equal(await page.locator('#wb-catalog-publish').isDisabled(),true);
-      assert.equal(await page.locator('#wb-catalog-payload').isHidden(),true);
-      await page.locator('#wb-catalog-preview').click();
-      await page.waitForFunction(()=>!document.querySelector('#wb-catalog-publish').disabled);
-      const preview=JSON.parse(await page.locator('#wb-catalog-json').textContent());
-      assert.deepEqual(preview.items.map(x=>x.id).sort(),['robot_patrol','target_detection']);
-      assert(preview.items.every(x=>x.interfaces.every(i=>i.url.startsWith(origin))));
-      await page.screenshot({path:path.join(output,'preview-'+viewport.width+'.png')});
-      const bounds=await page.locator('#modal').boundingBox();
-      assert(bounds.x>=0&&bounds.x+bounds.width<=viewport.width+1);
-      assert(bounds.y>=0&&bounds.y+bounds.height<=viewport.height+1);
-      assert.equal(await page.locator('#wb-catalog-publication').evaluate(el=>el.scrollWidth>el.clientWidth+1),false);
-      await page.locator('#wb-catalog-publish').evaluate(button=>{button.click();button.click();});
-      await page.waitForFunction(()=>document.querySelector('#wb-catalog-message').textContent.includes('对方已确认'));
-      assert.equal(sent.filter(x=>x.path.endsWith('/publish')).length,1);
-      assert.deepEqual(sent.at(-1).body,{capability_ids:['target_detection'],service_ids:['robot_patrol']});
-      assert.equal(await page.locator('#wb-catalog-publish').isDisabled(),true);
-      await page.screenshot({path:path.join(output,'published-'+viewport.width+'.png')});
-
-      // A successful HTTP response without confirmation must not be labelled synced.
-      await page.route('**/api/v1/network/catalog/publish',route=>route.fulfill({
-        status:200,contentType:'application/json',body:JSON.stringify({sync_status:'submitted',accepted:false,item_count:2})
-      }));
-      await page.locator('#wb-catalog-preview').click();
-      await page.waitForFunction(()=>!document.querySelector('#wb-catalog-publish').disabled);
-      await page.locator('#wb-catalog-publish').click();
-      await page.waitForFunction(()=>document.querySelector('#wb-catalog-message').textContent.includes('待对方确认'));
-      assert.doesNotMatch(await page.locator('#wb-catalog-message').textContent(),/已同步/);
-      await page.unroute('**/api/v1/network/catalog/publish');
-
-      // Configuration failures must disable sending, even after a valid earlier preview.
-      await page.route('**/api/v1/network/catalog/publication',route=>route.fulfill({
-        status:503,contentType:'application/json',body:JSON.stringify({detail:{message:'fixture configuration missing'}})
-      }));
-      await page.locator('#wb-catalog-preview').click();
-      await page.waitForFunction(()=>document.querySelector('#wb-catalog-message').textContent.includes('fixture configuration missing'));
-      assert.equal(await page.locator('#wb-catalog-publish').isDisabled(),true);
-      assert.equal(await page.locator('#wb-catalog-payload').isHidden(),true);
-      await page.unroute('**/api/v1/network/catalog/publication');
-
-      // Delayed previews cannot leak across modal instances or account changes.
-      for(const change of ['close','account']){
-        const started=deferred(),release=deferred();
-        await page.route('**/api/v1/network/catalog/publication',async route=>{
-          started.resolve();await release.promise;
-          await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(preview)});
-        });
-        await capability.check();
-        await page.evaluate(()=>{window.catalogPending=document.querySelector('#wb-catalog-preview').onclick();});
-        await started.promise;
-        if(change==='close'){
-          await page.locator('#wb-catalog-close').click();
-        }else{
-          const other=await (await context.request.post(origin+'/api/v1/register',{data:{account:'catalog-ui-other-'+runId+'-'+viewport.width}})).json();
-          await page.evaluate(async account=>{
-            accounts[account.account]={api_key:account.api_key};current=account.account;saveAccounts();await refreshAll();
-          },other);
-        }
-        assert.equal(await page.locator('#modal-bg').evaluate(el=>el.classList.contains('show')),false);
-        await page.locator('#wb-open-catalog-publication').click();
-        release.resolve();await page.evaluate(()=>window.catalogPending);
-        assert.equal(await page.locator('#wb-catalog-message').textContent(),'未选择目录项');
-        assert.equal(await page.locator('#wb-catalog-publish').isDisabled(),true);
-        assert.equal(await page.locator('#wb-catalog-payload').isHidden(),true);
-        await page.unroute('**/api/v1/network/catalog/publication');
+      await page.waitForFunction(()=>!wb.networkBusy);
+      const before=await page.evaluate(()=>({market:wb.market,pool:wbSources()}));
+      await page.locator('#wb-refresh-trf').click();
+      await page.waitForFunction(()=>document.querySelector('#wb-trf-status').textContent.includes('已读取'));
+      assert.equal(await page.locator('#wb-trf-servers .wb-trf-row').count(),4);
+      for(const kind of ['nf tool','computing tool','sensing tool','third-party tool']){
+        assert((await page.locator('#wb-trf-servers').innerText()).includes(kind));
       }
-      await page.evaluate(()=>activateTab('subs',true));
-      assert.equal(await page.locator('#modal-bg').evaluate(el=>el.classList.contains('show')),false);
+      assert.deepEqual(await page.evaluate(()=>({market:wb.market,pool:wbSources()})),before);
+      assert(sent.every(method=>method==='GET'));
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+      await page.screenshot({path:path.join(output,'trf-query-'+viewport.width+'.png'),fullPage:true});
+
+      // Configuration absence and malformed upstream responses must not leave stale rows.
+      for(const [status,body,message] of [
+        [200,{status:'not_configured',servers:[]},'TRF 地址未配置'],
+        [502,{detail:{message:'TRF 返回列表格式不支持'}},'TRF 返回列表格式不支持']
+      ]){
+        await page.route('**/api/v1/network/trf/servers',route=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)}));
+        await page.locator('#wb-refresh-trf').click();
+        await page.waitForFunction(message=>document.querySelector('#wb-trf-status').textContent===message,message);
+        assert.equal(await page.locator('#wb-trf-servers .wb-trf-row').count(),0);
+        await page.unroute('**/api/v1/network/trf/servers');
+      }
+      // Switching accounts while a query is in flight cannot display the old result.
+      const started=deferred(),release=deferred();
+      await page.route('**/api/v1/network/trf/servers',async route=>{
+        started.resolve();await release.promise;
+        await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({status:'loaded',servers:[
+          {serverName:'stale-account-server',serverType:'Steamable HTTP',toolType:'third-party tool',description:'stale',url:'http://127.0.0.1/mcp',serverStatus:'active'}
+        ]})});
+      });
+      await page.evaluate(()=>{window.pendingTrf=document.querySelector('#wb-refresh-trf').onclick();});
+      await started.promise;
+      const other=await (await context.request.post(origin+'/api/v1/register',{data:{account:'trf-other-'+runId+'-'+viewport.width}})).json();
+      await page.evaluate(async account=>{
+        accounts[account.account]={api_key:account.api_key};current=account.account;saveAccounts();await refreshAll();
+      },other);
+      release.resolve();await page.evaluate(()=>window.pendingTrf);
+      assert.equal(await page.locator('#wb-trf-status').innerText(),'尚未查询');
+      assert.equal(await page.locator('#wb-trf-servers .wb-trf-row').count(),0);
       assert.deepEqual(errors,[]);
-      console.log('Catalog UI passed: '+viewport.width+'px; real local publication plus isolated failure/race checks');
+      console.log('TRF operations UI passed: '+viewport.width+'px; hidden by default, four categories, no automatic tool import, failure and account race');
       await context.close();
     }
   }finally{await browser.close();}

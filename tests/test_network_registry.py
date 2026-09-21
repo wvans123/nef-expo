@@ -146,10 +146,19 @@ def headers(key: str = "caller-a") -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
 
 
-def configure(monkeypatch, *, catalog_url=None, publish_url=None, mcp_servers=None, token_env=None):
+def configure(
+    monkeypatch,
+    *,
+    catalog_url=None,
+    publish_url=None,
+    trf_mcp_servers_url=None,
+    mcp_servers=None,
+    token_env=None,
+):
     config = {
         "catalog_url": catalog_url,
         "publish_url": publish_url,
+        "trf_mcp_servers_url": trf_mcp_servers_url,
         "token_env": token_env,
         "mcp_servers": mcp_servers or {},
         "nef_base_url": "http://nef.test:8069",
@@ -300,9 +309,7 @@ def test_disabled_example_config_has_no_auto_mock(client, monkeypatch):
     path = Path(__file__).parents[1] / "config" / "registry.example.json"
     example = json.loads(path.read_text(encoding="utf-8"))
     assert example == {
-        "catalog_url": None,
-        "publish_url": None,
-        "withdraw_url": None,
+        "trf_mcp_servers_url": None,
         "token_env": None,
         "mcp_servers": {},
         "nef_base_url": None,
