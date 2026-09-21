@@ -2,6 +2,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {chromium}=require('playwright');
 const origin=process.argv[2],url=new URL(origin);
+const runId=Date.now().toString(36);
 assert.equal(url.hostname,'127.0.0.1');
 assert(url.port&&url.port!=='8069','Use an isolated fixture port');
 const output=path.resolve('.runtime/integration-ui');
@@ -16,6 +17,11 @@ fs.mkdirSync(output,{recursive:true});
       await page.goto(origin);
       await page.waitForFunction(()=>wb.scenes.length===3&&CAPS.length>0);
       assert.deepEqual(await page.evaluate(()=>wb.scenes.map(s=>s.price)),[115.68,119.76,119.6]);
+      assert.equal(await page.locator('#wb-open-catalog-publication').isVisible(),false);
+      assert.doesNotMatch(await page.locator('#pane-market').innerText(),/ARF|TRF|网络与自建目录/);
+      const peer=(await (await context.request.get(origin+'/__fixture__/peer')).json()).url;
+      assert.equal(new URL(peer).hostname,'127.0.0.1');
+      const probe=async()=> (await (await context.request.get(peer+'/probe')).json()).requests;
 
       // Open feedback is readable even without an account or subscription.
       const marker='Shared result '+viewport.width;
@@ -46,7 +52,7 @@ fs.mkdirSync(output,{recursive:true});
       await page.unroute('**/api/v1/scene-feedback/traffic_flow_detection');
 
       await page.locator('#btn-register-acct').click();
-      await page.locator('#wb-account-name').fill('integration-ui-'+viewport.width);
+      await page.locator('#wb-account-name').fill('integration-ui-'+runId+'-'+viewport.width);
       await page.locator('#wb-account-create').click();
       await page.waitForFunction(()=>!!apiKey());
       await page.evaluate(()=>activateTab('market',true));
@@ -59,7 +65,9 @@ fs.mkdirSync(output,{recursive:true});
       assert.match(await page.locator('#wb-purchase-quote').innerText(),/15\.92/);
       await page.screenshot({path:path.join(output,'quote-'+viewport.width+'.png')});
       await page.locator('#wb-confirm-scene').click();
-      await page.waitForFunction(()=>wbActive()==='intent'&&wb.sceneId==='robot_patrol'&&!document.querySelector('#purchase-notice').hidden);
+      await page.waitForFunction(()=>!document.querySelector('#modal-bg').classList.contains('show')&&!document.querySelector('#purchase-notice').hidden);
+      assert.equal(await page.evaluate(()=>wbActive()),'market');
+      assert.equal(await page.evaluate(()=>location.hash),'#market');
       assert.match(await page.locator('#purchase-notice').innerText(),/订购完成，已同步至合作平台/);
       assert.equal(await page.locator('#purchase-notice-detail').isVisible(),false);
       const event=await page.evaluate(async()=> (await api('/api/v1/integration/notifications')).notifications[0]);
@@ -68,6 +76,24 @@ fs.mkdirSync(output,{recursive:true});
       assert.equal(event.request.body.subscriberId,'subscriber-001');
       assert.equal(event.request.body.servicePlan.networkCapabilities[0].price,19.9);
 
+      // Purchased scene prices are reflected immediately, including PRO/MAX base prices.
+      await page.evaluate(()=>activateTab('subs',true));
+      const cost=page.locator('#subs-content .stat').filter({hasText:'估算月费用'}).locator('b');
+      await cost.filter({hasText:'¥15.92'}).waitFor();
+      for(const [tier,price] of [['pro','114.92'],['max','314.92']]){
+        await page.locator('#subs-content button').filter({hasText:new RegExp('^'+tier.toUpperCase()+' ¥')}).click();
+        await cost.filter({hasText:'¥'+price}).waitFor();
+        const cap=page.locator('[data-subs-cap]').first(),id=await cap.getAttribute('data-subs-cap');
+        await cap.click();
+        const description=await page.evaluate(id=>CAPS.find(c=>c.id===id).description,id);
+        assert((await page.locator('#modal').innerText()).includes(description));
+        await page.locator('#wb-subs-detail-close').click();
+      }
+      await page.locator('#subs-content button').filter({hasText:/^FREE$/}).click();
+      await cost.filter({hasText:'¥15.92'}).waitFor();
+      await page.evaluate(()=>activateTab('market',true));
+      await page.locator('[data-wb-scene="robot_patrol"]').click();
+      await page.waitForFunction(()=>wbActive()==='intent'&&wb.sceneId==='robot_patrol');
       const automaticPull=page.waitForResponse(response=>response.url().endsWith('/api/v1/services/robot_patrol/result')&&response.request().method()==='POST');
       await page.locator('#intent-input').fill('Test robot intent');
       await page.locator('#intent-send').click();
@@ -75,6 +101,11 @@ fs.mkdirSync(output,{recursive:true});
       await page.waitForFunction(()=>wb.resultTimer!==null);
       assert.match(await page.locator('#wb-intent-text').innerText(),/Test robot intent/);
       assert.equal((await (await automaticPull).json()).status,'unchanged');
+      const robotRequests=await probe(),robotStart=robotRequests.findLastIndex(r=>r.path==='/robot-intent');
+      assert.equal(robotRequests[robotStart].body,'Test robot intent');
+      const pulls=robotRequests.slice(robotStart).filter(r=>r.path==='/latest');
+      assert(pulls.length>=2&&pulls.every(r=>r.method==='GET'));
+      assert(pulls[1].time-pulls[0].time>=2,'Robot result polling must not run in a tight loop');
       await page.locator('#wb-feedback-pull').click();
       await page.waitForFunction(()=>!wb.resultBusy);
       await page.locator('#wb-feedback').scrollIntoViewIfNeeded();
@@ -104,6 +135,20 @@ fs.mkdirSync(output,{recursive:true});
       assert.equal(await page.evaluate(()=>wb.resultTimer),null);
       await page.unroute('**/api/v1/services/robot_patrol/result');
 
+      // Traffic receives a delayed POST callback; it must not start robot-style GET polling.
+      await page.locator('#wb-intent-subscribe').click();
+      await page.locator('#wb-confirm-scene').click();
+      await page.waitForFunction(()=>!document.querySelector('#modal-bg').classList.contains('show'));
+      assert.equal(await page.evaluate(()=>wbActive()),'intent');
+      const getCount=(await probe()).filter(r=>r.path==='/latest').length;
+      await page.locator('#intent-input').fill('Test traffic intent');
+      await page.locator('#intent-send').click();
+      await page.waitForFunction(()=>document.querySelector('#wb-feedback-text').textContent.includes('【本地验证回传】车流量中等'));
+      assert.equal(await page.evaluate(()=>wb.resultTimer),null);
+      const trafficRequests=await probe();
+      assert.deepEqual(JSON.parse(trafficRequests.findLast(r=>r.path==='/traffic-intent').body),{user_request:'Test traffic intent'});
+      assert.equal(trafficRequests.filter(r=>r.path==='/latest').length,getCount);
+
       await page.evaluate(()=>activateTab('market',true));
       await page.locator('.wb-scene-card').filter({has:page.locator('[data-wb-scene="robot_patrol"]')}).getByRole('button',{name:'取消开通',exact:true}).click();
       await page.locator('#wb-confirm-cancel').click();
@@ -112,6 +157,45 @@ fs.mkdirSync(output,{recursive:true});
       assert.equal(cancelled.action,'delete');
       assert.equal(cancelled.request.method,'DELETE');
       assert.match(cancelled.request.path,/subscriberId=subscriber-001$/);
+
+      // Discovery is private; only an explicit publication exposes the tool and POSTs to TRF.
+      await page.evaluate(()=>activateTab('afreg',true));
+      const serverConfig=JSON.parse(await page.locator('#wb-server-json').inputValue());
+      assert.equal(serverConfig.name,'巡检小车服务');
+      assert.equal(serverConfig.url,'');
+      assert.match(serverConfig.description,/巡检/);
+      serverConfig.url=peer+'/mcp';
+      await page.locator('#wb-server-json').fill(JSON.stringify(serverConfig));
+      const publishedBefore=(await probe()).filter(r=>r.path==='/publish').length;
+      await page.locator('#wb-register-server').click();
+      await page.waitForFunction(()=>wb.servers.some(s=>s.discovery_status==='discovered'));
+      const serverId=await page.evaluate(()=>wb.servers[0].id);
+      const publishedTool=async()=> (await (await context.request.get(origin+'/api/v1/network/market')).json()).items.find(x=>x.server_id===serverId);
+      assert.equal(await publishedTool(),undefined);
+      assert.equal((await probe()).filter(r=>r.path==='/publish').length,publishedBefore);
+      await page.locator('[data-publish-server="'+serverId+'"]').click();
+      await page.waitForFunction(id=>wb.servers.find(s=>s.id===id)?.publication_status==='published',serverId);
+      assert.equal((await publishedTool()).name,'inspect_frame');
+      const publication=JSON.parse((await probe()).findLast(r=>r.path==='/publish').body);
+      assert.equal(publication.type,'mcp_server_registration');
+      assert.equal(publication.server.tools[0].name,'inspect_frame');
+      assert(!JSON.stringify(publication).includes(peer+'/mcp'));
+      await page.evaluate(()=>activateTab('market',true));
+      const card=page.locator('#wb-network-market .tile').filter({hasText:'inspect_frame'}).first();
+      await card.waitFor();
+      assert.equal(await card.locator('.ticon').count(),1);
+      assert.match(await card.innerText(),/本地联调图像检查工具/);
+      await card.scrollIntoViewIfNeeded();
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+      await page.screenshot({path:path.join(output,'published-tools-'+viewport.width+'.png')});
+      await page.evaluate(()=>activateTab('afreg',true));
+      await page.screenshot({path:path.join(output,'external-service-'+viewport.width+'.png')});
+      await page.locator('[data-publish-server="'+serverId+'"]').click();
+      await page.waitForFunction(id=>wb.servers.find(s=>s.id===id)?.publication_status==='unpublished',serverId);
+      assert.equal(await publishedTool(),undefined);
+      assert.equal(JSON.parse((await probe()).findLast(r=>r.path==='/withdraw').body).registration_id,serverId);
+      await page.evaluate(()=>activateTab('market',true));
+      assert.equal(await page.locator('#wb-network-market .tile').filter({hasText:'inspect_frame'}).count(),0);
 
       await page.goto(origin+'/?ops=1#intent');
       await page.waitForFunction(()=>wb.scenes.length===3&&wbActive()==='intent');
@@ -129,7 +213,7 @@ fs.mkdirSync(output,{recursive:true});
       await page.waitForFunction(()=>!apiKey()&&Object.keys(accounts).length===0);
       assert.equal(await page.evaluate(()=>localStorage.getItem('nef_instance')),'0123456789abcdef');
       assert.deepEqual(errors,[]);
-      console.log('Integration UI passed: '+viewport.width+'px; shared feedback, quote, subscribe, intent/pull, cancellation, ops and restart');
+      console.log('Integration UI passed: '+viewport.width+'px; publication/withdrawal, billing, capability detail, no purchase redirect, robot GET/traffic callback, ops and restart');
       await context.close();
     }
   }finally{await browser.close();}

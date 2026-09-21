@@ -7,7 +7,7 @@ from test_network_registry import (
 )
 
 
-def provision(client, http_fixture, monkeypatch, *, tool_error=False):
+def provision(client, http_fixture, monkeypatch, *, tool_error=False, publish_service=True):
     monkeypatch.setenv("TEST_AF_TOKEN", "af-only-secret")
     monkeypatch.setenv("TEST_NW_TOKEN", "network-only-secret")
     calls=[]
@@ -41,6 +41,8 @@ def provision(client, http_fixture, monkeypatch, *, tool_error=False):
     result=client.post('/api/v1/network/servers/'+server['id']+'/discover',headers=headers())
     assert result.status_code==200, result.text
     path=result.json()['gateway_path']
+    if publish_service:
+        assert client.post('/api/v1/network/servers/'+server['id']+'/publish',headers=headers()).status_code==200
     return server,path,cfg,tool,calls,published
 
 
@@ -113,18 +115,20 @@ def test_missing_af_secret_never_degrades_to_anonymous(client,http_fixture,monke
 
 
 def test_publication_requires_operator_nef_endpoint(client,http_fixture,monkeypatch):
-    server,path,cfg,tool,calls,published=provision(client,http_fixture,monkeypatch)
+    server,path,cfg,tool,calls,published=provision(client,http_fixture,monkeypatch,publish_service=False)
     cfg['nef_base_url']=None;monkeypatch.setenv('NEF_REGISTRY_CONFIG',json.dumps(cfg))
     result=client.post('/api/v1/network/servers/'+server['id']+'/sync',headers=headers())
-    assert result.status_code==503 and result.json()['detail']['code']=='gateway_not_configured'
+    assert result.status_code==200 and result.json()['sync_error']['code']=='gateway_not_configured'
+    assert result.json()['publication_status']=='published' and result.json()['sync_status']=='failed'
     assert published==[]
 
 
 def test_schema_external_references_do_not_trigger_fetches(client,http_fixture,monkeypatch):
-    server,path,cfg,tool,calls,_=provision(client,http_fixture,monkeypatch)
+    server,path,cfg,tool,calls,_=provision(client,http_fixture,monkeypatch,publish_service=False)
     tool['inputSchema']={'type':'object','$ref':http_fixture.url('/must-not-fetch')}
     discovered=client.post('/api/v1/network/servers/'+server['id']+'/discover',headers=headers())
     assert discovered.status_code==200
+    assert client.post('/api/v1/network/servers/'+server['id']+'/publish',headers=headers()).status_code==200
     before=len(calls)
     assert rpc(client,path,'tools/call',{'name':'inspect_frame','arguments':{}}).json()['error']['code']==-32602
     assert len(calls)==before
@@ -183,7 +187,7 @@ def test_rpc_failure_is_not_success_and_never_retried(client,http_fixture,monkey
 
 
 def test_preview_matches_publication_without_dispatching(client,http_fixture,monkeypatch):
-    server,path,cfg,tool,calls,published=provision(client,http_fixture,monkeypatch)
+    server,path,cfg,tool,calls,published=provision(client,http_fixture,monkeypatch,publish_service=False)
     endpoint='/api/v1/network/servers/'+server['id']+'/publication'
     preview=client.get(endpoint,headers=headers())
     assert preview.status_code==200 and published==[]

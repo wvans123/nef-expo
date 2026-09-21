@@ -51,6 +51,7 @@ PLAN_TIERS = {  # 账号等级 → 免订阅可直接使用的能力层级
     "pro": {"basic"},
     "max": {"basic", "advanced"},
 }
+PLAN_MONTHLY_PRICES = {"free": 0.0, "pro": 99.0, "max": 299.0}
 DEFAULT_SCOPES = {
     "capabilities:invoke",
     "mcp:tools",
@@ -260,6 +261,50 @@ def _monthly_price(cap) -> float:
         return float(str(cap.unit_price).split("/")[0].replace("¥", "").strip())
     except ValueError:
         return 0.0
+
+
+def _scene_capability_ids(service_id: str) -> list[str]:
+    return [item["capability_id"] for item in SCENES[service_id]["provenance"]["components"]]
+
+
+def _estimated_monthly_cost(rec) -> float:
+    """账号当前固定月费；场景使用购买时所选能力的报价，避免后续配置变更改写已购价格。"""
+    plan = rec.get("plan", "free")
+    total = PLAN_MONTHLY_PRICES.get(plan, 0.0)
+    package_capabilities = {
+        cid for pid in rec["packages"] if pid in PKG_INDEX for cid in PKG_INDEX[pid]["capabilities"]
+    }
+    included_tiers = PLAN_TIERS.get(plan, set())
+
+    for cid in rec["subscriptions"]:
+        cap = _any_cap(cid)
+        if not cap or "/月" not in str(cap.unit_price):
+            continue
+        if cid in package_capabilities:
+            continue
+        if cap.source != "third_party" and cap.tier in included_tiers:
+            continue
+        total += _monthly_price(cap)
+
+    for pid in rec["packages"]:
+        if pid in PKG_INDEX:
+            try:
+                total += float(PKG_INDEX[pid]["price"].split("/")[0])
+            except (TypeError, ValueError):
+                pass
+
+    selected_by_scene = rec.get("scene_subscription_capabilities", {})
+    purchased_prices = rec.get("scene_subscription_prices", {})
+    for service_id in rec.get("scene_subscriptions", set()):
+        if service_id not in SCENES:
+            continue
+        price = purchased_prices.get(service_id)
+        if price is None:
+            selected = selected_by_scene.get(service_id, _scene_capability_ids(service_id))
+            price = subscription_notifications.quote("scene:" + service_id, selected)["price"]
+        if price is not None:
+            total += price
+    return round(total, 2)
 
 
 def _tp_billing_mode(cap) -> str:
@@ -523,11 +568,17 @@ def subscribe_scene(service_id: str, req: SceneSubscribeReq | None = None, autho
     _, rec = _auth(authorization)
     if service_id not in SCENES:
         raise HTTPException(404, "场景服务不存在")
-    allowed = {item["capability_id"] for item in SCENES[service_id]["provenance"]["components"]}
+    allowed = set(_scene_capability_ids(service_id))
     selected = (req.network_capability_ids if req and "network_capability_ids" in req.model_fields_set
-                else [item["capability_id"] for item in SCENES[service_id]["provenance"]["components"]])
+                else _scene_capability_ids(service_id))
     subscription_notifications.validate_capabilities(selected, allowed)
+    quote = subscription_notifications.quote("scene:" + service_id, selected)
     rec.setdefault("scene_subscriptions", set()).add(service_id)
+    rec.setdefault("scene_subscription_capabilities", {})[service_id] = list(selected)
+    if quote["price"] is not None:
+        rec.setdefault("scene_subscription_prices", {})[service_id] = quote["price"]
+    else:
+        rec.setdefault("scene_subscription_prices", {}).pop(service_id, None)
     return {"service_id": service_id, "subscribed": True, "account": rec["account"], "billing": "demo_entitlement",
             "notification": _notify_subscriptions(rec["account"], {("scene", service_id)}, selected)}
 
@@ -540,6 +591,8 @@ def unsubscribe_scene(service_id: str, authorization: str = Header(None)):
     if service_id not in rec.get("scene_subscriptions", set()):
         raise HTTPException(404, "该场景尚未开通")
     rec["scene_subscriptions"].remove(service_id)
+    rec.get("scene_subscription_capabilities", {}).pop(service_id, None)
+    rec.get("scene_subscription_prices", {}).pop(service_id, None)
     rec.get("scene_intents", {}).pop(service_id, None)
     return {"service_id": service_id, "subscribed": False, "account": rec["account"],
             "notification": subscription_notifications.cancel(rec["account"], service_id)}
@@ -715,6 +768,8 @@ def _ensure_account(account: str, plan: str = "free") -> str:
         key = "nef_" + secrets.token_hex(16)
         API_KEYS[key] = {"account": account, "subscriptions": set(),
                          "packages": set(), "scopes": set(DEFAULT_SCOPES),
+                         "scene_subscription_capabilities": {},
+                         "scene_subscription_prices": {},
                          "plan": plan if plan in PLAN_TIERS else "free",
                          "created": time.time()}
         ACCOUNT_KEYS[account] = key
@@ -894,25 +949,12 @@ def auth_info(authorization: str = Header(None)):
     key, rec = _auth(authorization)
     _pl = _capif_pipeline(key, rec, scope="auth:info", entitled=True, cap=None)
     caps = sorted(_subscribed_caps(rec))
-    est = 0.0
-    for cid in rec["subscriptions"]:
-        cap = _any_cap(cid)
-        if not cap:
-            continue
-        price = cap.unit_price
-        if "/月" in price:
-            try:
-                est += float(price.split("/")[0])
-            except ValueError:
-                pass
-    for pid in rec["packages"]:
-        est += float(PKG_INDEX[pid]["price"].split("/")[0])
     return {"account": rec["account"], "api_key": key,
             "subscribed_capabilities": caps,
             "scene_subscriptions": sorted(rec.get("scene_subscriptions", set())),
             "direct_subscriptions": sorted(rec["subscriptions"]),
             "packages": sorted(rec["packages"]),
-            "estimated_monthly_cost": round(est, 1),
+            "estimated_monthly_cost": _estimated_monthly_cost(rec),
             "plan": rec.get("plan", "free"),
             "plan_included_tiers": sorted(PLAN_TIERS.get(rec.get("plan", "free"), set())),
             "intent_eligible": _intent_eligible(rec),

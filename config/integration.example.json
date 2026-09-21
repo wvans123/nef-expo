@@ -35,6 +35,7 @@
   "registry": {
     "catalog_url": null,
     "publish_url": null,
+    "withdraw_url": null,
     "token_env": null,
     "nef_base_url": null,
     "open_registration_account": "1",

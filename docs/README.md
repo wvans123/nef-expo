@@ -1,16 +1,16 @@
 # 文档索引
 
-更新：2026-09-20。主线：能力供给 → 套餐定义 / MCP 能力源注册 → 网络目录同步 → 场景订阅 → Intent 与文字结果。API / MCP 北向接入作为并行开放方式保留。
+更新：2026-09-21。主线：能力供给 → 套餐定义 / MCP 连接发现 → 显式发布 / 取消发布 → 场景订阅 → Intent 与文字结果。TRF 同步管理位于双向开放折叠区，首页仅展示已发布扩展能力。API / MCP 北向接入作为并行开放方式保留。
 
 ## 用户指南
-- [项目说明](../README.md)：换电脑下载、两条命令启动、统一 POST 地址配置和修改接口的文件位置；维护中，部署入口以此为准。
+- [项目说明](../README.md)：换电脑下载、前台启动与 Windows 独立后台任务、统一 POST 地址配置和修改接口的文件位置；维护中，部署入口以此为准。
 
 ## 运行手册
 - [curl 联调手册](reference/manual-curl.md)：无 Key 回传、自查、开放 MCP 登记、订购/取消与现场排查；bash 和 PowerShell 命令。公开文档使用地址占位符，真实 IP 填本机配置。
-- [演示手册](demo-playbook.md)：智能编排、五分钟展示主线、跨机器联调和 Cloudflare Tunnel 部署；包括 Access、HTTPS / TLS、限定 API 路径的兼容规则、验收与回滚。2026-09-17 已恢复本机服务并核验 Tunnel 就绪、本机接口和公网未授权拦截；此前登录后页面已验证，有效机器凭据调用及回传仍待验收；旧九页签流程明确归档。
+- [演示手册](demo-playbook.md)：Windows 独立后台、跨机器联调和 Tunnel；2026-09-21 已重启加载本轮修改，旧内存账号清空。记录定向测试、桌面/手机验证和待提供的真实服务地址；之前智能推荐验收保留为历史快照。
 
 ## 架构 / 设计决策
-- [展示体验设计](superpowers/specs/2026-06-11-frontend-demo-redesign-design.md)：原版七个可见页签、真实基础能力组合、确定性配置检查、LLM 推荐与确认、声明式套餐、TRF / ARF 适配边界、MCP Server 注册和发现、网络内部经 NEF 调用 AF 的代理入口 / 发布契约、Intent 文字结果；内部生产接口待对接。
+- [展示体验设计](superpowers/specs/2026-06-11-frontend-demo-redesign-design.md)：原版七个可见页签、真实基础能力组合、确定性配置检查、LLM 推荐与确认、声明式套餐、TRF 适配边界、MCP Server 注册和发现、网络内部经 NEF 调用 AF 的代理入口 / 发布契约、Intent 文字结果；内部生产接口待对接。
 - [鉴权与场景授权设计](superpowers/specs/2026-06-15-dynamic-auth-and-dispatch-design.md)：维护 5G AF–NEF / CAPIF 参考、场景提供方与授权责任、6G 候选扩展以及真实回执边界；已实施场景订阅判定；标准安全接入与资源策略待实现。
 
 ## 接口参考
@@ -18,11 +18,11 @@
 - [智能推荐配置](../config/composer.example.json)：远程服务、模型和 Responses 协议沿用既有配置，项目推理档位降为 low；Key 使用服务端环境变量。能力池提示词、可选约束、新错误分类及运行代码加载边界见[演示手册](demo-playbook.md#智能编排准备与现场操作)。
 - [场景接口对接说明](reference/integration.md)：无 Key 共享回传、自查、状态 / 数据 / 后端媒体接收、机器狗 text/plain Intent 与 GET/POST 结果拉取；接口格式来自使用者记录，本机仅做模拟对端验证。
 - [套餐订购通知与订阅查询](reference/subscription-query.md)：固定 `subscriberId=subscriber-001`、折扣计价、取消 DELETE、通知过滤、2053/2051、请求回包与可选启动重置；后端兼容空选择，页面至少选一项。
-- [统一对接配置](../config/integration.example.json)：`start.py` 自动生成本地配置，集中设置订购、折扣、开放 MCP、ARF/TRF 发布及 Intent / 结果地址；已有 local 文件不覆盖、不上传。
+- [统一对接配置](../config/integration.example.json)：`start.py` 自动生成本地配置，集中设置订购、折扣、开放 MCP、TRF 发布及 Intent / 结果地址；已有 local 文件不覆盖、不上传。
 - [旧订购通知配置](../config/subscription.example.json)：兼容独立配置模式，新部署优先使用统一文件。
-- [选定网络目录发布](reference/network-catalog.md)：能力超市「发布 NEF 目录」的选择、预览、发布入口及对应接口；不是标准 NRF 注册，真实 ARF/NRF 接口待确认，上传不会更新已有进程。
-- [农场平台联调](reference/farm-integration.md)：套餐查询、无 Key 一步 MCP 登记和带 Key 分步流程、开放登记跨账号可见、网络代理调用；农场 MCP 与目录地址待提供。
-- [网络目录配置](../config/registry.example.json)：运维侧 TRF / ARF 拉取 / 发布接口和 NEF 网络可达入口、内部调用方授权及 MCP 服务允许列表示例；不含实际密钥。
+- [TRF 目录同步与发布](reference/network-catalog.md)：双向开放「TRF 同步管理」的手动拉取、选择、预览与发布接口；首页公开能力投影；真实 TRF 接口待确认。
+- [农场平台联调](reference/farm-integration.md)：套餐查询、无 Key MCP 登记发现、显式发布/撤回及网络代理调用；同一接入流程用于巡检小车，真实地址待提供。
+- [网络目录配置](../config/registry.example.json)：运维侧 TRF 拉取 / 发布接口和 NEF 网络可达入口、内部调用方授权及 MCP 服务允许列表示例；不含实际密钥。
 - [配置模板](../config/bridge.example.json)：从接口契约配套维护的可复制配置；示例域名不可用，必须按实际接口替换。
 
 ## 报告 / 快照

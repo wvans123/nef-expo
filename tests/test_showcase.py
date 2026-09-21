@@ -65,7 +65,7 @@ def test_simple_server_registration_and_network_directory():
     assert 'af-param-rows' not in html
     assert 'JSON.parse($(\'#wb-server-json\').value)' in js
     assert '/api/v1/network/servers' in js
-    assert "'discover'" in js and "'sync'" in js
+    assert "'discover'" in js and "'publish'" in js and "'unpublish'" in js
 
 def test_feedback_only_invocations_and_simplified_handoff():
     html=client.get('/').text;js=client.get('/static/workbench.js').text
@@ -89,25 +89,25 @@ def test_original_theme_and_reduced_motion():
     assert 'prefers-reduced-motion' in css
 
 
-def test_compact_scenes_automatic_catalog_and_af_provenance():
+def test_compact_scenes_manual_trf_management_and_published_market():
     html=client.get('/').text;js=client.get('/static/workbench.js').text
-    assert 'wb-refresh-catalog' not in html and 'wb-refresh-catalog' not in js
+    assert html.index('id="wb-refresh-catalog"') > html.index('id="pane-afreg"')
     assert 'Intent 驱动 · 按场景开通' not in html and '>INTENT</span>' not in js
     assert '基础能力组合' in js and 'data-scene-cap' in js
     assert "'/api/v1/network/catalog/refresh'" in js and '30000' in js
-    assert '自助编排 · ' in js
-    assert 'const afTools=' in js and "source:'AF'" in js and 'source_account' in js
+    assert '自助编排套餐' in js and 'const items=wb.market' in js
+    assert 'wbToolIcon' in js
     scenes=client.get('/api/v1/services').json()['services']
     assert all(s['provenance']['source']=='preset' and s['provenance']['components'] for s in scenes)
 
 
 def test_network_gateway_story_and_publication_are_visible():
     html=client.get('/').text;js=client.get('/static/workbench.js').text
-    assert '网络内部 · ARF / TRF 能力目录' in html
-    assert '内部网元 / NW Agent' in html and 'AF · tools/call' in html
-    assert '查看网络登记内容' in js and 's.gateway_path' in js
-    assert '最近网络调用' in js and 's.last_call.caller' in js
-    assert "+'/publication'" in js
+    market=html.split('id="pane-market"')[1].split('<!-- Tab 2')[0]
+    assert 'TRF' not in market and 'registry-strip' not in market
+    assert 'ARF' not in html and 'ARF' not in js
+    assert 'TRF 同步管理' in html and '"name": "巡检小车服务"' in html
+    assert 'data-preview-server' not in js and '取消发布' in js
 
 
 def test_selected_catalog_publication_is_a_separate_explicit_action():

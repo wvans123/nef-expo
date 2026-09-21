@@ -1,6 +1,6 @@
 # 农场平台双向联调
 
-分类：接口参考 / 联调流程。更新：2026-09-20。面向农场平台、NEF 和网络侧开发同事。
+分类：接口参考 / 联调流程。更新：2026-09-21。面向农场平台、NEF 和网络侧开发同事；巡检小车使用相同 MCP 接入流程。
 
 ## 1. 本次范围
 
@@ -93,6 +93,7 @@ CF-Access-Client-Secret: <Client Secret>
 {
   "catalog_url": null,
   "publish_url": "https://directory.example.invalid/mcp-registrations",
+  "withdraw_url": null,
   "token_env": "NEF_DIRECTORY_TOKEN",
   "nef_base_url": "https://nef.2012wtlab.com",
   "mcp_servers": {
@@ -114,7 +115,8 @@ CF-Access-Client-Secret: <Client Secret>
 | 字段 | 说明 |
 |---|---|
 | `catalog_url` | 网络能力目录拉取地址；本次只登记农场 MCP 时可为 null |
-| `publish_url` | ARF/TRF 接收登记的完整 POST 地址，不是农场 MCP 地址；目前只支持一个接收端，不自动双发 |
+| `publish_url` | TRF 接收登记的完整 POST 地址，不是农场 MCP 地址 |
+| `withdraw_url` | TRF 接收撤回的完整 POST 地址；未配置时仅本地下架并提示待配置 |
 | `token_env` | NEF 向目录发送 Bearer Key 所用环境变量名 |
 | `nef_base_url` | 网络客户端能访问的 NEF 地址，发布时由此生成代理 URL |
 | `mcp_servers` | 精确匹配登记 URL 的允许列表；页面登记不会自动加入允许列表 |
@@ -134,13 +136,13 @@ CF-Access-Client-Secret: <Client Secret>
 
 `POST /api/v1/af/mcp-servers`，JSON 为 `{"name":"农场管理平台","url":"http://<农场IP>:<端口>/mcp","description":"..."}`。参数限制与 6.1 相同，无需 NEF Key；同一 URL 重复调用更新开放登记，不重复创建，不修改同 URL 的私有登记。
 
-NEF 以 `registry.open_registration_account`（默认 `1`）登记并标记 `registered_via:open`，立即执行 initialize、notifications/initialized、tools/list。有 `registry.publish_url` 时再发布到 ARF/TRF，始终发布 NEF 代理入口，不直接把农场原始地址作为网络调用入口。
+NEF 以 `registry.open_registration_account`（默认 `1`）登记并标记 `registered_via:open`，立即执行 initialize、notifications/initialized、tools/list。登记与发现不会发布，即使已配置 `publish_url` 也保持草稿；随后由页面账号显式发布。发布时使用 NEF 代理入口，不直接把农场原始地址作为网络调用入口。
 
-返回登记记录、`created`、`discovery_status=ok|failed`、`sync_status=accepted|failed|pending`；失败附 sync_error，未配置目录或未明确确认附 sync_note。发现失败返回 502/504（允许列表拒绝为 403/503），detail 保留登记 ID 和失败状态。目录发布失败不撤销已发现工具。列表接口沿用原有 discovered/synced/submitted 状态词。
+成功返回登记记录、`created`、`discovery_status=ok`、`publication_status=draft`、`sync_status=pending`，提示等待显式发布。发现失败返回 502/504（允许列表拒绝为 403/503），detail 保留登记 ID 和 `discovery_status=failed`。列表接口发现成功的状态词仍为 `discovered`。
 
-开放登记对所有登录账号可见，任意具备 `af:register` scope 的账号可 discover、publication、sync；私有登记不变。`registry.allow_unlisted_mcp_servers` 默认 false，只有精确允许列表 URL 可连接；获准隔离测试网可设 true，允许无 Key 调用者让 NEF 连接任意合法 HTTP(S) URL，存在内网探测风险，勿对不可信网络启用。此开关不取消网络反向调用的独立凭据与 af_accounts 校验。
+开放登记对所有登录账号可见，任意具备 `af:register` scope 的账号可 discover、publication、publish、unpublish；私有登记不变。`registry.allow_unlisted_mcp_servers` 默认 false，只有精确允许列表 URL 可连接；获准隔离测试网可设 true，允许无 Key 调用者让 NEF 连接任意合法 HTTP(S) URL，存在内网探测风险，勿对不可信网络启用。此开关不取消网络反向调用的独立凭据与 af_accounts 校验。
 
-农场 MCP URL 和 ARF/TRF publish_url 仍待提供。本机只验证本地模拟对端，具体命令见 [curl 手册](manual-curl.md)。以下 6.1 起保留带 Key 的分步流程。
+农场 MCP URL 和 TRF publish_url 仍待提供。本机只验证本地模拟对端，具体命令见 [curl 手册](manual-curl.md)。以下 6.1 起保留带 Key 的分步流程。
 
 以下路径均相对于 NEF 公网 Base URL，所有请求携带第 3 节 Access 头。除特别说明外再带：
 
@@ -188,7 +190,7 @@ HTTP 200 响应关键字段：
 
 以上为字段摘录，实际还返回名称、URL、说明。后续请求使用真实返回的 `id`，不要使用示例字符串。登记成功只表示 NEF 保存记录，没有连接农场，也没有发布网络。
 
-本接口没有幂等键，重复 POST 会生成不同登记；重试前先查列表。每账号最多 64 个登记，本版本没有登记删除接口。
+同账号、同 URL、同登记类型重复 POST 更新原记录，不创建重复项。已发布时须先取消发布再更新或重新发现；否则返回 409。每账号最多 64 个登记，取消发布不是删除登记。
 
 ### 6.2 发现工具
 
@@ -241,10 +243,10 @@ GET /api/v1/network/servers/{server_id}/publication
 ### 6.4 发布到网络目录
 
 ```http
-POST /api/v1/network/servers/{server_id}/sync
+POST /api/v1/network/servers/{server_id}/publish
 ```
 
-无需请求体。NEF 向配置的 `publish_url` 发送 6.3 的发布 JSON，目录收到后必须确认：
+无需请求体，要求已发现至少一个工具，否则返回 409。旧 `/sync` 保留为兼容别名。显式发布后 `publication_status=published`，工具进入首页“扩展能力”；NEF 同时向配置的 `publish_url` 发送 6.3 的发布 JSON，目录收到后应确认：
 
 ```json
 {"accepted": true}
@@ -254,10 +256,23 @@ POST /api/v1/network/servers/{server_id}/sync
 |---|---|
 | HTTP 200，`accepted=true`，`sync_status=synced` | 目录明确确认接收 |
 | HTTP 200，`accepted=false`，`sync_status=submitted` | 上游有成功 HTTP 响应，但未给出明确接收确认 |
-| 503 | 发布地址或 NEF 网关配置缺失/无效 |
-| 502 / 504 | 上游错误、重定向或响应异常 / 上游超时 |
+| HTTP 200，`sync_status=pending` | 本地已发布，TRF 地址待配置 |
+| HTTP 200，`sync_status=failed` | 本地已发布，但网关配置、上游请求或响应失败；查看 `sync_error` / `sync_note` 后重试 |
+| 503 | 整体 registry 配置无效，未变更发布状态 |
 
-`synced` 只证明收到目录确认，不证明目录已完成生产发布、网络已发现或调用成功。代码允许发现前先同步空工具登记，但本次验收要求**先发现工具再发布**。当前只配置一个发布 URL，不会自动分别发送到 TRF 与 ARF；网络侧接收适配由双方确认。
+`synced` 只证明收到 TRF 接收确认，不证明其数据库已持久化或真实执行成功。首页发布与 TRF 同步分别记录；失败不伪装成同步成功，重复 `/publish` 可以重试。
+
+### 6.4.1 取消发布
+
+`POST /api/v1/network/servers/{server_id}/unpublish`，相同账号 Key，无请求体。立即置 `publication_status=unpublished`、从首页移除并阻止新的 NEF 网关调用。若曾向 TRF 发出过发布请求，向 `registry.withdraw_url` POST：
+
+```json
+{"type":"mcp_server_withdrawal","registration_id":"<登记ID>","account":"<来源账号>"}
+```
+
+TRF 返回 `{"accepted":true}` 才确认远端撤回；无明确确认记 `submitted`，失败记 `failed`，未配置地址记 `pending`。上述情况均保持本地下架，可再次 `/unpublish` 重试；从未外发过则 `sync_status=not_required`。对方实际撤回协议待提供，不猜测 DELETE 路径。
+
+自助套餐同样使用 `/api/v1/network/packages/{package_id}/publish` 和 `/unpublish`；撤回正文 `type=network_package_withdrawal`，`registration_id` 为套餐 ID。TRF 发布正文为 `type=network_package_declaration`、`account` 与 `package`。这些均是项目适配契约。
 
 ### 6.5 查看状态
 
@@ -265,7 +280,7 @@ POST /api/v1/network/servers/{server_id}/sync
 GET /api/v1/network/servers
 ```
 
-返回 `{"servers":[...]}`，包含当前账号私有登记及所有 `registered_via:open` 登记。查看 `registration_status`、`discovery_status`、`sync_status`、`tools`、`gateway_path` 和调用后的 `last_call`。不存在独立 `GET /servers/{id}` 接口；从列表按 `id` 选择。
+返回 `{"servers":[...]}`，包含当前账号私有登记及所有 `registered_via:open` 登记。查看 `registration_status`、`discovery_status`、`publication_status`、`sync_status`、`tools`、`gateway_path` 和调用后的 `last_call`。不存在独立 `GET /servers/{id}` 接口；从列表按 `id` 选择。公开首页读取 `/api/v1/network/market`，仅包含已发布内容，不暴露来源账号和上游 URL。
 
 ## 7. 网络经 NEF 调用农场
 

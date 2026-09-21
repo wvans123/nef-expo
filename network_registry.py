@@ -3,7 +3,7 @@
 
 The module deliberately keeps the boundary small: NEF records MCP servers and
 network package declarations, while an operator-configured catalog and an
-operator-configured TRF/ARF publisher remain outside NEF. Nothing here invents an
+operator-configured TRF publisher remain outside NEF. Nothing here invents an
 orchestration plan. Internal callers reach AF tools through a scoped NEF MCP gateway.
 """
 from __future__ import annotations
@@ -188,7 +188,7 @@ def _load_config() -> dict[str, Any]:
     if type(unlisted) is not bool:
         raise _ConfigError("invalid_config")
     normalized.update(open_registration_account=account, allow_unlisted_mcp_servers=unlisted)
-    for name in ("catalog_url", "publish_url", "nef_base_url"):
+    for name in ("catalog_url", "publish_url", "withdraw_url", "nef_base_url"):
         value = data.get(name)
         if value in (None, ""):
             normalized[name] = None
@@ -818,7 +818,7 @@ def _mark_sync_status(account: str, collection: str, record_id: str, status: str
 async def _publish(cfg: dict[str, Any], payload: dict[str, Any]) -> bool:
     publish_url = cfg.get("publish_url")
     if not publish_url:
-        _http_error(503, "not_configured", "TRF/ARF 发布地址未配置")
+        _http_error(503, "not_configured", "TRF 发布地址未配置")
     response = await _remote_request(
         "POST",
         publish_url,
@@ -982,6 +982,31 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                        if owner == account or s.get("registered_via") == "open"]
             return {"servers": [_public_record(item) for item in servers]}
 
+    @router.get("/api/v1/network/market")
+    async def published_market():
+        # Customer-facing projection: no AF addresses, credentials, or account IDs.
+        with _STATE_LOCK:
+            items = []
+            for state in _ACCOUNTS.values():
+                for server in state["servers"].values():
+                    if server.get("publication_status") != "published":
+                        continue
+                    for tool in server["tools"]:
+                        items.append({
+                            "id": server["id"] + ":" + tool["name"],
+                            "name": tool["name"], "description": tool.get("description", ""),
+                            "kind": "tool", "source": "AF", "provider": server["name"],
+                            "server_id": server["id"], "inputSchema": copy.deepcopy(tool["inputSchema"]),
+                        })
+                for package in state["packages"].values():
+                    if package.get("publication_status") == "published":
+                        items.append({
+                            "id": package["id"], "name": package["name"],
+                            "description": package["description"], "kind": "package",
+                            "source": "local", "steps": copy.deepcopy(package["steps"]),
+                        })
+            return {"items": items}
+
     @router.post("/api/v1/network/servers")
     async def register_network_server(
         payload: dict[str, Any] = Body(...),
@@ -1002,14 +1027,15 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
         )
         with _STATE_LOCK:
             state = _set_account_state(account)
-            if opened:
-                existing = next((s for s in state["servers"].values()
-                                 if s["url"] == url and s.get("registered_via") == "open"), None)
-                if existing:
-                    if existing.get("discovery_status") == "discovering" or existing.get("sync_status") == "syncing" or existing.get("gateway_busy"):
-                        _http_error(409, "busy", "服务正在处理另一项操作")
-                    existing.update(name=name, description=description)
-                    return {**_public_record(existing), "created": False}
+            existing = next((s for s in state["servers"].values()
+                             if s["url"] == url and s.get("registered_via") == ("open" if opened else "account")), None)
+            if existing:
+                if existing.get("discovery_status") == "discovering" or existing.get("sync_status") == "syncing" or existing.get("gateway_busy"):
+                    _http_error(409, "busy", "服务正在处理另一项操作")
+                if existing.get("publication_status") == "published":
+                    _http_error(409, "already_published", "请先取消发布，再更新服务")
+                existing.update(name=name, description=description)
+                return {**_public_record(existing), "created": False}
             if len(state["servers"]) >= MAX_SERVERS_PER_ACCOUNT:
                 _http_error(409, "limit_exceeded", "每个账号最多注册 64 个网络服务器")
             server_id = _new_id("srv", state["servers"])
@@ -1024,6 +1050,8 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                 "registration_status": "registered",
                 "discovery_status": "not_discovered",
                 "sync_status": "pending",
+                "publication_status": "draft",
+                "trf_may_exist": False,
                 "registered_via": "open" if opened else "account",
             }
             state["servers"][server_id] = server
@@ -1045,17 +1073,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
             raise HTTPException(exc.status_code, {**detail, **_public_record(_get_owned_server(account, sid)),
                                                 "created": created, "discovery_status": "failed"}) from exc
         record.update(created=created, discovery_status="ok")
-        if not config.get("publish_url"):
-            return {**record, "sync_status": "pending", "sync_note": "ARF/TRF 发布地址未配置"}
-        try:
-            published = await sync_server(sid, account)
-            record.update(sync_status="accepted" if published["accepted"] else "pending")
-            if not published["accepted"]:
-                record["sync_note"] = "已提交，待目录确认"
-        except HTTPException as exc:
-            _mark_sync_status(account, "servers", sid, "failed")
-            record.update(sync_status="failed", sync_error=exc.detail)
-        return record
+        return {**record, "sync_status": "pending", "sync_note": "已发现工具，等待显式发布"}
 
     @router.post("/api/v1/network/servers/{server_id}/discover")
     async def discover_network_server(
@@ -1069,6 +1087,8 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
     async def discover_server(server_id, account):
         server = _get_owned_server(account, server_id)
         account = server["source_account"]
+        if server.get("publication_status") == "published":
+            _http_error(409, "already_published", "请先取消发布，再重新发现工具")
         try:
             config = _load_config()
         except _ConfigError:
@@ -1091,6 +1111,8 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                 _http_error(404, "not_found", "网络服务器不存在")
             if current.get("discovery_status") == "discovering" or current.get("sync_status") == "syncing" or current.get("gateway_busy"):
                 _http_error(409, "busy", "服务正在处理另一项操作")
+            if current.get("publication_status") == "published":
+                _http_error(409, "already_published", "请先取消发布，再重新发现工具")
             current["tools"] = []
             current["discovery_status"] = "discovering"
             current["sync_status"] = "pending"
@@ -1126,6 +1148,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
             server = copy.deepcopy(_get_owned_server(account, server_id))
         return _publication(config, server["source_account"], server)
 
+    @router.post("/api/v1/network/servers/{server_id}/publish")
     @router.post("/api/v1/network/servers/{server_id}/sync")
     async def sync_network_server(
         server_id: str,
@@ -1138,29 +1161,68 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
     async def sync_server(server_id, account):
         server = _get_owned_server(account, server_id)
         account = server["source_account"]
-        if server.get("discovery_status") == "discovering":
-            _http_error(409, "busy", "MCP 服务器正在发现工具")
+        with _STATE_LOCK:
+            if server.get("sync_status") == "syncing" or server.get("discovery_status") == "discovering" or server.get("gateway_busy"):
+                _http_error(409, "busy", "服务正在更新")
+            if server.get("discovery_status") != "discovered" or not server.get("tools"):
+                _http_error(409, "not_discovered", "请先连接并发现至少一个工具")
+        return await change_publication(account, "servers", server_id, True)
+
+    async def change_publication(account, collection, record_id, publish):
         try:
             config = _load_config()
         except _ConfigError:
             _http_error(503, "invalid_config", "NEF_REGISTRY_CONFIG 无效")
-        if not config.get("publish_url"):
-            _http_error(503, "not_configured", "TRF/ARF 发布地址未配置")
         with _STATE_LOCK:
-            if server.get("sync_status") == "syncing" or server.get("discovery_status") == "discovering":
-                _http_error(409, "busy", "服务正在更新")
-            publish_payload = _publication(config, account, server)
-            server["sync_status"] = "syncing"
+            record = _ACCOUNTS[account][collection][record_id]
+            if record.get("sync_status") == "syncing" or record.get("discovery_status") == "discovering" or record.get("gateway_busy"):
+                _http_error(409, "busy", "服务正在处理另一项操作")
+            record["publication_status"] = "published" if publish else "unpublished"
+            record["sync_status"] = "pending"
+            record.pop("sync_error", None)
+            record.pop("sync_note", None)
+            if not publish and not record.get("trf_may_exist"):
+                record.update(sync_status="not_required", sync_note="已从首页下架，未向 TRF 发布过")
+                return _public_record(record)
+            url = config.get("publish_url" if publish else "withdraw_url")
+            if not url:
+                record["sync_note"] = ("已在首页发布，TRF 发布地址待配置" if publish
+                                       else "已从首页下架，TRF 撤回地址待配置")
+                return _public_record(record)
+            if publish:
+                try:
+                    payload = (_publication(config, account, record) if collection == "servers" else
+                               {"type": "network_package_declaration", "account": account,
+                                "package": _public_record(record)})
+                except HTTPException as exc:
+                    record.update(sync_status="failed", sync_error=exc.detail,
+                                  sync_note="已在首页发布，TRF 同步配置不完整")
+                    return _public_record(record)
+                # Even a timeout may have reached TRF. Preserve this until withdrawal is acknowledged.
+                record["trf_may_exist"] = True
+            else:
+                payload = {"type": "mcp_server_withdrawal" if collection == "servers" else "network_package_withdrawal",
+                           "registration_id": record_id, "account": account}
+            record["sync_status"] = "syncing"
         try:
-            accepted = await _publish(config, publish_payload)
+            accepted = await _publish({**config, "publish_url": url}, payload)
         except _RemoteFailure as exc:
-            _mark_sync_status(account, "servers", server_id, "failed")
-            status, message = _upstream_failure_status(exc.code)
-            _http_error(status, exc.code, message)
-        status = "synced" if accepted else "submitted"
-        result = _mark_sync_status(account, "servers", server_id, status)
-        result["accepted"] = accepted
-        return result
+            with _STATE_LOCK:
+                record.update(sync_status="failed", sync_error=exc.code,
+                              sync_note="首页状态已更新，TRF 请求失败，可重试")
+                return _public_record(record)
+        with _STATE_LOCK:
+            record["sync_status"] = "synced" if accepted else "submitted"
+            record["sync_note"] = "TRF 已确认" if accepted else "已提交 TRF，等待确认"
+            if not publish and accepted:
+                record["trf_may_exist"] = False
+            return {**_public_record(record), "accepted": accepted}
+
+    @router.post("/api/v1/network/servers/{server_id}/unpublish")
+    async def unpublish_server(server_id: str, authorization: str | None = Header(default=None)):
+        _, identity = auth(authorization, "af:register")
+        record = _get_owned_server(_account_from_record(identity), server_id)
+        return await change_publication(record["source_account"], "servers", server_id, False)
 
     @router.post("/api/v1/network/af-servers/{server_id}/mcp")
     async def af_tool_gateway(server_id: str, request: Request,
@@ -1170,6 +1232,8 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
         except _ConfigError:
             _http_error(503, "invalid_config", "网络调用配置无效")
         caller, account, server = _network_access(config, authorization, server_id)
+        if server.get("publication_status") != "published":
+            _http_error(409, "not_published", "服务尚未发布或已取消发布")
         approved = _approved_server(config, server["url"])
         if approved is None:
             _http_error(403, "not_approved", "AF 服务未获连接许可")
@@ -1218,7 +1282,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                 return error(-32602, "Arguments do not match the discovered inputSchema")
             with _STATE_LOCK:
                 current = _ACCOUNTS[account]["servers"][server_id]
-                if current.get("gateway_busy") or current.get("discovery_status") != "discovered":
+                if current.get("gateway_busy") or current.get("discovery_status") != "discovered" or current.get("publication_status") != "published":
                     return error(-32001, "AF service is busy")
                 current["gateway_busy"] = True
                 current["last_call"] = {"caller": caller, "tool": tool["name"], "status": "calling", "via": "NEF"}
@@ -1317,10 +1381,13 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                 "context": validation["context"],
                 "execution_target": "network",
                 "sync_status": "pending",
+                "publication_status": "draft",
+                "trf_may_exist": False,
             }
             state["packages"][package_id] = package
             return _public_record(package)
 
+    @router.post("/api/v1/network/packages/{package_id}/publish")
     @router.post("/api/v1/network/packages/{package_id}/sync")
     async def sync_network_package(
         package_id: str,
@@ -1328,28 +1395,15 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
     ):
         _key, record = auth(authorization, "pipeline:manage")
         account = _account_from_record(record)
-        package = _get_owned_package(account, package_id)
-        try:
-            config = _load_config()
-        except _ConfigError:
-            _http_error(503, "invalid_config", "NEF_REGISTRY_CONFIG 无效")
-        if not config.get("publish_url"):
-            _http_error(503, "not_configured", "TRF/ARF 发布地址未配置")
-        publish_payload = {
-            "type": "network_package_declaration",
-            "account": account,
-            "package": _public_record(package),
-        }
-        try:
-            accepted = await _publish(config, publish_payload)
-        except _RemoteFailure as exc:
-            _mark_sync_status(account, "packages", package_id, "failed")
-            status, message = _upstream_failure_status(exc.code)
-            _http_error(status, exc.code, message)
-        status = "synced" if accepted else "submitted"
-        result = _mark_sync_status(account, "packages", package_id, status)
-        result["accepted"] = accepted
-        return result
+        _get_owned_package(account, package_id)
+        return await change_publication(account, "packages", package_id, True)
+
+    @router.post("/api/v1/network/packages/{package_id}/unpublish")
+    async def unpublish_package(package_id: str, authorization: str | None = Header(default=None)):
+        _, identity = auth(authorization, "pipeline:manage")
+        account = _account_from_record(identity)
+        _get_owned_package(account, package_id)
+        return await change_publication(account, "packages", package_id, False)
 
     return router
 

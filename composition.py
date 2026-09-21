@@ -149,7 +149,10 @@ async def recommend(text, context):
     }, ensure_ascii=False)
     if cfg["wire_api"] == "responses":
         body = {"model": cfg["model"], "instructions": SYSTEM_PROMPT,
-                "input": [{"role": "user", "content": user_input}],
+                # Some compatible gateways replace top-level instructions.
+                # Keep the app policy in a developer message, above user/catalog data.
+                "input": [{"role": "developer", "content": SYSTEM_PROMPT},
+                          {"role": "user", "content": user_input}],
                 "max_output_tokens": 8192, "stream": False, "store": False}
         if cfg.get("reasoning_effort"):
             body["reasoning"] = {"effort": cfg["reasoning_effort"]}

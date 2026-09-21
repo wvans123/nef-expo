@@ -181,8 +181,8 @@ th{background:var(--card);color:var(--muted)}
 .rev-badge{font-size:10px;color:var(--green);border:1px solid #39ffb066;border-radius:8px;padding:0 6px;margin-left:6px}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;border-radius:8px;padding:9px 18px;z-index:200;display:none}
 </style>
-<link rel="stylesheet" href="/static/workbench.css?v=20260920-1">
-<script src="/static/showcase-story.js?v=20260920-1"></script>
+<link rel="stylesheet" href="/static/workbench.css?v=20260921-1">
+<script src="/static/showcase-story.js?v=20260921-1"></script>
 <script src="/static/showcase-mcp.js?v=20260909-1"></script>
 </head>
 <body>
@@ -212,7 +212,6 @@ th{background:var(--card);color:var(--muted)}
   <!-- Tab 1 能力超市 -->
   <div class="tabpane active" id="pane-market">
     <div class="banner" id="market-banner"></div>
-    <div class="registry-strip"><div><b>网络内部 · ARF / TRF 能力目录</b><span id="wb-catalog-status" class="muted">接入账号后自动同步</span></div><button id="wb-open-catalog-publication">发布 NEF 目录</button></div>
     <h3 class="sec">场景套餐 <small class="muted">按业务场景开通网络能力</small></h3>
     <div id="wb-scene-market" class="wb-scene-grid"></div>
     <details class="wb-legacy-packages" hidden><summary>基础能力组合套餐（兼容旧订阅）</summary><div id="pkg-row"></div></details>
@@ -320,13 +319,14 @@ th{background:var(--card);color:var(--muted)}
   <!-- Tab 8 双向开放：复用原版两栏布局 -->
   <div class="tabpane" id="pane-afreg">
     <h3 class="sec">MCP Server 注册 · 双向开放</h3>
-    <p class="muted">AF 提供工具，NEF 统一接入。工具信息发布至网络内部 ARF / TRF；内部网元调用时仍经过 NEF。</p>
-    <div class="afflow"><span class="afnode af-end">AF · MCP Server<small>外部能力源</small></span><span class="afarrow">→</span><span class="afnode nef">NEF<small>登记 · 发现 · 发布</small></span><span class="afarrow">→</span><span class="afnode nef">ARF / TRF<small>网络内工具目录</small></span></div><div class="wb-network-route"><b>调用路径</b><span>内部网元 / NW Agent</span><span>→</span><span>NEF · 接入核验与转发</span><span>→</span><span>AF · tools/call</span></div>
+    <p class="muted">连接外部服务并发现工具，确认发布后在能力超市展示，并同步至 TRF。</p>
+    <div class="afflow"><span class="afnode af-end">🚙 巡检小车<small>MCP 能力源</small></span><span class="afarrow">→</span><span class="afnode nef">NEF<small>发现 · 发布</small></span><span class="afarrow">→</span><span class="afnode nef">TRF<small>网络内工具目录</small></span></div>
     <div class="wb-two-columns"><div><h3 class="sec">① 接入外部能力</h3><label for="wb-server-json">MCP Server 信息</label><textarea id="wb-server-json" class="mono" rows="9">{
-  "name": "园区视觉服务",
-  "url": "https://partner.example.invalid/mcp",
-  "description": "目标识别与巡检分析"
-}</textarea><button class="primary" id="wb-register-server" style="margin-top:12px;width:100%">注册到 NEF</button><div id="wb-register-message" class="muted" role="status"></div></div><div><h3 class="sec">② 已登记的服务与工具</h3><button id="wb-reload-servers">↻ 刷新状态</button><div id="wb-server-list"></div></div></div>
+  "name": "巡检小车服务",
+  "url": "",
+  "description": "提供巡检小车的巡检任务、现场感知与异常检查能力，具体工具以连接后发现的结果为准。"
+}</textarea><p class="muted">收到小车 MCP 地址后填入 url，再连接。</p><button class="primary" id="wb-register-server" style="margin-top:12px;width:100%">连接并发现工具</button><div id="wb-register-message" class="muted" role="status"></div></div><div><h3 class="sec">② 服务与工具</h3><div id="wb-server-list"></div></div></div>
+    <details class="wb-trf-management"><summary>TRF 同步管理</summary><p class="muted">配置对方地址后，可拉取 TRF 能力，或选择本平台能力与场景发送至 TRF。</p><div class="registry-strip"><span id="wb-catalog-status" class="muted">等待接入</span><button id="wb-refresh-catalog">从 TRF 同步</button><button id="wb-open-catalog-publication">发布本平台能力至 TRF</button></div></details>
   </div>
 
   <!-- Tab 9 AF 智能终端 -->
@@ -453,7 +453,7 @@ async function loadMarket(){
       </div>
     </div>
     <div class="stat"><b>${CAPS.filter(c=>c.status==='available').length}</b><span>项可用能力</span></div>
-    <div class="stat"><b id="wb-af-count" style="color:#f0883e">${wb.servers.length}</b><span>个 AF 能力源</span></div>
+    <div class="stat"><b id="wb-af-count" style="color:#f0883e">${new Set((wb.market||[]).filter(x=>x.source==='AF').map(x=>x.server_id)).size}</b><span>个已发布能力源</span></div>
     <div class="stat"><b>${CAPS.filter(c=>c.status==='planned').length}</b><span>项规划中</span></div>
     <div class="stat"><b>3</b><span>种调用方式</span></div>
     <div class="stat"><b>3</b><span>个场景套餐</span></div>
@@ -560,9 +560,9 @@ async function renderSubs(){
       else if(direct.includes(cid)){ badge='单项直订'; color='var(--green)'; }
       else if(subs.includes(cid)){ badge='套餐内'; color='#39d2ff'; }
       else { badge=`等级解锁(${(info.plan||'').toUpperCase()})`; color='var(--purple)'; }
-      return `<div class="card" style="cursor:default"><b>${c.icon||''} ${esc(c.name)}</b> <span class="tier ${c.tier}">${c.tier}</span>
+      return `<button class="card wb-subs-cap" data-subs-cap="${esc(c.id)}"><b>${c.icon||''} ${esc(c.name)}</b> <span class="tier ${c.tier}">${c.tier}</span>
         <div class="muted" style="font-size:12px;margin:5px 0">${esc(c.description.slice(0,50))}…</div>
-        <span class="mono muted" style="font-size:11px">${c.id}</span> <span class="tag-tp" style="color:${color};border-color:${color}55">${badge}</span></div>`;
+        <span class="mono muted" style="font-size:11px">${esc(c.id)}</span> <span class="tag-tp" style="color:${color};border-color:${color}55">${badge}</span><small class="wb-cap-hint">查看能力用途 →</small></button>`;
     }).join('');
     el.innerHTML = `
       <div class="banner">
@@ -591,6 +591,11 @@ async function renderSubs(){
       <h3 class="sec">可用能力（${entitled.length}） <span class="muted" style="font-weight:400;font-size:12px">— 含单项直订 / 套餐内 / 等级解锁 / 第三方订阅</span></h3>
       ${entitled.length?'':'<p class="muted" style="font-size:12px">当前无可用能力——升级 PRO/MAX 可免订阅直用 basic（+advanced）层能力，或单独订阅；也可直接按次付费调用（API/MCP 调用时会收到价格提醒）。</p>'}
       <div class="grid">${capCards}</div>`;
+    el.querySelectorAll('[data-subs-cap]').forEach(button=>button.onclick=()=>{
+      const capability=CAPS.find(c=>c.id===button.dataset.subsCap);
+      showModal(`<h2>${capability.icon||'⚙️'} ${esc(capability.name)}</h2><p>${esc(capability.description)}</p><p class="muted">${esc(capability.unit_price)} · 当前账号已可用</p><div class="wb-modal-actions"><button id="wb-subs-detail-close">关闭</button></div>`);
+      $('#wb-subs-detail-close').onclick=hideModal;
+    });
   }catch(e){
     if(e && e.status === 401){
       el.innerHTML = `<div class="agent-block" style="border-left-color:var(--red)">
@@ -952,8 +957,8 @@ window.termRequest = termRequest;
 $('#term-send').onclick = ()=>termRequest($('#term-input').value.trim());
 $('#term-input').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#term-send').click(); });
 </script>
-<script src="/static/purchase.js?v=20260920-1"></script>
-<script src="/static/workbench.js?v=20260920-1"></script>
+<script src="/static/purchase.js?v=20260921-1"></script>
+<script src="/static/workbench.js?v=20260921-1"></script>
 <script src="/static/catalog-ui.js?v=20260917-1"></script>
 <script src="/static/composer.js?v=20260917-3"></script>
 </body>

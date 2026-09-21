@@ -231,7 +231,7 @@ def register_server(client: TestClient, url: str, *, key: str = "caller-a") -> d
     return response.json()
 
 
-def test_open_registration_discovers_publishes_and_is_shared(client, http_fixture, monkeypatch):
+def test_open_registration_discovers_waits_for_publish_and_is_shared(client, http_fixture, monkeypatch):
     url = http_fixture.url('/mcp')
     calls = install_mcp_fixture(http_fixture, '/mcp', pages=[{'tools': [tool('inspect')]}])
     http_fixture.add('POST','/publish',lambda r:json_response({'accepted': True}))
@@ -242,7 +242,9 @@ def test_open_registration_discovers_publishes_and_is_shared(client, http_fixtur
     response=client.post('/api/v1/af/mcp-servers',json=payload)
     assert response.status_code==200,response.text
     result=response.json();sid=result['id']
-    assert result['created'] and result['discovery_status']=='ok' and result['sync_status']=='accepted'
+    assert result['created'] and result['discovery_status']=='ok' and result['sync_status']=='pending'
+    assert client.get('/api/v1/network/market').json()['items']==[]
+    assert not any(r['path']=='/publish' for r in http_fixture.requests)
     assert [c['method'] for c in calls]==['initialize','notifications/initialized','tools/list']
     assert result['registered_via']=='open'
     again=client.post('/api/v1/af/mcp-servers',json={**payload,'name':'Updated'}).json()
@@ -254,6 +256,7 @@ def test_open_registration_discovers_publishes_and_is_shared(client, http_fixtur
         publication=client.get(f'/api/v1/network/servers/{sid}/publication',headers=headers(key)).json()
         assert publication['source_account']=='1'
         assert client.post(f'/api/v1/network/servers/{sid}/sync',headers=headers(key)).status_code==200
+        assert client.post(f'/api/v1/network/servers/{sid}/unpublish',headers=headers(key)).status_code==200
     private=register_server(client,url)
     assert client.get(f"/api/v1/network/servers/{private['id']}/publication",headers=headers('caller-b')).status_code==404
 
@@ -299,6 +302,7 @@ def test_disabled_example_config_has_no_auto_mock(client, monkeypatch):
     assert example == {
         "catalog_url": None,
         "publish_url": None,
+        "withdraw_url": None,
         "token_env": None,
         "mcp_servers": {},
         "nef_base_url": None,
@@ -674,7 +678,7 @@ def test_server_url_rejects_credentialed_or_unsupported_urls(client, url):
     assert response.status_code == 422
 
 
-def test_af_source_is_server_assigned_and_synced_before_discovery(client, http_fixture, monkeypatch):
+def test_af_source_is_server_assigned_and_publish_requires_discovery(client, http_fixture, monkeypatch):
     published=[]
     def publish(request):
         published.append(json.loads(request['body']))
@@ -690,8 +694,5 @@ def test_af_source_is_server_assigned_and_synced_before_discovery(client, http_f
     assert server['source']=='AF' and server['source_account']!='spoofed'
     assert server['registration_status']=='registered'
     result=client.post('/api/v1/network/servers/'+server['id']+'/sync',headers=headers())
-    assert result.status_code==200 and result.json()['sync_status']=='synced'
-    assert published[0]['source']=='AF'
-    assert published[0]['source_account']==server['source_account']
-    assert published[0]['server']['tools']==[]
-    assert published[0]['server']['discovery_status']=='not_discovered'
+    assert result.status_code==409 and result.json()['detail']['code']=='not_discovered'
+    assert published==[]

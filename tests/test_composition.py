@@ -246,14 +246,24 @@ def responses_peer(peer, monkeypatch, tmp_path):
 
 def test_responses_request_and_output_over_real_http(client, responses_peer):
     peer = responses_peer
-    peer.add("POST", "/v1/responses", lambda r: (200, {}, json.dumps(responses_payload()).encode()))
+    def compatible_gateway(request):
+        # This gateway does not apply top-level instructions. The application
+        # policy must survive in the ordered input messages.
+        wire = json.loads(request["body"])
+        if wire["input"][0] != {"role": "developer", "content": SYSTEM_PROMPT}:
+            payload = responses_payload()
+            payload["output"][-1]["content"][0]["text"] = "A prose answer, not a service plan."
+            return 200, {}, json.dumps(payload).encode()
+        return 200, {}, json.dumps(responses_payload()).encode()
+    peer.add("POST", "/v1/responses", compatible_gateway)
     response = client.post("/api/v1/composer/recommend", headers=headers(), json={"text": "track"})
     assert response.status_code == 200, response.text
     assert response.json()["proposal"] == proposal()
     wire = json.loads(peer.requests[0]["body"])
     assert wire["model"] == "gpt-6-astra" and wire["reasoning"] == {"effort": "high"}
     assert wire["instructions"] == SYSTEM_PROMPT
-    assert json.loads(wire["input"][0]["content"])["requirement"] == "track"
+    assert [message["role"] for message in wire["input"]] == ["developer", "user"]
+    assert json.loads(wire["input"][1]["content"])["requirement"] == "track"
     assert wire["store"] is False and wire["stream"] is False
     assert not {"messages", "temperature", "max_tokens"} & wire.keys()
     assert peer.requests[0]["headers"]["authorization"] == "Bearer test-secret-not-for-browser"
@@ -277,7 +287,7 @@ def test_model_receives_current_available_catalog_and_source(client, request, pr
         })
         assert result.status_code == 200, result.text
         wire = json.loads(peer.requests[-1]["body"])
-        data = json.loads(wire["input"][0]["content"] if protocol == "responses" else wire["messages"][1]["content"])
+        data = json.loads(wire["input"][1]["content"] if protocol == "responses" else wire["messages"][1]["content"])
         catalog = {c["capability_id"]: c for c in data["catalog"]}
         assert set(catalog) == {c.id for c in CAP_INDEX.values() if c.status == "available"}
         assert "vital_sign_detection" not in catalog

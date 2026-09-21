@@ -1,6 +1,6 @@
 # 场景接口对接说明
 
-分类：接口参考。面向场景开发同事，更新：2026-09-20。
+分类：接口参考。面向场景开发同事，更新：2026-09-21。
 
 启动、改地址用 [README](../../README.md#二换电脑启动与配置)，bash / PowerShell 命令见 [curl 联调手册](manual-curl.md)。套餐读取和通知另见[订阅契约](subscription-query.md)。机器狗地址和报文来自用户提供的另一台电脑联调记录，本机未访问真实对端。
 
@@ -72,7 +72,7 @@ X-NEF-Request-ID: <本次请求标识>
 {"user_request":"今天下午3点，十字路口东南侧的车流量情况怎么样"}
 ```
 
-对应配置 `bridge.scenes.traffic_flow_detection.intent`，`body={"user_request":"$text"}`。结果回传到 `/api/v1/scene-feedback/traffic_flow_detection`，无需 Key。
+对应配置 `bridge.scenes.traffic_flow_detection.intent`，`body={"user_request":"$text"}`。处理完成后，由车流量服务向 `POST /api/v1/scene-feedback/traffic_flow_detection` 回传 `{"final_result":"文字结果"}`，Content-Type 为 application/json，无需 Key。页面轮询的是 NEF 已收到的结果，不向车流量现场服务定时 GET。
 
 ### 机器狗巡检
 

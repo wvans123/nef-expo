@@ -1,5 +1,5 @@
 /* Incremental integration for the original workbench. Native tabs, forms and drag/drop remain in index.html. */
-const wb={networkBusy:false,networkError:'',access:null,scenes:[],sceneId:'',catalog:[],servers:[],packages:[],networkStatus:'not_configured',epoch:0,channels:[],channel:'',feedbackContext:'',feedbackSignature:'',feedbackBusy:false,resultTimer:null,resultBusy:false};
+const wb={networkBusy:false,networkError:'',access:null,scenes:[],sceneId:'',catalog:[],market:[],servers:[],packages:[],networkStatus:'not_configured',epoch:0,channels:[],channel:'',feedbackContext:'',feedbackSignature:'',feedbackBusy:false,resultTimer:null,resultBusy:false};
 const wbStatus=x=>({not_configured:'待对接',not_discovered:'未发现',discovering:'发现中',discovered:'已发现',pending:'待同步',submitted:'已提交 · 待确认',synced:'已同步',syncing:'同步中',calling:'转发中',returned:'已收到 AF 回执',tool_error:'AF 返回工具错误',failed:'失败'}[x]||x||'待处理');
 function wbMessage(e){const d=e?.data?.detail??e?.detail;return typeof d==='string'?d:d?.message||e?.message||'请求未完成';}
 function wbError(e){toast(wbMessage(e),false);}
@@ -19,7 +19,7 @@ function wbCancelScene(id){
   $('#wb-keep-scene').onclick=hideModal;
   $('#wb-confirm-cancel').onclick=()=>wbJob($('#wb-confirm-cancel'),$('#wb-cancel-message'),async epoch=>{
     const result=await api('/api/v1/services/'+encodeURIComponent(id)+'/subscribe',{method:'DELETE'});
-    if(epoch!==wb.epoch)return;wbStopResultLoop();hideModal();purchaseNotice(result.notification);await wbLoadScenes();
+    if(epoch!==wb.epoch)return;wbStopResultLoop();hideModal();purchaseNotice(result.notification);await wbLoadScenes();if(wbActive()==='subs')await renderSubs();
   });
 }
 async function wbJob(button,target,fn){if(!apiKey())return toast('请先在顶栏注册或选择账号',false);const epoch=wb.epoch;button.disabled=true;if(target)target.textContent='正在处理…';try{const text=await fn(epoch);if(epoch===wb.epoch&&target)target.textContent=text||'已更新';}catch(e){if(epoch===wb.epoch){if(target)target.textContent=wbMessage(e);else wbError(e);}}finally{button.disabled=false;}}
@@ -50,11 +50,11 @@ function wbOpenScene(id,owned){
   if(!apiKey())return toast('请先在顶栏注册账号',false);
   const s=wb.scenes.find(x=>x.id===id);if(!s)return;
   if(owned){wb.sceneId=id;activateTab('intent',true);return;}
-  showModal(`<h2>开通「${esc(s.name)}」</h2><p class="muted">开通后获得该场景的调用权益。当前为演示订阅，不产生真实费用。</p>${purchaseCapabilitySelector((s.provenance?.components||[]).map(c=>c.capability_id))}<div class="wb-modal-actions"><button id="wb-cancel">取消</button><button class="success" id="wb-confirm-scene">开通并进入</button></div><p id="wb-sub-message" class="muted"></p>`);
+  showModal(`<h2>开通「${esc(s.name)}」</h2><p class="muted">开通后获得该场景的调用权益。当前为演示订阅，不产生真实费用。</p>${purchaseCapabilitySelector((s.provenance?.components||[]).map(c=>c.capability_id))}<div class="wb-modal-actions"><button id="wb-cancel">取消</button><button class="success" id="wb-confirm-scene">确认开通</button></div><p id="wb-sub-message" class="muted"></p>`);
   $('#purchase-capabilities').insertAdjacentHTML('afterend','<div id="wb-purchase-quote" class="wb-price"></div>');
   const quote=()=>{const ids=purchaseCapabilityIds();$('#wb-purchase-quote').textContent=purchaseQuoteText(purchaseQuote(s,ids));$('#wb-confirm-scene').disabled=!ids.length;};
   $$('#purchase-capabilities input').forEach(input=>input.onchange=quote);quote();
-  $('#wb-cancel').onclick=hideModal;$('#wb-confirm-scene').onclick=()=>wbJob($('#wb-confirm-scene'),$('#wb-sub-message'),async epoch=>{const result=await api('/api/v1/services/'+encodeURIComponent(id)+'/subscribe',{method:'POST',body:JSON.stringify({network_capability_ids:purchaseCapabilityIds()})});if(epoch!==wb.epoch)return;wb.sceneId=id;hideModal();purchaseNotice(result.notification);await wbLoadScenes();activateTab('intent',true);return '已开通';});
+  $('#wb-cancel').onclick=hideModal;$('#wb-confirm-scene').onclick=()=>wbJob($('#wb-confirm-scene'),$('#wb-sub-message'),async epoch=>{const result=await api('/api/v1/services/'+encodeURIComponent(id)+'/subscribe',{method:'POST',body:JSON.stringify({network_capability_ids:purchaseCapabilityIds()})});if(epoch!==wb.epoch)return;hideModal();purchaseNotice(result.notification);await wbLoadScenes();if(wbActive()==='subs')await renderSubs();return '已开通';});
 }
 function wbRenderIntent(){
   const sel=$('#wb-intent-scene');sel.innerHTML='<option value="">不指定场景</option>'+wb.scenes.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');sel.value=wb.sceneId;
@@ -82,37 +82,38 @@ function wbIntentResult(res,scene,mode,error){
   if(mode==='demo'&&!error){$('#wb-feedback-text').textContent=res.demo_result?.text||'演示结果';$('#wb-feedback-data').textContent=jfmt(res.demo_result?.data||{});$('#wb-feedback-note').textContent='演示数据 · 非现场回传';}
 }
 async function wbLoadNetwork(){
-  if(!apiKey()){wb.catalog=[];wb.servers=[];wb.packages=[];wb.networkStatus='not_configured';wbRenderNetwork();return;}
   if(wb.networkBusy){wb.networkPending=true;return;}wb.networkBusy=true;const epoch=wb.epoch;
   try{
     wb.networkError='';
-    try{await api('/api/v1/network/catalog/refresh',{method:'POST'});}catch(e){wb.networkError=wbMessage(e);}
+    const response=await fetch('/api/v1/network/market',{cache:'no-store'});if(!response.ok)throw new Error('已发布能力读取失败');
+    const market=await response.json();
     if(epoch!==wb.epoch)return;
+    wb.market=market.items;
+    if(!apiKey()){wb.catalog=[];wb.servers=[];wb.packages=[];wb.networkStatus='not_configured';wbRenderNetwork();return;}
     const [c,s,p]=await Promise.all(['/catalog','/servers','/packages'].map(x=>api('/api/v1/network'+x)));if(epoch!==wb.epoch)return;
     wb.catalog=c.items;wb.networkStatus=c.status;wb.servers=s.servers;wb.packages=p.packages;wbRenderNetwork();
   }finally{wb.networkBusy=false;if(wb.networkPending){wb.networkPending=false;wbLoadNetwork().catch(wbError);}}
 }
 function wbRenderNetwork(){
-  const signature=jfmt([current,wb.networkStatus,wb.networkError,wb.catalog,wb.servers,wb.packages]);
+  const signature=jfmt([current,wb.networkStatus,wb.networkError,wb.catalog,wb.market,wb.servers,wb.packages]);
   if(wb.networkRenderSignature===signature)return;wb.networkRenderSignature=signature;
-  if($('#wb-af-count'))$('#wb-af-count').textContent=wb.servers.length;
-  $('#wb-catalog-status').textContent=apiKey()?(wb.networkError&&wb.networkStatus!=='not_configured'?'同步未完成':wbStatus(wb.networkStatus))+' · '+wb.catalog.length+' 条网络记录':'接入账号后自动同步';
-  $('#wb-catalog-status').title=wb.networkError||'进入页面及每 30 秒自动检查网络目录';
-  const afTools=wb.servers.flatMap(server=>(server.tools?.length?server.tools:[{name:server.name,description:'MCP Server · '+wbStatus(server.discovery_status),_server:true}]).map(tool=>({id:server.id+':'+tool.name,name:tool.name,description:tool.description||'AF 注册的 MCP Tool',kind:tool._server?'server':'tool',source:'AF',source_account:server.source_account||current,server:server.name,discovery_status:server.discovery_status,sync_status:server.sync_status,inputSchema:tool.inputSchema})));
-  const items=wb.catalog.concat(wb.packages.map(p=>({...p,kind:'package',source:'local'})),afTools);
-  $('#wb-network-market').innerHTML=items.length?'<h3 class="sec">网络与自建目录</h3><div class="tile-grid">'+items.map((x,i)=>`<button class="tile wb-network-item" data-net-item="${i}"><div class="tname">${esc(x.name)}</div><span class="muted">${x.kind==='package'?'场景套餐':x.kind==='server'?'MCP Server':'工具'} · ${x.source==='local'?'自助编排 · '+wbStatus(x.sync_status):x.source==='AF'?'AF · '+(x.source_account||'外部提供方')+' · '+(x.sync_status?wbStatus(x.sync_status):'网络目录'):'TRF / ARF'}</span></button>`).join('')+'</div>':'';
-  $$('#wb-network-market [data-net-item]').forEach(b=>b.onclick=()=>{const item=items[Number(b.dataset.netItem)];showModal(`<h2>${esc(item.name)}</h2><p class="muted">能力来源与服务信息</p><pre>${esc(jfmt(item))}</pre><button id="wb-close-detail">关闭</button>`);$('#wb-close-detail').onclick=hideModal;});
-  $('#wb-server-list').innerHTML=wb.servers.map(s=>`<article class="step-card"><div class="wb-record-head"><b>${esc(s.name)}</b><span class="method-chip">来源：AF · ${esc(s.source_account||current)}</span><span class="method-chip">NEF 已登记</span><span class="method-chip">${esc(wbStatus(s.discovery_status))} · ${s.tools.length} tools</span><span class="method-chip">${esc(wbStatus(s.sync_status))}</span></div><div class="wb-route-detail"><label>AF 原始服务 · 由 NEF 连接</label><code>${esc(s.url)}</code><label>网络侧调用入口 · 经过 NEF</label><code>${esc(s.gateway_path||'服务更新后可用')}</code></div><p class="muted">${esc(s.description||'')}</p><div class="wb-record-actions"><button class="primary" data-discover="${esc(s.id)}">连接并发现工具</button><button data-preview-server="${esc(s.id)}">查看网络登记内容</button><button data-sync-server="${esc(s.id)}">同步 ARF / TRF</button></div><div>${s.discovery_status==='discovered'?s.tools.map(t=>`<details class="wb-tool"><summary><b>${esc(t.name)}</b> · ${esc(t.description||'MCP Tool')}</summary><pre>${esc(jfmt(t.inputSchema))}</pre></details>`).join(''):'<p class="muted">尚无有效工具发现结果</p>'}</div><div class="wb-call-state">${s.last_call?`<b>最近网络调用</b> ${esc(s.last_call.caller)} → NEF → ${esc(s.last_call.tool)}<span class="method-chip">${esc(wbStatus(s.last_call.status))}</span>`:'等待网络侧调用 · 不绕过 NEF'}</div><p data-server-message="${esc(s.id)}" class="muted" role="status"></p></article>`).join('')||'<p class="muted">暂无登记的 MCP Server</p>';
-  $$('#wb-server-list [data-preview-server]').forEach(b=>b.onclick=()=>wbJob(b,null,async epoch=>{const payload=await api('/api/v1/network/servers/'+encodeURIComponent(b.dataset.previewServer)+'/publication');if(epoch!==wb.epoch)return;showModal(`<h2>发布至网络内部 ARF / TRF</h2><p class="muted">工具声明、AF 来源和 NEF 的 MCP 入口。AF 原始地址与凭证不作为网络调用入口发布。</p><pre>${esc(jfmt(payload))}</pre><button id="wb-publication-close">关闭</button>`);$('#wb-publication-close').onclick=hideModal;}));
+  if($('#wb-af-count'))$('#wb-af-count').textContent=new Set(wb.market.filter(x=>x.source==='AF').map(x=>x.server_id)).size;
+  $('#wb-catalog-status').textContent=wb.networkError||((apiKey()?wbStatus(wb.networkStatus):'请先接入账号')+' · '+wb.catalog.length+' 项');
+  const items=wb.market;
+  $('#wb-network-market').innerHTML=items.length?'<div class="cat-title"><span class="cat-dot" style="background:#f0883e"></span>扩展能力 <small>'+items.length+' 项</small></div><div class="tile-grid">'+items.map((x,i)=>`<button class="tile wb-network-item" data-net-item="${i}"><div class="ticon">${wbToolIcon(x)}</div><div class="tname" title="${esc(x.name)}">${esc(x.name)}</div><span class="wb-standard-label">${esc(x.provider||(x.kind==='package'?'自助编排套餐':'外部能力'))}</span><p class="wb-tile-description">${esc(x.description||'查看能力详情')}</p><div class="tfoot"><span class="cat-dot" style="background:#f0883e;width:7px;height:7px;margin:0"></span><span class="tprice">${x.kind==='package'?'组合套餐':'MCP 工具'}</span></div></button>`).join('')+'</div>':'';
+  $$('#wb-network-market [data-net-item]').forEach(b=>b.onclick=()=>{const item=items[Number(b.dataset.netItem)];showModal(`<h2>${wbToolIcon(item)} ${esc(item.name)}</h2><p>${esc(item.description||'服务提供方尚未填写说明')}</p><p class="muted">${esc(item.provider||(item.kind==='package'?'自助编排套餐':'外部能力'))}</p>${item.inputSchema?`<details><summary>调用参数</summary><pre>${esc(jfmt(item.inputSchema))}</pre></details>`:''}<div class="wb-modal-actions"><button id="wb-close-detail">关闭</button></div>`);$('#wb-close-detail').onclick=hideModal;});
+  $('#wb-server-list').innerHTML=wb.servers.map(s=>{const published=s.publication_status==='published';return `<article class="step-card"><div class="wb-record-head"><b>🚙 ${esc(s.name)}</b><span class="method-chip">${published?'已发布':'未发布'}</span><span class="method-chip">${esc(wbStatus(s.discovery_status))} · ${s.tools.length} 个工具</span></div><p class="muted">${esc(s.description||'')}</p><div class="wb-record-actions"><button data-discover="${esc(s.id)}" ${published?'disabled':''}>连接并发现工具</button><button class="${published?'':'primary'}" data-publish-server="${esc(s.id)}" data-action="${published?'unpublish':'publish'}" ${!published&&(!s.tools.length||s.discovery_status!=='discovered')?'disabled':''}>${published?'取消发布':'发布'}</button></div><p class="muted wb-sync-note">${esc(s.sync_note||'发现工具后，点击发布才会在首页展示')}</p>${(published&&s.sync_status!=='synced')||(!published&&s.trf_may_exist)?`<details class="wb-sync-detail"><summary>TRF 同步状态</summary><button class="wb-sync-retry" data-retry-server="${esc(s.id)}" data-action="${published?'publish':'unpublish'}">重试 TRF ${published?'同步':'撤回'}</button></details>`:''}<div>${s.tools.map(t=>`<details class="wb-tool"><summary>${wbToolIcon(t)} <b>${esc(t.name)}</b> · ${esc(t.description||'MCP 工具')}</summary><pre>${esc(jfmt(t.inputSchema))}</pre></details>`).join('')||'<p class="muted">等待连接并发现工具</p>'}</div></article>`;}).join('')||'<p class="muted">填入地址并连接后，工具会显示在这里。</p>';
   $$('#wb-server-list [data-discover]').forEach(b=>b.onclick=()=>wbServerAction(b,b.dataset.discover,'discover'));
-  $$('#wb-server-list [data-sync-server]').forEach(b=>b.onclick=()=>wbServerAction(b,b.dataset.syncServer,'sync'));
+  $$('#wb-server-list [data-publish-server]').forEach(b=>b.onclick=()=>wbServerAction(b,b.dataset.publishServer,b.dataset.action));
+  $$('#wb-server-list [data-retry-server]').forEach(b=>b.onclick=()=>wbServerAction(b,b.dataset.retryServer,b.dataset.action));
   if(wbActive()==='composer')wbRenderPool();loadPipeList();
 }
 async function wbServerAction(b,id,action){
-  await wbJob(b,$('#wb-register-message'),async epoch=>{try{const r=await api('/api/v1/network/servers/'+encodeURIComponent(id)+'/'+action,{method:'POST'});if(epoch!==wb.epoch)return;await wbLoadNetwork();return action==='discover'?'已完成 MCP 握手与工具发现，展开工具可查看参数声明。':'注册发布：'+wbStatus(r.sync_status);}catch(e){if(epoch===wb.epoch)await wbLoadNetwork().catch(()=>{});throw e;}});
+  await wbJob(b,$('#wb-register-message'),async epoch=>{try{const r=await api('/api/v1/network/servers/'+encodeURIComponent(id)+'/'+action,{method:'POST'});if(epoch!==wb.epoch)return;await wbLoadNetwork();return action==='discover'?'已连接并发现工具，点击发布后在首页展示。':r.sync_note||'发布状态已更新';}catch(e){if(epoch===wb.epoch)await wbLoadNetwork().catch(()=>{});throw e;}});
 }
-$('#wb-register-server').onclick=()=>wbJob($('#wb-register-server'),$('#wb-register-message'),async epoch=>{let body;try{body=JSON.parse($('#wb-server-json').value);}catch{throw new Error('JSON 格式有误');}await api('/api/v1/network/servers',{method:'POST',body:JSON.stringify(body)});if(epoch!==wb.epoch)return;await wbLoadNetwork();return '已登记。下一步：连接并发现工具。';});
-$('#wb-reload-servers').onclick=()=>wbLoadNetwork().catch(wbError);
+function wbToolIcon(tool){const name=(tool.name||'')+' '+(tool.description||'');return /巡检|patrol|robot|rover/i.test(name)?'🚙':/检测|视觉|detect|vision|camera/i.test(name)?'👁️':/追踪|track|定位|position/i.test(name)?'📍':/告警|异常|alert/i.test(name)?'🔔':tool.kind==='package'?'📦':'🔧';}
+$('#wb-register-server').onclick=()=>wbJob($('#wb-register-server'),$('#wb-register-message'),async epoch=>{let body;try{body=JSON.parse($('#wb-server-json').value);}catch{throw new Error('JSON 格式有误');}if(!body.url?.trim())throw new Error('请先填写巡检小车的 MCP 地址');try{const record=await api('/api/v1/network/servers',{method:'POST',body:JSON.stringify(body)});if(epoch!==wb.epoch)return;await api('/api/v1/network/servers/'+encodeURIComponent(record.id)+'/discover',{method:'POST'});return '已连接并发现工具，确认后点击发布。';}finally{if(epoch===wb.epoch)await wbLoadNetwork();}});
+$('#wb-refresh-catalog').onclick=()=>wbJob($('#wb-refresh-catalog'),$('#wb-catalog-status'),async epoch=>{wb.networkError='';try{await api('/api/v1/network/catalog/refresh',{method:'POST'});}catch(e){wb.networkError=wbMessage(e);throw e;}finally{if(epoch===wb.epoch)await wbLoadNetwork();}return 'TRF 能力已同步';});
 
 function wbSources(){const rows=[...CAPS.filter(c=>c.status==='available'),...wb.catalog.filter(c=>c.kind==='tool'),...wb.servers.flatMap(s=>s.discovery_status==='discovered'?s.tools.map(t=>({id:s.id+':'+t.name,name:t.name})):[])];return [...new Map(rows.map(x=>[x.id,x])).values()];}
 function wbRenderPool(){
@@ -121,9 +122,9 @@ function wbRenderPool(){
 }
 async function renderComposer(){wbRenderPool();loadPipeList();await wbLoadNetwork().catch(wbError);}
 function loadPipeList(){
-  $('#pipe-list').innerHTML=wb.packages.map(p=>`<div class="step-card"><b>${esc(p.name)}</b><span class="method-chip">${esc(wbStatus(p.sync_status))}</span><div class="kv"><b>步骤</b>${p.steps.map(s=>esc(wbSources().find(c=>c.id===s.capability_id)?.name||s.capability_id)).join(' → ')}</div><div class="wb-record-actions"><button class="primary" data-publish-package="${esc(p.id)}">同步 TRF / ARF</button><button data-preview-package="${esc(p.id)}">查看 JSON</button></div></div>`).join('')||'<span class="muted">暂无场景套餐</span>';
+  $('#pipe-list').innerHTML=wb.packages.map(p=>`<div class="step-card"><b>${esc(p.name)}</b><span class="method-chip">${p.publication_status==='published'?'已发布':'未发布'}</span><div class="kv"><b>步骤</b>${p.steps.map(s=>esc(wbSources().find(c=>c.id===s.capability_id)?.name||s.capability_id)).join(' → ')}</div><div class="wb-record-actions"><button class="primary" data-publish-package="${esc(p.id)}" data-action="${p.publication_status==='published'?'unpublish':'publish'}">${p.publication_status==='published'?'取消发布':'发布'}</button><button data-preview-package="${esc(p.id)}">查看 JSON</button></div><p class="muted">${esc(p.sync_note||'保存后需确认发布')}</p>${((p.publication_status==='published'&&p.sync_status!=='synced')||(p.publication_status!=='published'&&p.trf_may_exist))?`<button data-publish-package="${esc(p.id)}" data-action="${p.publication_status==='published'?'publish':'unpublish'}">重试 TRF 同步</button>`:''}</div>`).join('')||'<span class="muted">暂无场景套餐</span>';
   $$('#pipe-list [data-preview-package]').forEach(b=>b.onclick=()=>{$('#pipe-json').textContent=jfmt(wb.packages.find(p=>p.id===b.dataset.previewPackage));});
-  $$('#pipe-list [data-publish-package]').forEach(b=>b.onclick=()=>wbJob(b,$('#pipe-run-result'),async epoch=>{const r=await api('/api/v1/network/packages/'+encodeURIComponent(b.dataset.publishPackage)+'/sync',{method:'POST'});if(epoch!==wb.epoch)return;await wbLoadNetwork();return '网络交付：'+wbStatus(r.sync_status)+'\n'+jfmt(r);}));
+  $$('#pipe-list [data-publish-package]').forEach(b=>b.onclick=()=>wbJob(b,$('#pipe-run-result'),async epoch=>{const r=await api('/api/v1/network/packages/'+encodeURIComponent(b.dataset.publishPackage)+'/'+b.dataset.action,{method:'POST'});if(epoch!==wb.epoch)return;await wbLoadNetwork();return r.sync_note||'发布状态已更新';}));
 }
 /* REST retains original selection, generated parameter forms, request, authorization and response panes. */
 function wbTrackingCap(){const s=wb.scenes.find(x=>x.id==='collaborative_tracking');return s?{id:'scene:collaborative_tracking',name:s.name,params:[{name:'device_id',type:'string',required:true,description:'协同终端',default:'terminal-01'},{name:'video_source',type:'string',required:true,description:'视频源引用',default:'camera-01'},{name:'target',type:'string',required:true,description:'追踪目标',default:'指定移动目标'}]}:null;}
@@ -215,10 +216,10 @@ $('#wb-feedback-pull').onclick=wbPullResult;
 function wbTabChanged(name){wbStopResultLoop();wb.epoch++;window.wbCatalogClose?.();if(name!=='mcp')wbMcp.reset();wbUpdateFeedback();}
 async function refreshAll(){
   wbStopResultLoop();
-  wb.epoch++;window.wbCatalogClose?.();wbMcp.reset();wb.catalog=[];wb.servers=[];wb.packages=[];wb.channels=[];wb.channel='';wb.feedbackContext='';pipeSteps.length=0;window.wbComposerReset?.();wbClearFeedback();wbResetResult();$('#wb-register-message').textContent='';$('#purchase-notice').hidden=true;renderAccounts();wbRenderNetwork();
+  wb.epoch++;window.wbCatalogClose?.();wbMcp.reset();wb.catalog=[];wb.market=[];wb.servers=[];wb.packages=[];wb.channels=[];wb.channel='';wb.feedbackContext='';pipeSteps.length=0;window.wbComposerReset?.();wbClearFeedback();wbResetResult();$('#wb-register-message').textContent='';$('#purchase-notice').hidden=true;renderAccounts();wbRenderNetwork();
   try{await loadMarket();if(wbActive()==='subs')await renderSubs();if(wbActive()==='intent')wbRenderIntent();if(wbActive()==='api')await renderApiTab();if(wbActive()==='mcp')renderMcpTab();if(wbActive()==='composer')await renderComposer();await wbUpdateFeedback();}catch(e){wbError(e);}
 }
 window.addEventListener('pagehide',()=>{wbStopResultLoop();wb.epoch++;});
 setInterval(wbPollFeedback,2000);
-setInterval(()=>{if(['market','afreg'].includes(wbActive())&&apiKey())wbLoadNetwork().catch(wbError);},30000);
+setInterval(()=>{if(['market','afreg'].includes(wbActive()))wbLoadNetwork().catch(wbError);},30000);
 checkInstance().then(purchaseBootstrap).catch(wbError).then(refreshAll).then(()=>{const hash=location.hash.slice(1);if(hash&&!activateTab(hash,false))activateTab('market',true);});

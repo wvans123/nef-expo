@@ -2,6 +2,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {chromium}=require('playwright');
 const origin=process.argv[2],url=new URL(origin);
+const runId=Date.now().toString(36);
 assert.equal(url.hostname,'127.0.0.1');
 assert(url.port&&url.port!=='8069','Use an isolated fixture port');
 const output=path.resolve('.runtime/catalog-ui');
@@ -20,13 +21,18 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {
       });
       await page.goto(origin);
       await page.waitForFunction(()=>wb.scenes.length===3&&CAPS.length>0);
+      assert.equal(await page.locator('#wb-open-catalog-publication').isVisible(),false);
+      await page.evaluate(()=>activateTab('afreg',true));
+      await page.locator('.wb-trf-management > summary').click();
       await page.locator('#wb-open-catalog-publication').click();
       assert.equal(await page.locator('#modal-bg').evaluate(el=>el.classList.contains('show')),false);
       assert.match(await page.locator('#toast').innerText(),/注册或选择账号/);
       await page.locator('#btn-register-acct').click();
-      await page.locator('#wb-account-name').fill('catalog-ui-'+viewport.width);
+      await page.locator('#wb-account-name').fill('catalog-ui-'+runId+'-'+viewport.width);
       await page.locator('#wb-account-create').click();
-      await page.waitForFunction(()=>apiKey()&&wb.catalog.length===2);
+      await page.waitForFunction(()=>!!apiKey());
+      await page.locator('#wb-refresh-catalog').click();
+      await page.waitForFunction(()=>wb.catalog.length===2);
       await page.locator('#wb-open-catalog-publication').click();
       assert.equal(await page.locator('#wb-catalog-preview').isDisabled(),true);
       assert.equal(await page.locator('#wb-catalog-publish').isDisabled(),true);
@@ -94,7 +100,7 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {
         if(change==='close'){
           await page.locator('#wb-catalog-close').click();
         }else{
-          const other=await (await context.request.post(origin+'/api/v1/register',{data:{account:'catalog-ui-other-'+viewport.width}})).json();
+          const other=await (await context.request.post(origin+'/api/v1/register',{data:{account:'catalog-ui-other-'+runId+'-'+viewport.width}})).json();
           await page.evaluate(async account=>{
             accounts[account.account]={api_key:account.api_key};current=account.account;saveAccounts();await refreshAll();
           },other);

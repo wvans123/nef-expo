@@ -1,6 +1,6 @@
 # curl 联调手册
 
-分类：运行手册。更新：2026-09-20。用于获准内网测试，接口定义见[场景接口](integration.md)、[订购通知](subscription-query.md)、[农场 MCP](farm-integration.md)、[目录发布](network-catalog.md)。所有示例 `<...>` 都需替换；不要把命令中的 NEF 地址写为 `0.0.0.0`。
+分类：运行手册。更新：2026-09-21。用于获准内网测试，接口定义见[场景接口](integration.md)、[订购通知](subscription-query.md)、[农场 MCP](farm-integration.md)、[目录发布](network-catalog.md)。所有示例 `<...>` 都需替换；不要把命令中的 NEF 地址写为 `0.0.0.0`。
 
 ## 1. 最短验证顺序
 
@@ -59,7 +59,7 @@ nef GET '/api/v1/integration/subscriptions?account_id=1'
 nef POST /api/v1/af/mcp-servers '{"name":"农场管理平台","url":"http://<农场IP>:<端口>/mcp","description":"农场能力"}'
 ```
 
-最后一条会立即连接所填 MCP，发现工具，并在配置了目录地址时发布；只对获准目标执行。未配允许列表默认拒绝连接，登记仍保留。对端不可达 502/504，别把“已登记”当工具已发现。
+最后一条会立即连接所填 MCP 并发现工具，保持草稿，不自动发布到 TRF；之后用账号 Key 显式调用 publish。只对获准目标执行，未配允许列表默认拒绝连接，登记仍保留。对端不可达 502/504，别把“已登记”当工具已发现。
 
 媒体上传以 JPEG 为例，PNG/MP4/WebM 修改 Content-Type 和文件名：
 
@@ -93,12 +93,14 @@ nef GET /api/v1/network/servers
 nef POST /api/v1/network/servers '{"name":"私有测试MCP","url":"http://<农场IP>:<端口>/mcp","description":"本账号登记"}'
 nef POST /api/v1/network/servers/<server_id>/discover
 nef GET /api/v1/network/servers/<server_id>/publication
-nef POST /api/v1/network/servers/<server_id>/sync
+nef POST /api/v1/network/servers/<server_id>/publish
+nef POST /api/v1/network/servers/<server_id>/unpublish
+nef GET /api/v1/network/market
 nef POST /api/v1/network/catalog/publication '{"capability_ids":["target_detection"],"service_ids":["robot_patrol"]}'
 nef POST /api/v1/network/catalog/publish '{"capability_ids":["target_detection"],"service_ids":["robot_patrol"]}'
 ```
 
-将 `<...>` 整段替换后执行。Intent 会真实发给配置的现场地址，subscribe/DELETE 会通知农场，sync/publish 会向目录发送；预览 publication 只返回报文。旧无路径回传 `POST /api/v1/scene-feedback` 要把 KEY 暂时换成 feedback-access 的 receiver_key，不能使用账号 Key 写入。媒体读取 `GET /api/v1/exhibition/channels/<id>/media/<asset_id>` 则用账号 Key。
+将 `<...>` 整段替换后执行。Intent 会真实发给配置的现场地址，subscribe/DELETE 会通知农场；discover 只发现工具，publish 才在首页发布并 POST 至 TRF，unpublish 本地下架并按 `registry.withdraw_url` 通知撤回（没有地址则提示待配置）。旧 sync 是 publish 别名；预览 publication 只返回报文。旧无路径回传 `POST /api/v1/scene-feedback` 要把 KEY 暂时换成 feedback-access 的 receiver_key，不能使用账号 Key 写入。媒体读取 `GET /api/v1/exhibition/channels/<id>/media/<asset_id>` 则用账号 Key。
 
 ## 4. NEF 实际发出的内容
 
