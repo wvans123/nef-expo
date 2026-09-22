@@ -10,7 +10,9 @@ class SubscribedTool(BaseModel):
     display_name: str
     description: str
     inputSchema: dict[str, Any]
-    grant_sources: list[str] = Field(description="direct, package:<id>, or plan:<name>.")
+    grant_sources: list[str] = Field(
+        description="direct, package:<id>, scene:<id>, or plan:<name>."
+    )
 
 
 class SubscribedPackage(BaseModel):
@@ -71,7 +73,9 @@ class SubscriptionSnapshot(BaseModel):
     storage: Literal["memory"] = "memory"
     plan: str
     direct_subscriptions: list[str]
-    subscribed_capabilities: list[str] = Field(description="Direct plus legacy package grants.")
+    subscribed_capabilities: list[str] = Field(
+        description="Direct plus legacy package and selected scene capability grants."
+    )
     entitled_capabilities: list[str] = Field(description="Available atomic tools with subscription or plan grants; excludes unsubscribed pay-per-call tools.")
     packages: list[SubscribedPackage]
     scene_subscriptions: list[str]

@@ -24,7 +24,7 @@
 - **真实调用**：活动页面直接发送 live 请求，移除执行方式和示例意图；Intent 可选“不指定场景”，走单独配置的通用接收地址。未配置返回待对接，不回落到模拟结果。旧后端 demo 契约仅保留兼容，HTTP 受理不等于业务完成。
 - **简化回传**：同事无需 NEF Key，向 `/api/v1/scene-feedback/{scene_id}` POST `{"final_result":"文字结果"}`，GET 同一路径即可自查。三场景通道共享，页面不登录也可读；旧带接收 Key 接口保留备用。`?ops=1` 显示“回传地址”和通知诊断，只是显示开关，不是鉴权。命令见 [curl 手册](docs/reference/manual-curl.md)。
 - **TRF 目录同步**：首页底部显式同步 23 项可用本地能力，POST 带 `isThirdParty: false`；逐项 GET 核对后显示登记圆点，支持整体撤回。普通首页只展示同步操作和状态；`?ops=1` 中的“目录来源设置”可预览 TRF 四类服务登记，不自动变成可调用工具，也不影响普通商城来源。页面加载/定时刷新只读本地缓存。
-- **订阅费用与说明**：估算月费用包含等级基础价和已购场景价格，场景按购买时所选能力与折扣计价；取消后移除。PRO/MAX 可用能力可点击查看用途，完整规则见[订阅参考](docs/reference/subscription-query.md#103-nef-服务端配置)。
+- **订阅费用与说明**：开通场景同时开通所选子能力，首页和详情显示“套餐已包含”，API / MCP 可直接使用；不重复收取子能力月费。取消场景只撤回该场景来源，保留单订或其他套餐仍覆盖的能力。估算费用包含等级基础价和购买时保存的场景价，PRO/MAX 可用能力可点击查看用途；规则见[订阅参考](docs/reference/subscription-query.md#103-nef-服务端配置)。
 - **边界**：当前目录契约是本项目的对接约定，不是 TRF 标准协议。生产网络接口仍待同事提供；本地账号、权益、登记与回传保存在内存。mTLS / OAuth、资源级策略、生产持久化未接入。
 - **本期隐藏**：对外 Skill / 场景方案、AF 智能终端不进入展示动线。对应页签隐藏，旧后端接口保留兼容但不进入本期演示。
 
@@ -81,7 +81,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-NefBackgroun
 | 通知范围 | `subscriptions.account_ids` / `notify_plans` | `null` 表示全部；否则填账号列表 / `scene:robot_patrol` 等完整套餐键列表 |
 | 启动清理对端套餐 | `subscriptions.reset_partner_plans_on_start` | 默认 `false`；仅在确认可删除固定测试订购者的套餐后设 `true` |
 | TRF MCP 服务发布、查询、撤回 | `registry.trf_mcp_servers_url` | 完整集合地址 `http://<TRF-IP>:<端口>/trf/api/v1/mcp-servers`；POST/GET 同址，DELETE 追加 serverName |
-| 对方访问本 NEF 的地址 | `registry.nef_base_url` | `http://<NEF电脑IP>:8069`，用于首页本地能力的单工具 MCP 入口及独立代理入口 |
+| 对方访问本 NEF 的地址 | `registry.nef_base_url` | `http://<NEF电脑IP>:8069`，或对方可访问的本平台域名；用于生成 MCP 调用 URL，与 TRF 接收地址不同，不填 `0.0.0.0` |
 | 允许连接的外部 MCP | `registry.mcp_servers` | 按[农场联调](docs/reference/farm-integration.md#5-nef-运维配置)填精确 URL 允许列表；只登记不代表已经发布 |
 | 开放 MCP 登记归属 | `registry.open_registration_account` | 无 Key 登记的来源账号，默认 `1` |
 | 放宽 MCP 允许列表 | `registry.allow_unlisted_mcp_servers` | 默认 `false`；仅获准隔离测试网可启用，存在任意地址探测风险 |
@@ -151,7 +151,7 @@ node tests/test_purchase.cjs
 
 对接地址统一读取 `config/integration.local.json`，字段与旧配置兼容规则见第二节。智能推荐默认读取 `config/composer.local.json`（可由 `NEF_COMPOSER_CONFIG` 覆盖），模板为 `config/composer.example.json`；远程 Base URL `https://sub2api.2012wtlab.com/v1`、模型 `gpt-6-astra`、Responses 协议及 `low` 档位已填写。模型 Key 使用 `NEF_COMPOSER_API_KEY`，不读取 Codex 密钥、不依赖本机 CPA。每次请求内嵌可用原子能力池与参数 schema；Responses 通过 instructions 和显式 developer 消息传递同一份应用提示词，适配本次观察到的仅用顶层 instructions 时未遵守输出要求的问题，未确认远程网关的内部处理方式。推荐仍须校验、采用和确认后保存，不代表套餐已部署或执行业务。错误按超时、上游错误、连接失败和响应格式错误分类，并返回排查用 request_id，不暴露密钥或上游正文。当前验收和历史记录见[演示运行手册](docs/demo-playbook.md)。
 
-跨应用读取订阅：`GET /api/v1/integration/subscriptions?account_id=1`，其中 `1` 是在 NEF 注册的账号名，不是自动编号。1.1 响应的 `purchased_packages` 直接提供已购场景/能力套餐及详情，适合农场平台展示“已购网络套餐”；新增 `external_tool_subscriptions` 提供第三方 MCP 工具订阅与 available 状态；原子工具、参数 schema、权益来源等旧字段仍保留，不返回 API Key。公网仍需 Access 机器凭据，接口详细契约见[订阅查询接口](docs/reference/subscription-query.md)。农场查询套餐、MCP 注册发现、发布网络和网络回调的步骤见[农场平台联调](docs/reference/farm-integration.md)。场景开通不要求组件逐一订阅，但组件单独调用仍校验各自权益；订阅数据仍为内存态，重启后需恢复。
+跨应用读取订阅：`GET /api/v1/integration/subscriptions?account_id=1`，其中 `1` 是在 NEF 注册的账号名，不是自动编号。1.1 响应的 `purchased_packages` 直接提供已购场景/能力套餐及详情，适合农场平台展示“已购网络套餐”；新增 `external_tool_subscriptions` 提供第三方 MCP 工具订阅与 available 状态；原子工具、参数 schema、权益来源等旧字段仍保留，不返回 API Key。公网仍需 Access 机器凭据，接口详细契约见[订阅查询接口](docs/reference/subscription-query.md)。农场查询套餐、MCP 注册发现、发布网络和网络回调的步骤见[农场平台联调](docs/reference/farm-integration.md)。场景购买时所选子能力自动纳入订阅，查询以 `scene:<id>` 标明来源；独立调用复用这些权益，未选能力不被该场景授权。订阅数据仍为内存态，重启后需恢复。
 
 订购主流程：农场按钮跳转 `/?account_id=1`，用户开通任一场景后由 NEF 向配置的 `/business/v1/service-plans` POST `subscriberId` + `servicePlan`。套餐内含 `planId/showName/description/price`；页面默认全选能力，至少保留一项；后端兼容显式空选择并省略 `networkCapabilities`，PA/CA 决策由网络侧实现。价格按折扣计算，未配折扣才用固定价；失败保留订阅，`?ops=1` 可查看请求/回包并重试。取消开通会删除本地权益并向农场发送 DELETE。现场地址来自另一台记录，本机未访问验证或重启加载。唯一契约见[套餐订购通知与订阅查询](docs/reference/subscription-query.md#10-跳转订购与套餐通知)，新部署使用统一配置模板 `config/integration.example.json`。
 

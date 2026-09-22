@@ -71,3 +71,31 @@ def test_plan_and_package_entitlements_do_not_double_charge_direct_capabilities(
     )
     assert scene.status_code == 200
     assert auth_info(client, headers)["estimated_monthly_cost"] == 203.92
+
+
+def test_scene_grant_suppresses_direct_charge_until_last_overlapping_scene_is_cancelled(
+        client, monkeypatch):
+    configure_discount(monkeypatch, 0.8)
+    headers = register(client)
+    assert client.post("/api/v1/subscribe", json={
+        "account": "cost-test", "capability_ids": ["target_detection"],
+    }).status_code == 200
+    assert auth_info(client, headers)["estimated_monthly_cost"] == 19.9
+
+    for service_id in ("robot_patrol", "collaborative_tracking"):
+        assert client.post(
+            f"/api/v1/services/{service_id}/subscribe",
+            headers=headers,
+            json={"network_capability_ids": ["target_detection"]},
+        ).status_code == 200
+    assert auth_info(client, headers)["estimated_monthly_cost"] == 31.84
+
+    assert client.delete(
+        "/api/v1/services/robot_patrol/subscribe", headers=headers
+    ).status_code == 200
+    assert auth_info(client, headers)["estimated_monthly_cost"] == 15.92
+
+    assert client.delete(
+        "/api/v1/services/collaborative_tracking/subscribe", headers=headers
+    ).status_code == 200
+    assert auth_info(client, headers)["estimated_monthly_cost"] == 19.9

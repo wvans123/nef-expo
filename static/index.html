@@ -477,21 +477,30 @@ async function loadMarket(){
 }
 
 window.showCap = async id => {
-  const c = await fetch('/api/v1/capabilities/'+id).then(r=>r.json());
+  const epoch=wb.epoch;
+  let c,info;
+  try{
+    [c,info]=await Promise.all([api('/api/v1/capabilities/'+encodeURIComponent(id)),apiKey()?api('/api/v1/auth/info'):Promise.resolve(null)]);
+  }catch(e){if(epoch===wb.epoch)wbError(e);return;}
+  if(epoch!==wb.epoch)return;
+  const access=wbCapabilityAccess(info,id);
   const rows = c.params.map(p=>`<tr><td class="mono">${p.name}</td><td>${p.type}</td><td>${p.required?'是':'否'}</td><td>${esc(p.description)}</td></tr>`).join('');
   const example = {}; c.params.forEach(p=>example[p.name]= p.default!==undefined?p.default:(p.enum?p.enum[0]:'...'));
   showModal(`
-    <h2>${c.icon||''} <span class="cat-dot" style="background:${CATS[c.category]?.color||'#f0883e'}"></span>${esc(c.name)} <span class="tier ${c.tier}">${c.tier}</span></h2>
+    <h2 id="wb-cap-detail">${c.icon||''} <span class="cat-dot" style="background:${CATS[c.category]?.color||'#f0883e'}"></span>${esc(c.name)} <span class="tier ${c.tier}">${c.tier}</span></h2>
     <p class="muted">${esc(c.description)}</p><span class="method-chip">${esc(c.standard_basis?.label||'平台扩展')}</span>
     <div class="kv"><b>REST</b><code>${esc(c.rest_endpoint)}</code></div>
     <div class="kv"><b>MCP Tool</b><code>${c.id}</code> · <b>价格</b><span class="price">${esc(c.unit_price)}</span></div>
+    ${access.available?`<p id="wb-cap-access" class="ok">${esc(access.detail)}</p>`:''}
     <table><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr>${rows||'<tr><td colspan=4>无参数</td></tr>'}</table>
     <label>示例请求 JSON</label><pre>${esc(jfmt(example))}</pre>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
       <button onclick="hideModal()">关闭</button>
       ${c.status==='planned'
         ? '<span class="muted" style="font-size:12px;align-self:center">🔜 规划中 · 即将上线，敬请期待</span>'
-        : c.source==='third_party'
+        : access.available
+          ? `<button class="success" disabled>${esc(access.label)}</button>`
+          : c.source==='third_party'
           ? `<span class="muted" style="font-size:12px;align-self:center">🤝 第三方 AF 能力 · 收益与提供方分成</span>
              <button class="success" onclick="confirmSubscribe('cap','${c.id}','${esc(c.name)}','${esc(c.unit_price)}')">订阅 ${esc(c.unit_price)}</button>`
           : `<button class="success" onclick="confirmSubscribe('cap','${c.id}','${esc(c.name)}','${esc(c.unit_price)}')">订阅 ${esc(c.unit_price)}</button>`}
@@ -544,6 +553,7 @@ async function renderSubs(){
   try{
     const info = await api('/api/v1/auth/info');
     if(epoch!==wb.epoch)return;
+    wb.authInfo=info;wbRenderHomeCatalog();
     wbRenderSceneSubscriptions(info);
     const subs = info.subscribed_capabilities, direct = info.direct_subscriptions||[], entitled = info.entitled_capabilities||[];
     const capCards = entitled.map(cid=>{
@@ -551,6 +561,7 @@ async function renderSubs(){
       let badge, color;
       if(c.source==='third_party'){ badge='第三方订阅'; color='#f0883e'; }
       else if(direct.includes(cid)){ badge='单项直订'; color='var(--green)'; }
+      else if((info.capability_grant_sources?.[cid]||[]).some(s=>s.startsWith('scene:'))){ badge='场景套餐内'; color='#39d2ff'; }
       else if(subs.includes(cid)){ badge='套餐内'; color='#39d2ff'; }
       else { badge=`等级解锁(${(info.plan||'').toUpperCase()})`; color='var(--purple)'; }
       return `<button class="card wb-subs-cap" data-subs-cap="${esc(c.id)}"><b>${c.icon||''} ${esc(c.name)}</b> <span class="tier ${c.tier}">${c.tier}</span>
@@ -953,8 +964,8 @@ $('#term-send').onclick = ()=>termRequest($('#term-input').value.trim());
 $('#term-input').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#term-send').click(); });
 </script>
 <script src="/static/purchase.js?v=20260921-1"></script>
-<script src="/static/trf-catalog.js?v=20260922-2"></script>
-<script src="/static/workbench.js?v=20260922-1"></script>
+<script src="/static/trf-catalog.js?v=20260922-3"></script>
+<script src="/static/workbench.js?v=20260922-3"></script>
 <script src="/static/composer.js?v=20260917-3"></script>
 </body>
 </html>

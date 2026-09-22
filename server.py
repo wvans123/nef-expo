@@ -249,13 +249,6 @@ def _any_cap(cid):
     return CAP_INDEX.get(cid) or next((c for c in THIRD_PARTY if c.id == cid), None)
 
 
-def _subscribed_caps(rec) -> set:
-    caps = set(rec["subscriptions"])
-    for pid in rec["packages"]:
-        caps |= set(PKG_INDEX[pid]["capabilities"])
-    return caps
-
-
 def _monthly_price(cap) -> float:
     """月价数值（用于包月第三方能力按订阅人数结算收入）。"""
     try:
@@ -268,40 +261,88 @@ def _scene_capability_ids(service_id: str) -> list[str]:
     return [item["capability_id"] for item in SCENES[service_id]["provenance"]["components"]]
 
 
+def _selected_scene_capability_ids(rec, service_id: str) -> list[str]:
+    """Return only the active scene's actually selected, valid atomic capabilities.
+
+    Older in-memory records did not persist a selection, so a missing scene key means
+    the full scene composition. An explicitly persisted empty list stays empty.
+    """
+    if service_id not in SCENES:
+        return []
+    allowed = _scene_capability_ids(service_id)
+    selected_by_scene = rec.get("scene_subscription_capabilities", {})
+    if isinstance(selected_by_scene, dict) and service_id in selected_by_scene:
+        selected = selected_by_scene[service_id]
+        if not isinstance(selected, (list, tuple, set)):
+            return []
+    else:
+        selected = allowed
+    selected_set = set(selected)
+    return [cid for cid in allowed if cid in selected_set]
+
+
+def _capability_grant_sources(rec) -> dict[str, list[str]]:
+    """Derive subscription grants without copying scene capabilities into direct state."""
+    sources: dict[str, list[str]] = {}
+
+    def grant(capability_id: str, source: str):
+        sources.setdefault(capability_id, []).append(source)
+
+    for cid in sorted(rec.get("subscriptions", set())):
+        grant(cid, "direct")
+    for pid in sorted(rec.get("packages", set())):
+        package = PKG_INDEX.get(pid)
+        if package:
+            for cid in package["capabilities"]:
+                grant(cid, "package:" + pid)
+    for service_id in sorted(rec.get("scene_subscriptions", set())):
+        for cid in _selected_scene_capability_ids(rec, service_id):
+            grant(cid, "scene:" + service_id)
+    return sources
+
+
+def _subscribed_caps(rec) -> set:
+    return set(_capability_grant_sources(rec))
+
+
 def _estimated_monthly_cost(rec) -> float:
     """账号当前固定月费；场景使用购买时所选能力的报价，避免后续配置变更改写已购价格。"""
     plan = rec.get("plan", "free")
     total = PLAN_MONTHLY_PRICES.get(plan, 0.0)
     package_capabilities = {
-        cid for pid in rec["packages"] if pid in PKG_INDEX for cid in PKG_INDEX[pid]["capabilities"]
+        cid for pid in rec.get("packages", set()) if pid in PKG_INDEX
+        for cid in PKG_INDEX[pid]["capabilities"]
+    }
+    scene_capabilities = {
+        cid for service_id in rec.get("scene_subscriptions", set())
+        for cid in _selected_scene_capability_ids(rec, service_id)
     }
     included_tiers = PLAN_TIERS.get(plan, set())
 
-    for cid in rec["subscriptions"]:
+    for cid in rec.get("subscriptions", set()):
         cap = _any_cap(cid)
         if not cap or "/月" not in str(cap.unit_price):
             continue
-        if cid in package_capabilities:
+        if cid in package_capabilities or cid in scene_capabilities:
             continue
         if cap.source != "third_party" and cap.tier in included_tiers:
             continue
         total += _monthly_price(cap)
 
-    for pid in rec["packages"]:
+    for pid in rec.get("packages", set()):
         if pid in PKG_INDEX:
             try:
                 total += float(PKG_INDEX[pid]["price"].split("/")[0])
             except (TypeError, ValueError):
                 pass
 
-    selected_by_scene = rec.get("scene_subscription_capabilities", {})
     purchased_prices = rec.get("scene_subscription_prices", {})
     for service_id in rec.get("scene_subscriptions", set()):
         if service_id not in SCENES:
             continue
         price = purchased_prices.get(service_id)
         if price is None:
-            selected = selected_by_scene.get(service_id, _scene_capability_ids(service_id))
+            selected = _selected_scene_capability_ids(rec, service_id)
             price = subscription_notifications.quote("scene:" + service_id, selected)["price"]
         if price is not None:
             total += price
@@ -885,14 +926,13 @@ def integration_subscriptions(
     package_ids = sorted(rec["packages"])
     scene_ids = sorted(rec.get("scene_subscriptions", set()))
     plan = rec.get("plan", "free")
-    subscribed = direct | {cid for pid in package_ids for cid in PKG_INDEX[pid]["capabilities"]}
+    grant_sources = _capability_grant_sources(rec)
+    subscribed = set(grant_sources)
     tools = []
     for cap in sorted([*CAPABILITIES, *THIRD_PARTY], key=lambda c: c.id):
         if cap.status != "available":
             continue
-        sources = (["direct"] if cap.id in direct else []) + [
-            "package:" + pid for pid in package_ids if cap.id in PKG_INDEX[pid]["capabilities"]
-        ]
+        sources = list(grant_sources.get(cap.id, []))
         if cap.source != "third_party" and cap.tier in PLAN_TIERS.get(plan, set()):
             sources.append("plan:" + plan)
         if sources:
@@ -952,9 +992,11 @@ def integration_subscriptions(
 def auth_info(authorization: str = Header(None)):
     key, rec = _auth(authorization)
     _pl = _capif_pipeline(key, rec, scope="auth:info", entitled=True, cap=None)
-    caps = sorted(_subscribed_caps(rec))
+    grant_sources = _capability_grant_sources(rec)
+    caps = sorted(grant_sources)
     return {"account": rec["account"], "api_key": key,
             "subscribed_capabilities": caps,
+            "capability_grant_sources": grant_sources,
             "scene_subscriptions": sorted(rec.get("scene_subscriptions", set())),
             "direct_subscriptions": sorted(rec["subscriptions"]),
             "external_tool_subscriptions": network_registry_runtime.market_subscriptions(
@@ -967,7 +1009,7 @@ def auth_info(authorization: str = Header(None)):
             "intent_eligible": _intent_eligible(rec),
             "entitled_capabilities": sorted(
                 [c.id for c in CAPABILITIES if c.status == "available" and _entitled(rec, c)]
-                + [c.id for c in THIRD_PARTY if c.id in rec["subscriptions"]]),
+                + [c.id for c in THIRD_PARTY if c.id in grant_sources]),
             "per_call_charges": {
                 "count": len(PER_CALL_BILLS.get(rec["account"], [])),
                 "total": round(sum(b["price"] for b in PER_CALL_BILLS.get(rec["account"], [])), 2),

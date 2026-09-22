@@ -86,10 +86,13 @@ def test_live_snapshot_schema_and_secret_exclusion(client):
 
 
 def test_package_plan_sources_are_deduplicated_and_do_not_grant_scenes(client):
-    register(client, plan="pro")
+    headers = register(client, plan="pro")
     assert client.post("/api/v1/subscribe", json={
         "account": "1", "capability_ids": ["target_detection"], "package_ids": ["robot_patrol"],
     }).status_code == 200
+    assert client.get("/api/v1/auth/info", headers=headers).json()["capability_grant_sources"][
+        "target_detection"
+    ] == ["direct", "package:robot_patrol"]
     data = lookup(client)
     tool = next(t for t in data["tools"] if t["capability_id"] == "target_detection")
     assert set(tool["grant_sources"]) == {"direct", "package:robot_patrol", "plan:pro"}
@@ -98,21 +101,24 @@ def test_package_plan_sources_are_deduplicated_and_do_not_grant_scenes(client):
     assert data["scene_subscriptions"] == [] and data["scene_services"] == []
 
 
-def test_scene_grant_does_not_imply_standalone_component_grants(client):
+def test_scene_selected_components_are_standalone_grants_with_scene_sources(client):
     headers = register(client)
     assert client.post("/api/v1/services/robot_patrol/subscribe", headers=headers).status_code == 200
     data = lookup(client)
-    assert data["scene_subscriptions"] == ["robot_patrol"] and data["tools"] == []
+    assert data["scene_subscriptions"] == ["robot_patrol"]
+    assert data["direct_subscriptions"] == []
+    assert data["subscribed_capabilities"] == sorted(server._scene_capability_ids("robot_patrol"))
+    assert all(t["grant_sources"] == ["scene:robot_patrol"] for t in data["tools"])
     scene = data["scene_services"][0]
     assert scene["tool"] is None and scene["modes"] == ["intent"]
-    assert not any(c["standalone_entitled"] for c in scene["components"])
+    assert all(c["standalone_entitled"] for c in scene["components"])
     assert client.post("/api/v1/services/robot_patrol/intent",
                        headers={**headers, "X-NEF-Execution": "demo"}, json={"text": "patrol"}).status_code == 200
     assert client.post("/api/v1/capabilities/target_detection/invoke",
-                       headers=headers, json={"area": "A"}).status_code == 402
+                       headers=headers, json={"area": "A"}).status_code == 200
     client.post("/api/v1/subscribe", json={"account": "1", "capability_ids": ["target_detection"]})
-    components = lookup(client)["scene_services"][0]["components"]
-    assert [c["capability_id"] for c in components if c["standalone_entitled"]] == ["target_detection"]
+    target = next(t for t in lookup(client)["tools"] if t["capability_id"] == "target_detection")
+    assert target["grant_sources"] == ["direct", "scene:robot_patrol"]
 
 
 def test_scene_tool_has_actual_mcp_schema_without_claiming_live_execution(client, monkeypatch):

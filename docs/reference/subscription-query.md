@@ -1,6 +1,6 @@
 # 套餐订购通知与订阅查询
 
-分类：接口参考。协议版本：1.1。更新：2026-09-21。
+分类：接口参考。协议版本：1.1。更新：2026-09-22。
 
 交付状态：代码包含 1.1 查询与第 10 节订购通知，通知通过本地模拟对端验证，真实农场接收仍待联调。换电脑按 [README](../../README.md#二换电脑启动与配置) 运行 `python start.py` 并填写统一配置。上传 GitHub 本身不会重启任何进程；本机单独重启与验收记录见运行手册，不是新机器预置账号或交付保证。
 
@@ -88,8 +88,8 @@ CF-Access-Client-Secret: <单独交付>
 | `storage` | string | 固定 `memory`，说明重启不会保留 |
 | `plan` | string | `free` / `pro` / `max` |
 | `direct_subscriptions` | string[] | 单独订阅的基础或已注册第三方能力 ID |
-| `subscribed_capabilities` | string[] | 直接订阅与旧套餐包含能力的并集；不含纯等级赠送或场景内部组成 |
-| `entitled_capabilities` | string[] | 已开放且被直订、旧套餐或等级覆盖的原子能力 ID；与 `tools[].capability_id` 一致 |
+| `subscribed_capabilities` | string[] | 直接订阅、旧套餐包含能力及已购场景所选子能力的并集；不含纯等级赠送 |
+| `entitled_capabilities` | string[] | 已开放且被直订、旧套餐、场景所选子能力或等级覆盖的原子能力 ID；与 `tools[].capability_id` 一致 |
 | `packages` | object[] | 旧能力套餐，结构见下表 |
 | `scene_subscriptions` | string[] | 独立开通的场景服务 ID |
 | `tools` | object[] | 可供“我的工具”展示的原子工具及参数定义；不混入未订阅的按次付费工具 |
@@ -110,7 +110,7 @@ CF-Access-Client-Secret: <单独交付>
 | `intent_example` | string 或 null | 场景的意图请求示例；旧能力套餐为 null |
 | `tool` | object 或 null | 支持 Tool 的场景定义 `{name, description, inputSchema}`；其他为 null |
 
-此处“已购”指演示账号已开通的权益，不表示真实支付成功，也没有订单号或到期日。网络目录中的未购套餐和自助编排保存的定义不进入此列表；TRF 查询记录没有购买接口，不能把同步目录当成已经购买；显式发布的第三方 MCP 工具支持独立演示订阅，记录在 external_tool_subscriptions。场景开通后组件可以用于该场景，但 `standalone_entitled=false` 表示组件不能因为该场景开通就被当成独立获权工具。
+此处“已购”指演示账号已开通的权益，不表示真实支付成功，也没有订单号或到期日。网络目录中的未购套餐和自助编排保存的定义不进入此列表；TRF 查询记录没有购买接口，不能把同步目录当成已经购买；显式发布的第三方 MCP 工具支持独立演示订阅，记录在 external_tool_subscriptions。场景开通时勾选的子能力同时获得独立调用权益；未选组件仍可作为套餐设计信息展示，其 `standalone_entitled` 由其他有效权益决定。
 
 ### external_tool_subscriptions 每项
 
@@ -127,9 +127,11 @@ CF-Access-Client-Secret: <单独交付>
 | `display_name` | string | 页面显示名称 |
 | `description` | string | 工具说明 |
 | `inputSchema` | object | JSON Schema 参数定义，与本工具 MCP 定义同源；不是实际参数值 |
-| `grant_sources` | string[] | 权益来源，可同时包含 `direct`、`package:<套餐ID>`、`plan:<等级>` |
+| `grant_sources` | string[] | 权益来源，可同时包含 `direct`、`package:<套餐ID>`、`scene:<场景ID>`、`plan:<等级>` |
 
 例如同一能力既单独订阅又在套餐中，只返回一个工具，`grant_sources` 保留两个来源。想展示“我单独买的工具”，取 `direct_subscriptions`；想展示“订阅或等级包含的工具”，取 `tools`。
+
+页面带 Key 的 `GET /api/v1/auth/info` 同时返回 `capability_grant_sources`（能力 ID → 直订/旧套餐/场景来源数组），首页据此展示“套餐已包含”及具体场景名。等级覆盖仍通过 `entitled_capabilities` 和 plan 字段判定。关联权益从已购记录派生，不向 `direct_subscriptions` 写入副本，因此撤回一个场景不会误删其他来源。
 
 ### packages 每项
 
@@ -151,7 +153,7 @@ CF-Access-Client-Secret: <单独交付>
 
 当前三场景为 `robot_patrol`、`traffic_flow_detection`、`collaborative_tracking`。只有端网协同场景另有 Tool，准确名称为 `scene_collaborative_tracking`。
 
-**场景与组件规则：** 开通场景后，走该场景入口不再要求逐个开通组件；组件独立调用仍检查自己的权益。因此场景已开通而 `standalone_entitled=false` 是正常结果，不能把所有场景组件直接加入独立工具列表。实际设备、数据和内部资源权限仍由执行方检查。
+**场景与组件规则：** 开通场景时按购买选择同步授予子能力权益，API / MCP 的独立调用也使用这些权益，不必再逐项订阅。只选部分能力时只授权所选项；省略选择按默认全选，显式空数组只开通场景入口。取消场景或减少选择会撤回相应来源，保留单独订阅、其他套餐或等级仍覆盖的能力；不会因为子能力可用而开通其他场景入口。实际设备、数据和内部资源权限仍由执行方检查。
 
 旧 `packages` 和新 `scene_services` 不是同一种权益，即使某个 ID 都叫 `robot_patrol` 也不能合并。自助编排保存的套餐定义、导入的网络目录和 AF MCP Server 登记不是订阅，本接口不将它们作为已订阅工具返回。旧 `scenario_*` / `pipeline_*` 包装工具也不包含在本接口的原子 `tools` 数组中。
 
@@ -278,7 +280,7 @@ for tool in snapshot["tools"]:
 1. NEF 操作员注册约定账号 `1`，对方查询得到 200 和空数组。
 2. NEF 为 `1` 单独订阅一个工具，对方重新查询，核对 `tools` 与 `direct_subscriptions`。
 3. 对方查询 `2`：若已注册但未订阅，应为空；若未注册，应为 404，不可返回 `1` 的数据。
-4. NEF 为 `1` 开通场景，核对 `scene_services` 和组件 `standalone_entitled`，不将场景组件误当成独立开通。
+4. NEF 为 `1` 开通场景，核对所选组件进入 `tools`、带 `scene:<id>` 来源且 `standalone_entitled=true`；未选项不被这个场景授权。取消后只移除该场景来源，其他来源保留。
 5. 检查响应无 API Key、Access Secret、回传 Key；无 Access 凭据的公网请求不能取得订阅快照。
 6. 另行验收真正的工具调用或场景回传，不用查询成功替代业务验收。
 
@@ -378,7 +380,7 @@ X-NEF-Event-ID: sub_<本次通知标识>
 }
 ```
 
-订购弹窗提供当前套餐内的可用网络能力复选框，默认全部勾选，页面至少保留一项，并按选择实时重算报价。开通完成后留在当前页；只有主动点击“进入场景”才进入意图受理。所选项只是交给网络侧的范围约束，不自动开通原子工具的独立调用权益，也不改变本地场景执行实现。
+订购弹窗提供当前套餐内的可用网络能力复选框，默认全部勾选，页面至少保留一项，并按选择实时重算报价。开通完成后留在当前页；只有主动点击“进入场景”才进入意图受理。所选项既作为交给网络侧的范围约束，也作为本地原子工具的套餐权益来源；不改变场景执行实现。首页及能力详情显示“套餐已包含”，不再提示重复购买。
 
 页面调用 NEF 的场景订购接口可带 `{"network_capability_ids":["target_detection"]}`；省略请求体或传 `{}` 默认发送套餐能力组合，只有显式 `{"network_capability_ids":[]}` 表示不限定范围。仅接受当前套餐已开放的能力 ID，重复、未知或越出套餐的能力返回 422，且不产生订购。NEF 仍从认证账号确认本地权益和通知归属，但外发 `subscriberId` 使用固定值；不接受场景请求体覆盖该字段。
 
@@ -406,7 +408,7 @@ X-NEF-Event-ID: sub_<本次通知标识>
 
 `discount` 必须为有限数且 `0<d<=1`，配置后价格为所选能力目录单价之和乘折扣，四舍五入保留两位。全选月价：机器狗 115.68、车流量 119.76、端网协同 119.6。`GET /api/v1/services` 返回全选 `price` 和 `discount`；不配置折扣时回退 `plan_prices`，缺失固定价格则 `price_not_configured`，不自动报价为零。
 
-“订阅与鉴权”的估算月费用来自 `GET /api/v1/auth/info` 的 `estimated_monthly_cost`：等级基础月费（FREE 0、PRO 99、MAX 299）加单项包月订阅、旧能力套餐固定价和已开通场景的购买价。单项能力已被等级或旧能力套餐覆盖时不重复计费；场景调用权益与原子能力权益分别计价。场景在开通时保存所选能力的报价，之后修改折扣不会改写已购金额，取消后移除该项。例如只选目标检测、八折时场景价为 15.92，FREE 合计 15.92、PRO 合计 114.92、MAX 合计 314.92（无其他订阅时）。按次消费另列，不计入固定月费；这些是演示估算，不执行真实扣费。
+“订阅与鉴权”的估算月费用来自 `GET /api/v1/auth/info` 的 `estimated_monthly_cost`：等级基础月费（FREE 0、PRO 99、MAX 299）加未被覆盖的单项包月订阅、旧能力套餐固定价和已开通场景的购买价。单项能力已被等级、旧能力套餐或已购场景所选能力覆盖时不重复计费；场景包含的子能力不额外收单项月费。取消场景后，原本独立订阅且不再被其他权益覆盖的能力恢复其单项月费。场景在开通时保存所选能力的报价，之后修改折扣不会改写已购金额，取消后移除该项。例如只选目标检测、八折时场景价为 15.92，FREE 合计 15.92、PRO 合计 114.92、MAX 合计 314.92（无其他订阅时）。按次消费另列，不计入固定月费；这些是演示估算，不执行真实扣费。
 
 带凭证的非回环地址必须用 HTTPS；当天获准局域网测试可配置不带凭证的 HTTP，仍会明文发送套餐和 `subscriberId`。地址不允许内嵌用户名/密码、query 或 fragment。不从浏览器传入地址或密钥，不修改现有 Tunnel。
 

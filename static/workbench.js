@@ -1,5 +1,5 @@
 /* Incremental integration for the original workbench. Native tabs, forms and drag/drop remain in index.html. */
-const wb={networkBusy:false,networkError:'',access:null,scenes:[],sceneId:'',catalog:[],market:[],toolSubscriptions:[],servers:[],packages:[],networkStatus:'not_configured',epoch:0,channels:[],channel:'',feedbackContext:'',feedbackSignature:'',feedbackBusy:false,resultTimer:null,resultBusy:false};
+const wb={networkBusy:false,networkError:'',access:null,authInfo:null,scenes:[],sceneId:'',catalog:[],market:[],toolSubscriptions:[],servers:[],packages:[],networkStatus:'not_configured',epoch:0,channels:[],channel:'',feedbackContext:'',feedbackSignature:'',feedbackBusy:false,resultTimer:null,resultBusy:false};
 const wbStatus=x=>({not_configured:'待对接',not_discovered:'未发现',discovering:'发现中',discovered:'已发现',pending:'待同步',submitted:'已提交 · 待确认',synced:'已同步',syncing:'同步中',calling:'转发中',returned:'已收到 AF 回执',tool_error:'AF 返回工具错误',failed:'失败'}[x]||x||'待处理');
 function wbMessage(e){const d=e?.data?.detail??e?.detail;return typeof d==='string'?d:d?.message||e?.message||'请求未完成';}
 function wbError(e){toast(wbMessage(e),false);}
@@ -32,6 +32,7 @@ async function wbLoadScenes(){
   const epoch=wb.epoch;const r=await fetch('/api/v1/services');if(!r.ok)throw new Error('场景目录读取失败');const data=await r.json();if(epoch!==wb.epoch)return;wb.scenes=data.services;
   let info=null;if(apiKey())try{info=await api('/api/v1/auth/info');}catch{}
   if(epoch!==wb.epoch)return;
+  wb.authInfo=info;wbRenderHomeCatalog();
   const owned=new Set(info?.scene_subscriptions||[]);
   $('#wb-scene-market').innerHTML=wb.scenes.map(s=>`<article class="pkg-chip wb-scene-card"><span class="method-chip">场景套餐</span><h3>${esc(s.name)}</h3><p class="muted">${esc(s.description)}</p><div class="wb-scene-outputs">${s.outputs.map(t=>`<span>${esc(t)}</span>`).join('')}</div><div class="wb-components"><label>基础能力组合</label>${(s.provenance?.components||[]).map(c=>`<button class="wb-component" data-scene-cap="${esc(c.capability_id)}" title="${esc(c.role)}">${esc(CAPS.find(x=>x.id===c.capability_id)?.name||c.capability_id)}</button>`).join('')}<small>套餐设计 · NEF / 场景服务方</small></div><button data-wb-scene="${esc(s.id)}" class="${owned.has(s.id)?'primary':'success'}">${owned.has(s.id)?'进入场景 →':'开通场景'}</button></article>`).join('');
   $$('#wb-scene-market [data-scene-cap]').forEach(b=>b.onclick=()=>showCap(b.dataset.sceneCap));
@@ -50,7 +51,7 @@ function wbOpenScene(id,owned){
   if(!apiKey())return toast('请先在顶栏注册账号',false);
   const s=wb.scenes.find(x=>x.id===id);if(!s)return;
   if(owned){wb.sceneId=id;activateTab('intent',true);return;}
-  showModal(`<h2>开通「${esc(s.name)}」</h2><p class="muted">开通后获得该场景的调用权益。当前为演示订阅，不产生真实费用。</p>${purchaseCapabilitySelector((s.provenance?.components||[]).map(c=>c.capability_id))}<div class="wb-modal-actions"><button id="wb-cancel">取消</button><button class="success" id="wb-confirm-scene">确认开通</button></div><p id="wb-sub-message" class="muted"></p>`);
+  showModal(`<h2>开通「${esc(s.name)}」</h2><p class="muted">开通场景时同步开通所选子能力，无需重复订阅。当前为演示订阅，不产生真实费用。</p>${purchaseCapabilitySelector((s.provenance?.components||[]).map(c=>c.capability_id))}<div class="wb-modal-actions"><button id="wb-cancel">取消</button><button class="success" id="wb-confirm-scene">确认开通</button></div><p id="wb-sub-message" class="muted"></p>`);
   $('#purchase-capabilities').insertAdjacentHTML('afterend','<div id="wb-purchase-quote" class="wb-price"></div>');
   const quote=()=>{const ids=purchaseCapabilityIds();$('#wb-purchase-quote').textContent=purchaseQuoteText(purchaseQuote(s,ids));$('#wb-confirm-scene').disabled=!ids.length;};
   $$('#purchase-capabilities input').forEach(input=>input.onchange=quote);quote();
@@ -281,7 +282,8 @@ async function wbPullResult(){
 $('#wb-feedback-pull').onclick=wbPullResult;
 function wbTabChanged(name){if($('#wb-tool-detail'))hideModal();wbStopResultLoop();wb.epoch++;window.wbCatalogClose?.();if(name!=='mcp')wbMcp.reset();wbUpdateFeedback();}
 async function refreshAll(){
-  if($('#wb-tool-detail'))hideModal();
+  if($('#wb-tool-detail')||$('#wb-cap-detail'))hideModal();
+  wb.authInfo=null;
   wbStopResultLoop();
   $('#wb-trf-servers').innerHTML='';$('#wb-trf-status').textContent='尚未查询';
   wb.epoch++;window.wbCatalogClose?.();wbMcp.reset();wb.catalog=[];wb.market=[];wb.toolSubscriptions=[];wb.servers=[];wb.packages=[];wb.channels=[];wb.channel='';wb.feedbackContext='';pipeSteps.length=0;window.wbComposerReset?.();wbClearFeedback();wbResetResult();$('#wb-register-message').textContent='';$('#purchase-notice').hidden=true;renderAccounts();wbRenderNetwork();

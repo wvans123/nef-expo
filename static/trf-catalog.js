@@ -18,6 +18,16 @@ function wbRegistrationDot(status='unknown'){
   return `<span class="wb-registration wb-registration-${esc(status)}" title="TRF · ${esc(label)}" aria-label="TRF · ${esc(label)}"><span class="cat-dot"></span><span>${esc(label)}</span></span>`;
 }
 function wbLocalHomeCaps(){return CAPS.filter(c=>c.status==='available'&&c.category!=='ecosystem');}
+function wbCapabilityAccess(info,id){
+  if(!info)return {label:'',detail:'',available:false};
+  const sources=info.capability_grant_sources?.[id]||[];
+  const sceneNames=sources.filter(s=>s.startsWith('scene:')).map(s=>wb.scenes.find(scene=>scene.id===s.slice(6))?.name||s.slice(6));
+  if(sceneNames.length)return {label:'套餐已包含',detail:'已由「'+sceneNames.join('」「')+'」开通，可直接使用，无需重复订阅。',available:true};
+  if((info.direct_subscriptions||[]).includes(id))return {label:'已订阅',detail:'当前账号已单独订阅，可直接使用。',available:true};
+  if((info.subscribed_capabilities||[]).includes(id))return {label:'套餐已包含',detail:'已由能力套餐开通，无需重复订阅。',available:true};
+  if((info.entitled_capabilities||[]).includes(id))return {label:'等级已包含',detail:'当前账号等级已包含此能力，无需重复订阅。',available:true};
+  return {label:'',detail:'',available:false};
+}
 function wbRenderHomeCatalog(){
   const remote=wbTrf.source==='trf',snap=wbTrf.snapshot;
   const caps=wbLocalHomeCaps(),tools=wb.market.filter(t=>t.kind==='tool');
@@ -31,7 +41,7 @@ function wbRenderHomeCatalog(){
       const action=t.origin==='cap'?'data-home-cap':t.origin==='external'?'data-home-tool':'data-home-trf';
       const name=t.name,description=t.description||'暂无用途说明';
       const caption=t.origin==='cap'?t.standard_basis?.label||'NEF 网络能力':t.origin==='trf'?'TRF 服务目录':t.serverName||t.provider;
-      const price=t.origin==='cap'?t.unit_price:t.origin==='trf'?(t.serverStatus==='active'?'服务已登记':'服务状态：'+t.serverStatus):wb.toolSubscriptions.some(s=>s.id===t.id)?'已订阅 · 演示免费':'演示免费 · 点击订阅';
+      const price=t.origin==='cap'?(wbCapabilityAccess(wb.authInfo,t.id).label||t.unit_price):t.origin==='trf'?(t.serverStatus==='active'?'服务已登记':'服务状态：'+t.serverStatus):wb.toolSubscriptions.some(s=>s.id===t.id)?'已订阅 · 演示免费':'演示免费 · 点击订阅';
       return `<button class="tile" ${action}="${esc(t.id)}"><div class="ticon">${t.icon||meta.icon}</div><div class="tname" title="${esc(name)}">${esc(name)}</div><span class="wb-standard-label">${esc(caption)}</span><p class="wb-tile-description">${esc(description)}</p><div class="tfoot">${wbRegistrationDot(status)}<span class="tprice">${esc(price)}</span></div></button>`;
     }).join('')||'<p class="muted">暂无能力</p>'}</div></section>`;
   };
@@ -66,7 +76,7 @@ function wbRenderTrfControls(){
   $('#wb-home-trf-summary').textContent=remote?`TRF 目录 ${snap?.remote_items?.length||0} 项${snap?.ignored_count?' · 未识别类型 '+snap.ignored_count+' 项未展示':''}`:summary;
   let note=remote?'仅展示服务登记，不自动开通调用权限。':'同步当前可用能力。';
   if(!snap?.configured)note+=' TRF 地址待配置。';
-  else if(!remote&&!snap.base_configured)note+=' NEF 对外访问地址待配置。';
+  else if(!remote&&!snap.base_configured)note+=' 还需配置本 NEF 的访问地址，供 TRF 调用这些能力（registry.nef_base_url）。';
   if(snap?.last_checked)note+=' 上次核对：'+new Date(typeof snap.last_checked==='number'?snap.last_checked*1000:snap.last_checked).toLocaleString();
   if(snap?.status==='failed'||snap?.status==='stale')note+=' 状态核对失败，显示上次结果。';
   $('#wb-home-trf-note').textContent=note;

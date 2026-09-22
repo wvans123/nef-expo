@@ -36,6 +36,10 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 
 这是 registry 子对象片段，不要覆盖整个统一配置。一个集合地址用于 GET、POST 以及追加 serverName 的 DELETE；未取得地址时保留 null，不填占位 IP。`mcp_servers` 是精确 URL 允许列表，表单登记不会自动授权。认证如需 Bearer，`token_env` 填服务端环境变量名，不写密钥值。
 
+首页发布本地能力需要上述两端地址：`trf_mcp_servers_url` 是 NEF 发送登记请求的接收方；`nef_base_url` 是 TRF 客户端随后访问 NEF 的根地址，程序在它后面追加 `/mcp/capabilities/<能力ID>`。只填 TRF 地址可以查询目录，但不能生成本地能力的调用地址。`nef_base_url` 填对方能访问的本机 IP 加端口，或本平台可达域名；不填 TRF 地址、`0.0.0.0` 或 `/mcp` 路径。内网部署按 README 使用 `python start.py` 监听 `0.0.0.0:8069`；仅监听 `127.0.0.1` 的 Windows 后台须通过已配置的 Tunnel 访问，不能直接使用局域网 IP。
+
+这两个配置不会从浏览器的 Host 自动猜测。修改 JSON 后刷新或核对即可，不需要为地址变更重启清空账号；如果页面仍与文件不一致，先确认访问的 NEF 机器及端口，再检查进程是否设置了覆盖统一文件的 `NEF_REGISTRY_CONFIG` 或 `NEF_INTEGRATION_CONFIG`。页面的“本 NEF 的访问地址”提示对应 `registry.nef_base_url`；真实可达性仍需由对方验证。
+
 新协议发布原始 MCP 地址，TRF 消费者可能直接访问它；现有 NEF 代理入口仍独立保留，但不会偷偷替换这次约定的 url。取消发布会关闭 NEF 展示和新代理调用，不会关闭外部 MCP 服务本身。
 
 ## 3. NEF 发给 TRF
