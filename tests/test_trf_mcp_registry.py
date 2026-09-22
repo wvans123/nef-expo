@@ -90,7 +90,10 @@ def test_exact_post_raw_url_preview_and_market_projection(
         return 201, {}, b""
 
     http_fixture.add("POST", "/trf/api/v1/mcp-servers", post_server)
-    http_fixture.add("GET", "/trf/api/v1/mcp-servers", lambda _r: json_response(stored))
+    http_fixture.add("GET", "/trf/api/v1/mcp-servers", lambda _r: json_response({
+        "code": 200, "message": "OK",
+        "data": [{**item, "id": 42, "createdAt": "2026-09-22"} for item in stored],
+    }))
 
     preview = client.get(path + "/publication", headers=headers())
     assert preview.status_code == 200
@@ -206,7 +209,44 @@ def test_trf_get_not_configured_and_schema_failure(client, http_fixture, monkeyp
     configure(monkeypatch, trf_mcp_servers_url=collection_url)
     failed = client.get("/api/v1/network/trf/servers", headers=headers())
     assert failed.status_code == 502
-    assert failed.json()["detail"]["code"] == "trf_schema_invalid"
+    assert failed.json()["detail"]["code"] == "trf_incomplete_list"
+
+
+@pytest.mark.parametrize("envelope", [
+    lambda rows: rows,
+    lambda rows: {"items": rows, "total": len(rows)},
+    lambda rows: {"code": 200, "message": "OK", "data": rows},
+    lambda rows: {"code": 0, "data": {"records": rows, "total": len(rows)}},
+    lambda rows: {"data": {"items": rows, "nextCursor": None}},
+    lambda rows: {"servers": rows},
+])
+def test_get_projects_metadata_without_rejecting_complete_collection(envelope):
+    item = trf_server("sample", "http://example.invalid/mcp")
+    enriched = {**item, "id": 10, "createdAt": "2026-09-22", "internalSecret": "not-projected"}
+    assert network_registry._validate_trf_servers(envelope([enriched])) == [item]
+
+
+@pytest.mark.parametrize("body", [
+    {"message": "error"},
+    {"code": 500, "data": []},
+    {"success": False, "items": []},
+    {"items": [], "total": 5},
+    {"data": {"records": [], "hasMore": True}},
+    {"items": [], "totalPages": 3},
+    {"data": [], "pagination": {"total": 10}},
+    {"items": [], "nextCursor": "next"},
+    {"items": [], "data": []},
+    {"data": None},
+])
+def test_incomplete_or_error_envelope_is_not_an_empty_directory(body):
+    with pytest.raises(network_registry._RemoteSchemaFailure):
+        network_registry._validate_trf_servers(body)
+
+
+def test_duplicate_names_cannot_mask_a_conflicting_server():
+    item = trf_server("same-name", "http://example.invalid/mcp")
+    with pytest.raises(network_registry._RemoteSchemaFailure):
+        network_registry._validate_trf_servers([item, {**item, "url": "http://other.invalid/mcp"}])
 
 
 def test_delete_uses_saved_encoded_target_empty_body_and_404_confirmation(

@@ -121,10 +121,13 @@ def _set_item(
     state: dict[str, Any],
     capability_id: str,
     registration_status: str,
-    sync_error: str | None = None,
+    sync_error: str | registry._RemoteFailure | None = None,
 ) -> None:
     item = {"registration_status": registration_status}
-    if sync_error:
+    if isinstance(sync_error, registry._RemoteFailure):
+        item["sync_error"] = sync_error.code
+        item["sync_diagnostic"] = registry._trf_error_detail(sync_error)
+    elif sync_error:
         item["sync_error"] = sync_error
     state["items"][capability_id] = item
 
@@ -204,7 +207,7 @@ def _apply_remote(
     remote: list[dict[str, Any]],
     *,
     recover: bool,
-    absent_overrides: dict[str, tuple[str, str | None]] | None = None,
+    absent_overrides: dict[str, tuple[str, str | registry._RemoteFailure | None]] | None = None,
 ) -> None:
     payloads = _payloads(context["base"])
     projected, ignored = _remote_projection(remote)
@@ -237,7 +240,7 @@ def _apply_remote(
 
 def _mark_read_failure(
     context: dict[str, Any],
-    code: str,
+    failure: registry._RemoteFailure,
     *,
     preserve_submissions: bool = False,
 ) -> None:
@@ -250,14 +253,10 @@ def _mark_read_failure(
                 preserve_submissions
                 and previous.get("registration_status") in {"submitted", "failed"}
             ):
-                _set_item(
-                    state,
-                    capability_id,
-                    previous["registration_status"],
-                    previous.get("sync_error") or code,
-                )
+                if not previous.get("sync_error"):
+                    _set_item(state, capability_id, previous["registration_status"], failure)
             else:
-                _set_item(state, capability_id, "unknown", code)
+                _set_item(state, capability_id, "unknown", failure)
 
 
 def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
@@ -296,6 +295,8 @@ def _response(
         }
         if stored.get("sync_error"):
             item["sync_error"] = stored["sync_error"]
+        if stored.get("sync_diagnostic"):
+            item["sync_diagnostic"] = stored["sync_diagnostic"]
         items.append(item)
     return {
         "configured": bool(context["valid"] and context["target"]),
@@ -338,7 +339,12 @@ def _finish_status(state: dict[str, Any], *, withdrawing: bool = False) -> None:
         for value in state["items"].values()
     ]
     desired = "unregistered" if withdrawing else "registered"
-    if statuses and all(status == desired for status in statuses):
+    if any(
+        item.get("registration_status") == "unknown" and item.get("sync_error")
+        for item in state["items"].values()
+    ):
+        state["status"] = "stale" if state["last_checked"] else "failed"
+    elif statuses and all(status == desired for status in statuses):
         state["status"] = "synced"
     elif statuses and all(status in {"failed", "conflict"} for status in statuses):
         state["status"] = "failed"
@@ -383,10 +389,10 @@ def build_router(
                     context["token_env"],
                 )
             except registry._RemoteSchemaFailure as exc:
-                _mark_read_failure(context, exc.code)
+                _mark_read_failure(context, exc)
                 return _response(context, busy_override=False)
             except registry._RemoteFailure as exc:
-                _mark_read_failure(context, exc.code)
+                _mark_read_failure(context, exc)
                 return _response(context, busy_override=False)
             with _STATE_LOCK:
                 state = _state_for(context)
@@ -429,10 +435,10 @@ def build_router(
                     context["token_env"],
                 )
             except registry._RemoteSchemaFailure as exc:
-                _mark_read_failure(context, exc.code)
+                _mark_read_failure(context, exc)
                 return _response(context, busy_override=False)
             except registry._RemoteFailure as exc:
-                _mark_read_failure(context, exc.code)
+                _mark_read_failure(context, exc)
                 return _response(context, busy_override=False)
 
             with _STATE_LOCK:
@@ -440,7 +446,7 @@ def build_router(
                 _apply_remote(context, state, initial, recover=True)
                 state["status"] = "loaded"
 
-            attempted: dict[str, tuple[str, str | None]] = {}
+            attempted: dict[str, tuple[str, str | registry._RemoteFailure | None]] = {}
             for capability_id, payload in payloads.items():
                 with _STATE_LOCK:
                     current = _state_for(context)["items"][capability_id]
@@ -466,13 +472,13 @@ def build_router(
                         payload=payload,
                     )
                 except registry._RemoteFailure as exc:
-                    attempted[capability_id] = ("failed", exc.code)
+                    attempted[capability_id] = ("failed", exc)
                     with _STATE_LOCK:
                         _set_item(
                             _state_for(context),
                             capability_id,
                             "failed",
-                            exc.code,
+                            exc,
                         )
                 else:
                     attempted[capability_id] = (
@@ -488,14 +494,14 @@ def build_router(
             except registry._RemoteSchemaFailure as exc:
                 _mark_read_failure(
                     context,
-                    exc.code,
+                    exc,
                     preserve_submissions=True,
                 )
                 return _response(context, busy_override=False)
             except registry._RemoteFailure as exc:
                 _mark_read_failure(
                     context,
-                    exc.code,
+                    exc,
                     preserve_submissions=True,
                 )
                 return _response(context, busy_override=False)
@@ -536,9 +542,9 @@ def build_router(
                         context["token_env"],
                     )
                 except registry._RemoteSchemaFailure as exc:
-                    _mark_read_failure(context, exc.code)
+                    _mark_read_failure(context, exc)
                 except registry._RemoteFailure as exc:
-                    _mark_read_failure(context, exc.code)
+                    _mark_read_failure(context, exc)
                 else:
                     with _STATE_LOCK:
                         state = _state_for(context)
@@ -582,7 +588,6 @@ def build_router(
                         registry._RemoteSchemaFailure,
                         registry._RemoteFailure,
                     ) as exc:
-                        code = exc.code
                         with _STATE_LOCK:
                             for record in records:
                                 state = _managed_state(record)
@@ -590,7 +595,7 @@ def build_router(
                                     state,
                                     record["capability_id"],
                                     "unknown",
-                                    code,
+                                    exc,
                                 )
                                 state["status"] = (
                                     "stale"
@@ -633,7 +638,7 @@ def build_router(
                                 state,
                                 capability_id,
                                 "failed",
-                                exc.code,
+                                exc,
                             )
                             state["status"] = "failed"
                     else:
@@ -661,7 +666,7 @@ def build_router(
                                 state,
                                 record["capability_id"],
                                 "submitted",
-                                exc.code,
+                                exc,
                             )
                             state["status"] = (
                                 "stale"

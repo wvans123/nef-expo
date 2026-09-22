@@ -20,7 +20,7 @@
 - [套餐订购通知与订阅查询](reference/subscription-query.md)：场景所选子能力同步授权、权益来源与取消保留、避免子能力重复计费；固定 `subscriberId=subscriber-001`、折扣计价、取消 DELETE、通知过滤与回包；后端兼容空选择，页面至少选一项；查询另含 external_tool_subscriptions。
 - [统一对接配置](../config/integration.example.json)：`start.py` 自动生成本地配置，集中设置订购、折扣、开放 MCP、TRF 发布及 Intent / 结果地址；已有 local 文件不覆盖、不上传。
 - [旧订购通知配置](../config/subscription.example.json)：兼容独立配置模式，新部署优先使用统一文件。
-- [TRF MCP Server 契约与能力映射](reference/network-catalog.md)：TRF 接收地址与 NEF 调用地址的配置区别、统一七字段 POST（本地 isThirdParty=false、外部 true）、兼容旧 GET、按名 DELETE、首页同步/撤回及状态点、运维目录预览、单工具 MCP 入口、第三方工具账号订阅；真实 IP/回包待提供。
+- [TRF MCP Server 契约与能力映射](reference/network-catalog.md)：统一七字段 POST（本地 isThirdParty=false、外部 true）、GET 包装与额外字段兼容、同一集合地址按名 DELETE、重启后核对撤回、请求方法/状态码诊断、四类目录与单工具 MCP 入口；真实 IP/回包待提供。
 - [农场平台联调](reference/farm-integration.md)：套餐查询、无 Key MCP 登记发现、显式发布/撤回及网络代理调用；同一接入流程用于巡检小车，真实地址待提供。
 - [网络目录配置](../config/registry.example.json)：运维侧 TRF MCP 集合地址和独立 NEF 代理入口、内部调用方授权及 MCP 服务允许列表示例；不含实际密钥。
 - [配置模板](../config/bridge.example.json)：从接口契约配套维护的可复制配置；示例域名不可用，必须按实际接口替换。

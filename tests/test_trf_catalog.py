@@ -392,3 +392,99 @@ def test_refresh_recovers_exact_registration_and_missing_base_never_posts(
     assert blocked.json()["status"] == "not_configured"
     assert blocked.json()["items"][0]["sync_error"] == "nef_base_not_configured"
     assert len(http_fixture.requests) == request_count
+
+
+def test_collection_metadata_trailing_slash_and_withdraw_after_restart(
+    catalog_client, http_fixture, monkeypatch
+):
+    cap = use_capabilities(monkeypatch, "target_detection")[0]
+    collection = "/trf/api/v1/mcp-servers"
+    target = http_fixture.url(collection)
+    base = "http://nef.example:8069"
+    configure_catalog(monkeypatch, target=target + "/", base=base)
+    remote: list[dict] = []
+    foreign = {
+        **trf_catalog._payloads(base)[cap.id],
+        "serverName": "unrelated-service",
+        "isThirdParty": True,
+    }
+    remote.append(foreign)
+    http_fixture.add("GET", collection, lambda _r: json_response({
+        "code": 200, "message": "OK",
+        "data": {"items": [{**item, "id": index, "createdAt": "2026-09-22"}
+                           for index, item in enumerate(remote)], "total": len(remote)},
+    }))
+
+    def publish(request):
+        remote.append(json.loads(request["body"]))
+        return 201, {}, b""
+
+    http_fixture.add("POST", collection, publish)
+    published = catalog_client.post("/api/v1/network/trf/catalog/publish", headers=headers())
+    assert by_capability(published)[cap.id]["registration_status"] == "registered"
+    assert remote[-1]["isThirdParty"] is False
+
+    # A restart loses the local cache, not the remote registration.
+    trf_catalog.reset_state_for_tests()
+    payload = trf_catalog._payloads(base)[cap.id]
+
+    def delete(request):
+        assert request["body"] == b""
+        remote[:] = [item for item in remote if item["serverName"] != payload["serverName"]]
+        return 204, {}, b""
+
+    http_fixture.add("DELETE", collection + "/" + payload["serverName"], delete)
+    withdrawn = catalog_client.post("/api/v1/network/trf/catalog/unpublish", headers=headers())
+    assert by_capability(withdrawn)[cap.id]["registration_status"] == "unregistered"
+    assert withdrawn.json()["status"] == "synced"
+    assert withdrawn.json()["can_withdraw"] is False
+    assert remote == [foreign]
+    assert [r["path"] for r in http_fixture.requests if r["method"] != "DELETE"] == [
+        collection, collection, collection, collection, collection,
+    ]
+    assert [r["path"] for r in http_fixture.requests if r["method"] == "DELETE"] == [
+        collection + "/" + payload["serverName"],
+    ]
+
+
+@pytest.mark.parametrize("action", ["refresh", "publish", "unpublish"])
+def test_get_error_stays_failed_and_exposes_safe_diagnostic(
+    catalog_client, http_fixture, monkeypatch, action
+):
+    cap = use_capabilities(monkeypatch, "target_detection")[0]
+    target = http_fixture.url("/trf/api/v1/mcp-servers")
+    configure_catalog(monkeypatch, target=target, base="http://nef.example:8069")
+    http_fixture.add("GET", "/trf/api/v1/mcp-servers",
+                     lambda _r: (503, {}, b"secret-debug-body"))
+    response = catalog_client.post("/api/v1/network/trf/catalog/" + action, headers=headers())
+    assert response.json()["status"] == "failed"
+    assert by_capability(response)[cap.id]["sync_diagnostic"] == {
+        "code": "upstream_http_error", "method": "GET", "http_status": 503,
+    }
+    assert "secret-debug-body" not in response.text
+    assert target not in response.text
+    assert [r["method"] for r in http_fixture.requests] == ["GET"]
+
+
+def test_post_and_delete_errors_report_the_actual_method(
+    catalog_client, http_fixture, monkeypatch
+):
+    cap = use_capabilities(monkeypatch, "target_detection")[0]
+    path = "/trf/api/v1/mcp-servers"
+    configure_catalog(monkeypatch, target=http_fixture.url(path), base="http://nef.example:8069")
+    remote: list[dict] = []
+    http_fixture.add("GET", path, lambda _r: json_response(remote))
+    http_fixture.add("POST", path, lambda _r: (400, {}, b"private-body"))
+    failed = catalog_client.post("/api/v1/network/trf/catalog/publish", headers=headers())
+    assert by_capability(failed)[cap.id]["sync_diagnostic"] == {
+        "code": "upstream_http_error", "method": "POST", "http_status": 400,
+    }
+    remote.append(trf_catalog._payloads("http://nef.example:8069")[cap.id])
+    http_fixture.add("DELETE", path + "/" + remote[0]["serverName"],
+                     lambda _r: (405, {}, b"private-delete-body"))
+    failed = catalog_client.post("/api/v1/network/trf/catalog/unpublish", headers=headers())
+    assert by_capability(failed)[cap.id]["sync_diagnostic"] == {
+        "code": "upstream_http_error", "method": "DELETE", "http_status": 405,
+    }
+    assert failed.json()["can_withdraw"] is True
+    assert "private-delete-body" not in failed.text

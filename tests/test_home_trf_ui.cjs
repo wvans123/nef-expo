@@ -25,6 +25,7 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     const offered=await page.evaluate(()=>wbLocalHomeCaps().filter(c=>c.source==='network'));
     const card=page.locator('[data-home-cap="target_detection"]');
     assert.match(await card.innerText(),/未核对/);
+    assert.equal(await page.locator('#wb-trf-withdraw').isEnabled(),true,'Withdrawal can recover registrations after a restart');
     await page.locator('#wb-trf-publish').click();
     assert.match(await page.locator('#toast').innerText(),/注册或选择账号/);
     await page.locator('#btn-register-acct').click();
@@ -80,6 +81,10 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     await page.waitForFunction(()=>wbTrf.snapshot&&wbTrf.source==='trf');
     await page.locator('#wb-home-source-settings summary').click();
     await page.locator('#wb-home-source').selectOption('local');
+    await context.request.post(origin+'/__fixture__/reset-trf-cache');
+    await page.evaluate(()=>wbLoadTrfCatalog());
+    assert.equal(await page.locator('#wb-trf-withdraw').isEnabled(),true);
+    assert.match(await card.innerText(),/未核对/);
     await page.locator('#wb-trf-withdraw').click();
     await page.locator('#wb-trf-confirm-withdraw').click();
     await page.waitForFunction(()=>!wbTrf.busy&&wbTrf.snapshot.items.every(t=>t.registration_status==='unregistered'));
@@ -89,6 +94,24 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     await page.locator('#wb-home-source').selectOption('trf');
     assert.equal(await page.locator('[data-home-trf]').count(),4);
     await page.locator('#wb-home-source').selectOption('local');
+    // Browser diagnostics must identify the failed method without echoing peer bodies.
+    await page.route('**/api/v1/network/trf/catalog/refresh',async route=>{
+      const snapshot=await (await context.request.get(origin+'/api/v1/network/trf/catalog')).json();
+      snapshot.status='failed';
+      snapshot.items=snapshot.items.map(item=>({...item,registration_status:'unknown',sync_error:'upstream_http_error',
+        sync_diagnostic:{code:'upstream_http_error',method:'GET',http_status:503}}));
+      await route.fulfill({json:snapshot});
+    });
+    await page.locator('#wb-trf-read').click();
+    await page.waitForFunction(()=>!wbTrf.busy&&wbTrf.snapshot.status==='failed');
+    assert.match(await page.locator('#wb-home-trf-note').innerText(),/GET HTTP 503/);
+    assert.match(await card.locator('.wb-registration').getAttribute('title'),/GET HTTP 503/);
+    assert.doesNotMatch(await page.locator('#wb-home-trf-message').innerText(),/已更新|处理完成/);
+    await page.locator('#wb-home-trf').scrollIntoViewIfNeeded();
+    await page.screenshot({path:path.join(output,'failed-read-desktop.png')});
+    await page.unroute('**/api/v1/network/trf/catalog/refresh');
+    await page.locator('#wb-trf-read').click();
+    await page.waitForFunction(()=>!wbTrf.busy&&wbTrf.snapshot.status==='loaded');
     // External publication adds the optional flag; its tool still supports account subscription.
     await page.getByRole('button',{name:'双向开放 · MCP',exact:true}).click();
     await page.locator('#wb-server-name').fill('home-external-'+Date.now());

@@ -73,17 +73,24 @@ class _ConfigError(Exception):
 class _RemoteFailure(Exception):
     """A bounded upstream request failed without retaining upstream content."""
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, *, method: str | None = None, http_status: int | None = None):
         super().__init__(code)
         self.code = code
+        self.method = method
+        self.http_status = http_status
 
 
-class _RemoteSchemaFailure(Exception):
+class _RemoteSchemaFailure(_RemoteFailure):
     """A remote response was reachable but did not match its contract."""
 
-    def __init__(self, code: str):
-        super().__init__(code)
-        self.code = code
+
+def _trf_error_detail(exc: _RemoteFailure) -> dict[str, Any]:
+    detail: dict[str, Any] = {"code": exc.code}
+    if exc.method:
+        detail["method"] = exc.method
+    if exc.http_status is not None:
+        detail["http_status"] = exc.http_status
+    return detail
 
 
 @dataclass(frozen=True)
@@ -229,6 +236,8 @@ def _load_config() -> dict[str, Any]:
         urlsplit(trf_collection).query or urlsplit(trf_collection).fragment
     ):
         raise _ConfigError("invalid_config")
+    if trf_collection:
+        normalized["trf_mcp_servers_url"] = trf_collection.rstrip("/")
     clients = data.get("network_clients", {})
     if not isinstance(clients, dict):
         raise _ConfigError("invalid_config")
@@ -331,23 +340,24 @@ async def _remote_request(
                 }
                 if not 200 <= response.status_code < 300:
                     if 300 <= response.status_code < 400:
-                        raise _RemoteFailure("redirect_not_allowed")
-                    raise _RemoteFailure("upstream_http_error")
+                        raise _RemoteFailure("redirect_not_allowed", http_status=response.status_code)
+                    raise _RemoteFailure("upstream_http_error", http_status=response.status_code)
                 return _RemoteResponse(
                     status_code=response.status_code,
                     content_type=content_type.split(";", 1)[0].strip().lower(),
                     body=body,
                     headers=response_headers,
                 )
-    except _RemoteFailure:
+    except _RemoteFailure as exc:
+        exc.method = method
         raise
     except (httpx.TimeoutException, TimeoutError) as exc:
-        raise _RemoteFailure("upstream_timeout") from exc
+        raise _RemoteFailure("upstream_timeout", method=method) from exc
     except (httpx.HTTPError, OSError) as exc:
-        raise _RemoteFailure("upstream_request_failed") from exc
+        raise _RemoteFailure("upstream_request_failed", method=method) from exc
     except Exception as exc:
         # Keep transport failures honest without exposing exception text.
-        raise _RemoteFailure("upstream_request_failed") from exc
+        raise _RemoteFailure("upstream_request_failed", method=method) from exc
 
 
 def _sse_messages(body: bytes) -> list[dict[str, Any]]:
@@ -768,23 +778,43 @@ def _decode_json_value(response: _RemoteResponse) -> Any:
 
 
 def _validate_trf_servers(value: Any) -> list[dict[str, Any]]:
+    envelopes: list[dict[str, Any]] = []
+    # Only unwrap known collection shapes; never interpret an error as an empty list.
+    for _ in range(2):
+        if not isinstance(value, dict):
+            break
+        envelopes.append(value)
+        if value.get("success") is False or value.get("error"):
+            raise _RemoteSchemaFailure("trf_response_rejected")
+        if value.get("code") not in (None, 0, "0", 200, "200"):
+            raise _RemoteSchemaFailure("trf_response_rejected")
+        keys = [key for key in ("data", "items", "servers", "records") if key in value]
+        if len(keys) != 1:
+            raise _RemoteSchemaFailure("trf_schema_invalid")
+        value = value[keys[0]]
     if isinstance(value, list):
         items = value
-    elif isinstance(value, dict) and set(value) == {"items"} and isinstance(value["items"], list):
-        items = value["items"]
-    elif isinstance(value, dict) and set(value) == {"data"} and isinstance(value["data"], list):
-        items = value["data"]
     else:
-        # Pagination and other envelopes have not been specified by the TRF contract.
         raise _RemoteSchemaFailure("trf_schema_invalid")
+    for envelope in envelopes:
+        if any(envelope.get(key) for key in ("nextCursor", "next_cursor", "next", "hasMore", "has_more", "pagination")):
+            raise _RemoteSchemaFailure("trf_incomplete_list")
+        for key in ("total", "totalCount", "totalElements"):
+            if key in envelope:
+                total = envelope[key]
+                if type(total) is not int or total != len(items):
+                    raise _RemoteSchemaFailure("trf_incomplete_list")
+        for key in ("totalPages", "pages"):
+            if key in envelope and (type(envelope[key]) is not int or envelope[key] > 1):
+                raise _RemoteSchemaFailure("trf_incomplete_list")
     if len(items) > MAX_CATALOG_ITEMS:
         raise _RemoteSchemaFailure("trf_too_many_servers")
     result: list[dict[str, Any]] = []
+    names: set[str] = set()
     for item in items:
         if (
             not isinstance(item, dict)
             or any(field not in item for field in _TRF_FIELDS)
-            or any(field not in (*_TRF_FIELDS, *_TRF_OPTIONAL_FIELDS) for field in item)
         ):
             raise _RemoteSchemaFailure("trf_schema_invalid")
         try:
@@ -801,8 +831,11 @@ def _validate_trf_servers(value: Any) -> list[dict[str, Any]]:
             is_third_party = item.get("isThirdParty")
             if "isThirdParty" in item and type(is_third_party) is not bool:
                 raise ValueError("isThirdParty")
+            if server_name in names:
+                raise ValueError("duplicate serverName")
         except (KeyError, TypeError, ValueError) as exc:
             raise _RemoteSchemaFailure("trf_schema_invalid") from exc
+        names.add(server_name)
         # The known categories are nf/computing/sensing/third-party tool.
         # Bounded unknown values are preserved rather than misclassified.
         parsed = {
@@ -824,8 +857,15 @@ async def _read_trf_servers(
     *,
     token_env: str | None,
 ) -> list[dict[str, Any]]:
-    response = await _remote_request("GET", collection_url, token_env=token_env)
-    return _validate_trf_servers(_decode_json_value(response))
+    response = None
+    try:
+        response = await _remote_request("GET", collection_url, token_env=token_env)
+        return _validate_trf_servers(_decode_json_value(response))
+    except _RemoteFailure as exc:
+        exc.method = "GET"
+        if response is not None:
+            exc.http_status = response.status_code
+        raise
 
 
 def _same_trf_server(left: dict[str, Any], right: dict[str, Any]) -> bool:
@@ -865,16 +905,17 @@ async def _delete_trf_server(
                 if 200 <= response.status_code < 300 or response.status_code == 404:
                     return response.status_code
                 if 300 <= response.status_code < 400:
-                    raise _RemoteFailure("redirect_not_allowed")
-                raise _RemoteFailure("upstream_http_error")
-    except _RemoteFailure:
+                    raise _RemoteFailure("redirect_not_allowed", http_status=response.status_code)
+                raise _RemoteFailure("upstream_http_error", http_status=response.status_code)
+    except _RemoteFailure as exc:
+        exc.method = "DELETE"
         raise
     except (httpx.TimeoutException, TimeoutError) as exc:
-        raise _RemoteFailure("upstream_timeout") from exc
+        raise _RemoteFailure("upstream_timeout", method="DELETE") from exc
     except (httpx.HTTPError, OSError) as exc:
-        raise _RemoteFailure("upstream_request_failed") from exc
+        raise _RemoteFailure("upstream_request_failed", method="DELETE") from exc
     except Exception as exc:
-        raise _RemoteFailure("upstream_request_failed") from exc
+        raise _RemoteFailure("upstream_request_failed", method="DELETE") from exc
 
 
 def _get_owned_package(account: str, package_id: str) -> dict[str, Any]:

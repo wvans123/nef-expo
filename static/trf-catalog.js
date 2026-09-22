@@ -13,9 +13,33 @@ const wbRegistrationLabels={
   registered:'已注册',unregistered:'未注册',unknown:'未核对',
   submitted:'待确认',failed:'同步失败',conflict:'同名冲突',
 };
-function wbRegistrationDot(status='unknown'){
+function wbTrfFailureText(item){
+  if(!item?.sync_error)return '';
+  const reasons={
+    trf_schema_invalid:'GET 回包结构或字段不符合约定',
+    trf_incomplete_list:'GET 返回了分页数据，需提供完整服务列表',
+    trf_response_rejected:'TRF 回包表示请求失败',
+    invalid_json:'TRF 返回的不是有效 JSON',
+    unsupported_transport:'TRF 返回的 Content-Type 不是 JSON',
+    upstream_http_error:'TRF 返回错误状态码',
+    upstream_timeout:'连接 TRF 超时',
+    upstream_request_failed:'无法连接 TRF，请核对地址及网络',
+    redirect_not_allowed:'TRF 返回重定向，请配置最终集合地址',
+    missing_operator_token:'TRF 鉴权凭证未配置',
+    trf_name_conflict:'同名服务内容不同，未覆盖或删除',
+    trf_confirmation_unknown:'请求已提交，GET 尚未确认结果',
+    nef_base_not_configured:'NEF 对外访问地址未配置',
+    trf_not_configured:'TRF 集合地址未配置',
+    invalid_config:'登记配置无效',
+  };
+  const d=item.sync_diagnostic||{};
+  const request=[d.method,d.http_status!=null?'HTTP '+d.http_status:''].filter(Boolean).join(' ');
+  return (request?request+'：':'')+(reasons[item.sync_error]||'TRF 请求失败')+' ('+item.sync_error+')';
+}
+function wbRegistrationDot(status='unknown',item=null){
   const label=wbRegistrationLabels[status]||'未核对';
-  return `<span class="wb-registration wb-registration-${esc(status)}" title="TRF · ${esc(label)}" aria-label="TRF · ${esc(label)}"><span class="cat-dot"></span><span>${esc(label)}</span></span>`;
+  const detail=wbTrfFailureText(item);
+  return `<span class="wb-registration wb-registration-${esc(status)}" title="TRF · ${esc(label)}${detail?' · '+esc(detail):''}" aria-label="TRF · ${esc(label)}"><span class="cat-dot"></span><span>${esc(label)}</span></span>`;
 }
 function wbLocalHomeCaps(){return CAPS.filter(c=>c.status==='available'&&c.category!=='ecosystem');}
 function wbCapabilityAccess(info,id){
@@ -32,7 +56,7 @@ function wbRenderHomeCatalog(){
   const remote=wbTrf.source==='trf',snap=wbTrf.snapshot;
   const caps=wbLocalHomeCaps(),tools=wb.market.filter(t=>t.kind==='tool');
   const items=remote?(snap?.remote_items||[]).map(t=>({...t,origin:'trf'})):
-    [...caps.map(c=>({...c,origin:'cap',registration_status:snap?.items?.find(s=>s.capability_id===c.id)?.registration_status||'unknown'})),
+    [...caps.map(c=>({...c,...snap?.items?.find(s=>s.capability_id===c.id),origin:'cap'})),
      ...tools.map(t=>({...t,origin:'external'}))];
   const groupHtml=meta=>{
     const rows=items.filter(t=>t.toolType===meta.id);
@@ -42,7 +66,7 @@ function wbRenderHomeCatalog(){
       const name=t.name,description=t.description||'暂无用途说明';
       const caption=t.origin==='cap'?t.standard_basis?.label||'NEF 网络能力':t.origin==='trf'?'TRF 服务目录':t.serverName||t.provider;
       const price=t.origin==='cap'?(wbCapabilityAccess(wb.authInfo,t.id).label||t.unit_price):t.origin==='trf'?(t.serverStatus==='active'?'服务已登记':'服务状态：'+t.serverStatus):wb.toolSubscriptions.some(s=>s.id===t.id)?'已订阅 · 演示免费':'演示免费 · 点击订阅';
-      return `<button class="tile" ${action}="${esc(t.id)}"><div class="ticon">${t.icon||meta.icon}</div><div class="tname" title="${esc(name)}">${esc(name)}</div><span class="wb-standard-label">${esc(caption)}</span><p class="wb-tile-description">${esc(description)}</p><div class="tfoot">${wbRegistrationDot(status)}<span class="tprice">${esc(price)}</span></div></button>`;
+      return `<button class="tile" ${action}="${esc(t.id)}"><div class="ticon">${t.icon||meta.icon}</div><div class="tname" title="${esc(name)}">${esc(name)}</div><span class="wb-standard-label">${esc(caption)}</span><p class="wb-tile-description">${esc(description)}</p><div class="tfoot">${wbRegistrationDot(status,t)}<span class="tprice">${esc(price)}</span></div></button>`;
     }).join('')||'<p class="muted">暂无能力</p>'}</div></section>`;
   };
   $('#cap-list').innerHTML=wbToolTypes.slice(0,3).map(groupHtml).join('');
@@ -68,7 +92,7 @@ function wbRenderTrfControls(){
   $('#wb-home-source').value=wbTrf.source;
   $('#wb-trf-publish').hidden=$('#wb-trf-withdraw').hidden=remote;
   $('#wb-trf-publish').disabled=!!busy||!snap?.configured||!snap?.base_configured;
-  $('#wb-trf-withdraw').disabled=!!busy||!snap?.can_withdraw;
+  $('#wb-trf-withdraw').disabled=!!busy||!(snap?.can_withdraw||(snap?.configured&&snap?.base_configured));
   $('#wb-trf-read').disabled=!!busy||!snap?.configured;
   $('#wb-trf-read').textContent=remote?'刷新目录':'核对状态';
   const counts=snap?.summary;
@@ -78,7 +102,8 @@ function wbRenderTrfControls(){
   if(!snap?.configured)note+=' TRF 地址待配置。';
   else if(!remote&&!snap.base_configured)note+=' 还需配置本 NEF 的访问地址，供 TRF 调用这些能力（registry.nef_base_url）。';
   if(snap?.last_checked)note+=' 上次核对：'+new Date(typeof snap.last_checked==='number'?snap.last_checked*1000:snap.last_checked).toLocaleString();
-  if(snap?.status==='failed'||snap?.status==='stale')note+=' 状态核对失败，显示上次结果。';
+  const failures=[...new Set((snap?.items||[]).filter(i=>i.sync_error).map(wbTrfFailureText))];
+  if(failures.length)note+=' '+failures.slice(0,3).join('；');
   $('#wb-home-trf-note').textContent=note;
   $('#wb-home-trf-message').textContent=wbTrf.message;
 }
@@ -96,8 +121,9 @@ async function wbTrfAction(action){
   try{
     wbTrf.snapshot=await api('/api/v1/network/trf/catalog/'+action,{method:'POST'});
     if(epoch!==wb.epoch){wbTrf.message='';return;}
-    const s=wbTrf.snapshot,failed=(s.items||[]).filter(i=>['failed','conflict','submitted'].includes(i.registration_status));
-    wbTrf.message=action==='unpublish'&&s.can_withdraw?'仍有登记未能确认撤回（可能在之前的 TRF 地址），请重试或核对对端记录。':
+    const s=wbTrf.snapshot,failed=(s.items||[]).filter(i=>i.sync_error||['failed','conflict','submitted'].includes(i.registration_status));
+    wbTrf.message=s.status==='not_configured'?'配置尚未完成，未发送 TRF 请求。':
+      action==='unpublish'&&s.can_withdraw?'仍有登记未能确认撤回（可能在之前的 TRF 地址），请查看下方错误或核对对端记录。':
       failed.length?`${failed.length} 项失败或尚待确认，请查看卡片状态后重试。`:
       s.status==='failed'||s.status==='stale'?'状态核对未完成，保留上次记录。':
       action==='refresh'?'注册状态已更新。':action==='publish'?'同步处理完成，请查看登记状态。':'撤回处理完成，请查看登记状态。';

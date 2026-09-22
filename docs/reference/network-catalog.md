@@ -64,7 +64,9 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 
 ### 查询与确认
 
-`GET {trf_mcp_servers_url}`，无正文。目前支持完整数组、单字段 `{"items":[...]}` 或 `{"data":[...]}`，每项包含六个基础字段；可选布尔 `isThirdParty` 会保留，其他额外字段不进入投影。分页或其他外层结构尚未约定，返回明确的 schema 错误，不把未知结构当空列表。运维查询保留未知类型供排查；首页仅显示四种约定类型，并报告跳过数量。
+`GET {trf_mcp_servers_url}`，无正文。支持完整数组，以及 `items`、`data`、`servers`、`records` 列表包装；也支持两层包装，例如 `{"code":200,"message":"OK","data":{"items":[...],"total":23}}`。每项包含六个基础字段；可选布尔 `isThirdParty` 会保留，数据库 `id`、时间戳等额外字段会忽略，不因这些字段而整批失败。
+
+包装中的 `code` 可省略或为 `0` / `200`（兼容字符串）；明确 `success:false`、非空 `error` 或其他 code 返回 `trf_response_rejected`。`total` / `totalCount` / `totalElements` 若存在必须等于列表长度；非空下一页游标、hasMore、pagination 或多页标志返回 `trf_incomplete_list`，不把不完整列表用于“未登记/已删除”的判断。未知包装、缺失基础字段及重复 serverName 返回 `trf_schema_invalid`，不会当作空目录。真实 TRF 如采用其他成功 code 或分页契约，需提供回包后调整适配。运维查询保留未知类型供排查；首页仅显示四种约定类型，并报告跳过数量。
 
 发布的 HTTP 2xx 不直接等于同步成功：随后 GET，读回基础字段一致的记录才记 `synced`；若 GET 带 `isThirdParty`，值也须匹配。为兼容旧 GET 可省略该字段，但这不证明它已被对方保存。查不到匹配项或查询暂不可用记 `submitted`，请求或 schema 错误按实际记录。GET 读取确认不证明后续工具可执行。
 
@@ -74,7 +76,9 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 
 首次发布的地址及名称保存在进程内；配置改址后该记录仍在原目标重试 / 撤回，避免删除新环境的同名服务。确认撤回后可删除本地登记，再用新配置重新登记。超时可能已经到达对端，不自动声称未发送；当前没有对方幂等规则，重试需核对实际记录。
 
-所有请求不走系统代理、不跟随重定向。登记与状态目前仍在内存，重启会清空；重启前应撤回本进程发布的登记，或由对方按 serverName 清理，NEF 不会在重启后自动猜测并删除 TRF 记录。
+POST 和 GET 使用同一个 `registry.trf_mcp_servers_url`，统一去掉末尾 `/`；DELETE 仅在该集合地址后追加 URL 编码后的 `/serverName`，无正文。不需要另配查询/删除 IP，也不使用旧 `withdraw_url`。所有请求不走系统代理、不跟随重定向。
+
+登记与状态目前仍在内存，重启会清空。首页内部能力可在配置不变时，通过显式“核对状态”或“取消 TRF 注册”GET 精确匹配并恢复撤回信息，不依赖上一次本地缓存；没有自动启动删除。双向开放登记仍需重启前撤回，或由对方按 serverName 清理，不能凭名称前缀推断归属。
 
 ## 4. 页面调用 NEF 的接口
 
@@ -156,6 +160,8 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 | POST `/api/v1/network/trf/catalog/unpublish` | 同上鉴权；仅 DELETE 本平台本批已发送或已精确匹配的条目，再 GET 确认；不删除第三方/同名冲突记录 |
 
 按钮是一次页面操作；现有 TRF 契约一次 POST 只接受一个 MCP Server，因此批量同步是多次单条 POST，不虚构数组批量接口。部分失败保留逐项结果可重试；同名不同内容为冲突，不覆盖。撤回保留首次目标，配置改址后不会误删新环境同名登记。
+
+首页取消按钮在已配置 TRF 和 NEF 地址时即可使用，包括本进程尚无登记缓存的情况；点击后先 GET 精确匹配，再按 serverName DELETE。GET 失败或不完整时不盲目 POST/DELETE，也不显示“处理完成”。失败项保留 `sync_error`；可用时附 `sync_diagnostic: {code, method, http_status}`，例如 GET / HTTP 503 或 POST / HTTP 400。页面底部与状态点提示显示具体原因，不回显地址、响应原文或凭证。`can_withdraw` 表示进程内仍有待确认撤回的登记，不再作为取消按钮的唯一启用条件。
 
 状态包括 `unknown`（灰，尚未核对）、`registered`（绿，读回一致）、`unregistered`（红，读回缺席）、`submitted`（黄，已提交待确认）、`failed`、`conflict`。不把预设、旧成功缓存或 HTTP 200 一律当成已经注册。缓存与发送记录仍为内存；重启后需显式读取核对，只有与本机当前配置和能力完整匹配的登记才恢复可撤回状态。
 

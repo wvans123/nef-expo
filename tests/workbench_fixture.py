@@ -30,7 +30,10 @@ class Peer(BaseHTTPRequestHandler):
         if self.path=='/probe':return self.respond({'requests':self.requests})
         self.requests.append({'method':'GET','path':self.path,'time':time.monotonic()})
         if self.path=='/latest':return self.respond({'final_result':'Local fixture perception result'})
-        if self.path=='/trf/api/v1/mcp-servers':return self.respond(list(self.servers.values()))
+        if self.path=='/trf/api/v1/mcp-servers':
+            return self.respond({'code':200,'message':'OK','data':[
+                {**item,'id':index,'createdAt':'2026-09-22'}
+                for index,item in enumerate(self.servers.values())]})
         self.respond({'items':[{'id':'fixture.vision','name':'联调视觉工具','kind':'tool','description':'本地验证目录，不是生产网络数据','inputSchema':{'type':'object','properties':{}}},{'id':'fixture.patrol','name':'联调巡检套餐','kind':'package','description':'本地目录契约验证'}]})
     def do_DELETE(self):
         raw=self.rfile.read(int(self.headers.get('Content-Length','0')))
@@ -89,6 +92,11 @@ if __name__=='__main__':
         @app.get('/__fixture__/peer')
         def fixture_peer():
             return {'url':base}
+        @app.post('/__fixture__/reset-trf-cache')
+        def fixture_reset_trf_cache():
+            import trf_catalog
+            trf_catalog.reset_state_for_tests()
+            return {'reset':True}
         import uvicorn
         try:uvicorn.run('server:app',host='127.0.0.1',port=args.port,log_level='warning')
         finally:peer.shutdown();peer.server_close()
