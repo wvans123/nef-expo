@@ -1,0 +1,97 @@
+/* Desktop-only homepage/TRF integration against the isolated synthetic peer. */
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {chromium}=require('playwright');
+const origin=process.argv[2],url=new URL(origin);
+assert.equal(url.hostname,'127.0.0.1');assert(url.port&&url.port!=='8069');
+const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive:true});
+(async()=>{
+  const browser=await chromium.launch({headless:true,...(process.env.NEF_TEST_BROWSER_CHANNEL?{channel:process.env.NEF_TEST_BROWSER_CHANNEL}:{})});
+  try{
+    const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[];
+    page.on('pageerror',e=>errors.push(e.message));
+    const peer=(await (await context.request.get(origin+'/__fixture__/peer')).json()).url;
+    const probe=async()=> (await (await context.request.get(peer+'/probe')).json()).requests;
+    const writes=async()=> (await probe()).filter(r=>r.method==='POST'&&r.path==='/trf/api/v1/mcp-servers');
+    const beforeRead=(await probe()).filter(r=>r.path==='/trf/api/v1/mcp-servers').length;
+    await page.goto(origin);
+    await page.waitForFunction(()=>wbTrf.snapshot&&CAPS.length);
+    assert.equal((await probe()).filter(r=>r.path==='/trf/api/v1/mcp-servers').length,beforeRead);
+    assert.deepEqual(await page.locator('.wb-home-group').evaluateAll(els=>els.map(el=>el.dataset.toolType)),
+      ['nf tool','computing tool','sensing tool','third-party tool']);
+    assert.doesNotMatch(await page.locator('#pane-market').innerText(),/规划中|生态服务/);
+    const offered=await page.evaluate(()=>wbLocalHomeCaps().filter(c=>c.source==='network'));
+    const card=page.locator('[data-home-cap="target_detection"]');
+    assert.match(await card.innerText(),/未核对/);
+    await page.locator('#wb-trf-publish').click();
+    assert.match(await page.locator('#toast').innerText(),/注册或选择账号/);
+    await page.locator('#btn-register-acct').click();
+    await page.locator('#wb-account-name').fill('home-trf-'+Date.now());
+    await page.locator('#wb-account-create').click();
+    await page.waitForFunction(()=>!!apiKey()&&wbTrf.snapshot);
+    await page.locator('#wb-trf-read').click();
+    await page.waitForFunction(()=>!wbTrf.busy&&wbTrf.snapshot.items.every(t=>t.registration_status==='unregistered'));
+    assert.match(await card.innerText(),/未注册/);
+    await page.locator('#wb-trf-publish').click();
+    await page.waitForFunction(()=>!wbTrf.busy&&wbTrf.snapshot.items.every(t=>t.registration_status==='registered'));
+    assert.match(await card.innerText(),/已注册/);
+    const posts=await writes();
+    assert.equal(posts.length,offered.length);
+    for(const row of posts){
+      const payload=JSON.parse(row.body);
+      const cap=offered.find(c=>payload.url.endsWith('/mcp/capabilities/'+c.id));
+      assert(cap);assert.equal(payload.toolType,cap.toolType);
+      assert.equal(payload.serverType,'Streamable HTTP');
+      assert.equal(payload.serverStatus,'active');
+      assert(!Object.hasOwn(payload,'isThirdParty'));
+      assert.equal(Object.keys(payload).length,6);
+    }
+    await page.locator('#wb-trf-publish').click();
+    await page.waitForFunction(()=>!wbTrf.busy);
+    assert.equal((await writes()).length,posts.length,'Already registered rows must not be reposted');
+    await page.locator('#wb-home-trf').scrollIntoViewIfNeeded();
+    await page.screenshot({path:path.join(output,'synchronized-desktop.png')});
+    await page.locator('#wb-home-source').selectOption('trf');
+    assert.equal(await page.locator('[data-home-cap]').count(),0);
+    assert.equal(await page.locator('[data-home-trf]').count(),offered.length+4);
+    assert.equal(await page.locator('#wb-trf-publish').isVisible(),false);
+    await page.locator('[data-home-trf="trf:fixture-nf"]').click();
+    assert.match(await page.locator('#modal').innerText(),/尚未发现工具参数/);
+    assert.equal(await page.locator('#wb-subscribe-tool').count(),0);
+    await page.locator('#wb-trf-detail-close').click();
+    await page.reload();
+    await page.waitForFunction(()=>wbTrf.snapshot&&wbTrf.source==='trf');
+    assert.equal(await page.locator('[data-home-trf]').count(),offered.length+4);
+    await page.locator('#wb-home-source').selectOption('local');
+    await page.locator('#wb-trf-withdraw').click();
+    await page.locator('#wb-trf-confirm-withdraw').click();
+    await page.waitForFunction(()=>!wbTrf.busy&&wbTrf.snapshot.items.every(t=>t.registration_status==='unregistered'));
+    const deletes=(await probe()).filter(r=>r.method==='DELETE'&&r.path.startsWith('/trf/api/v1/mcp-servers/'));
+    assert.equal(deletes.length,offered.length);
+    assert(deletes.every(r=>r.path.includes('/nef-cap-')));
+    await page.locator('#wb-home-source').selectOption('trf');
+    assert.equal(await page.locator('[data-home-trf]').count(),4);
+    await page.locator('#wb-home-source').selectOption('local');
+    // External publication adds the optional flag; its tool still supports account subscription.
+    await page.getByRole('button',{name:'双向开放 · MCP',exact:true}).click();
+    await page.locator('#wb-server-name').fill('home-external-'+Date.now());
+    await page.locator('#wb-server-url').fill(peer+'/mcp');
+    await page.locator('#wb-register-server').click();
+    await page.waitForFunction(()=>wb.servers.some(s=>s.discovery_status==='discovered'));
+    const id=await page.evaluate(()=>wb.servers[0].id);
+    await page.locator('[data-publish-server="'+id+'"]').click();
+    await page.waitForFunction(()=>wb.servers[0]?.sync_status==='synced');
+    assert.equal(JSON.parse((await writes()).at(-1).body).isThirdParty,true);
+    await page.getByRole('button',{name:'能力超市',exact:true}).click();
+    const external=page.locator('#wb-network-market [data-home-tool]').first();
+    await external.waitFor();assert.match(await external.innerText(),/已注册/);
+    await external.click();
+    await page.locator('#wb-subscribe-tool').click();
+    await page.locator('#wb-use-tool').waitFor();
+    await page.locator('#wb-close-detail').click();
+    await page.locator('#cap-list').scrollIntoViewIfNeeded();
+    await page.screenshot({path:path.join(output,'four-types-desktop.png')});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+    assert.deepEqual(errors,[]);
+    console.log(`Homepage TRF desktop passed: ${offered.length} local capabilities, 4 types, flag, batch sync/withdraw, no duplicate writes, safe GET mode and external subscription.`);
+  }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

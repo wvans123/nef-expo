@@ -20,7 +20,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from subscription_query import SubscriptionSnapshot
 
 from skills import (CAPABILITIES, CAP_INDEX, PACKAGES, PKG_INDEX, CATEGORIES,
-                    AGENTS, Capability, CapParam, agent_for_capability)
+                    AGENTS, Capability, CapParam, agent_for_capability,
+                    trf_catalog_capabilities)
 from stubs import invoke_stub
 from intent import process_intent, intent_status
 from registry import (THIRD_PARTY, THIRD_PARTY_META, THIRD_PARTY_SUBS, REVERSE_CALLS,
@@ -1639,6 +1640,61 @@ async def mcp_endpoint(request: Request, authorization: str = Header(None), x_ne
             "error": {"code": -32601, "message": f"method not supported: {method}"}}
 
 
+@app.post("/mcp/capabilities/{cap_id}")
+async def capability_mcp_endpoint(
+    cap_id: str, request: Request, authorization: str = Header(None)
+):
+    """Single-tool NEF adapter registered at TRF; reuses live invocation and grants."""
+    cap = next((c for c in trf_catalog_capabilities() if c.id == cap_id), None)
+    if cap is None:
+        raise HTTPException(404, "此能力不在首页开放目录中")
+    _, rec = _auth(authorization, required_scope="mcp:tools")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "需要 JSON-RPC 对象")
+    if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
+        raise HTTPException(400, "需要 JSON-RPC 2.0 对象")
+    method, rid = body.get("method"), body.get("id")
+    # Notifications are acknowledgements only; tools/call without an id never executes.
+    if "id" not in body:
+        return Response(status_code=202)
+    if type(rid) not in (str, int):
+        raise HTTPException(422, "JSON-RPC id 需为字符串或整数")
+    if method == "initialize":
+        return {"jsonrpc": "2.0", "id": rid, "result": {
+            "protocolVersion": "2025-03-26", "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": f"nef-cap-{cap.id}", "version": "1.0"},
+            "instructions": "NEF 单能力入口；调用需要账号权限和权益，按实际配置转发。",
+        }}
+    if method == "ping":
+        return {"jsonrpc": "2.0", "id": rid, "result": {}}
+    if method == "tools/list":
+        tool = cap.mcp_tool()
+        tool["subscribed"] = _entitled(rec, cap)
+        return {"jsonrpc": "2.0", "id": rid, "result": {"tools": [tool]}}
+    if method == "tools/call":
+        params = body.get("params", {})
+        if (not isinstance(params, dict) or params.get("name") != cap.id
+                or not isinstance(params.get("arguments", {}), dict)):
+            return {"jsonrpc": "2.0", "id": rid, "error": {
+                "code": -32602, "message": "该入口仅允许调用当前能力，arguments 需为对象"}}
+        try:
+            return await run_in_threadpool(
+                mcp_tools_call, McpCallReq(id=rid, params=params), authorization, "live"
+            )
+        except HTTPException as exc:
+            if exc.status_code in (401, 403):
+                raise
+            import json
+            return {"jsonrpc": "2.0", "id": rid, "result": {
+                "isError": True, "content": [{"type": "text", "text": json.dumps(
+                    {"http_status": exc.status_code, "detail": exc.detail}, ensure_ascii=False
+                )}]}}
+    return {"jsonrpc": "2.0", "id": rid,
+            "error": {"code": -32601, "message": "不支持的方法"}}
+
+
 # ===== Skill 双文档生成 =====
 def skill_steps(pkg):
     steps = []
@@ -1808,6 +1864,8 @@ exhibition.mount_routes(app, _auth)
 
 import network_registry as network_registry_runtime
 app.include_router(network_registry_runtime.build_router(_auth))
+from trf_catalog import build_router as build_trf_catalog_router
+app.include_router(build_trf_catalog_router(_auth))
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

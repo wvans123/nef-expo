@@ -98,10 +98,7 @@ function wbRenderNetwork(){
   const signature=jfmt([current,wb.networkStatus,wb.networkError,wb.catalog,wb.market,wb.servers,wb.packages,wb.toolSubscriptions]);
   if(wb.networkRenderSignature===signature)return;wb.networkRenderSignature=signature;
   if($('#wb-af-count'))$('#wb-af-count').textContent=new Set(wb.market.filter(x=>x.source==='AF').map(x=>x.server_id)).size;
-  const items=wb.market;
-  const groups=[...new Set(items.map(x=>x.kind==='package'?'package':x.toolType||'third-party tool'))];
-  $('#wb-network-market').innerHTML=groups.map(group=>'<div class="cat-title"><span class="cat-dot" style="background:#f0883e"></span>'+esc(group==='package'?'自助编排套餐':wbToolType(group))+'</div><div class="tile-grid">'+items.map((x,i)=>({x,i})).filter(({x})=>(x.kind==='package'?'package':x.toolType||'third-party tool')===group).map(({x,i})=>`<button class="tile wb-network-item" data-net-item="${i}"><div class="ticon">${wbToolIcon(x)}</div><div class="tname" title="${esc(x.name)}">${esc(x.name)}</div><span class="wb-standard-label">${esc(x.serverName||x.provider||(x.kind==='package'?'自助编排套餐':'外部能力'))}</span><p class="wb-tile-description">${esc(x.description||'查看能力详情')}</p><div class="tfoot"><span class="cat-dot" style="background:#f0883e;width:7px;height:7px;margin:0"></span><span class="tprice">${x.kind==='package'?'组合套餐':wb.toolSubscriptions.some(t=>t.id===x.id)?'已订阅 · 演示免费':'演示免费 · 点击订阅'}</span></div></button>`).join('')+'</div>').join('');
-  $$('#wb-network-market [data-net-item]').forEach(b=>b.onclick=()=>wbShowNetworkTool(items[Number(b.dataset.netItem)].id));
+  wbRenderHomeCatalog();
   $('#wb-server-list').innerHTML=wb.servers.map(s=>{
     const published=s.publication_status==='published',busy=['discovering'].includes(s.discovery_status)||s.sync_status==='syncing';
     const retry=(published&& !['synced','not_required'].includes(s.sync_status))||(!published&&s.trf_may_exist);

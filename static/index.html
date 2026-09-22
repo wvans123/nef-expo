@@ -181,7 +181,7 @@ th{background:var(--card);color:var(--muted)}
 .rev-badge{font-size:10px;color:var(--green);border:1px solid #39ffb066;border-radius:8px;padding:0 6px;margin-left:6px}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;border-radius:8px;padding:9px 18px;z-index:200;display:none}
 </style>
-<link rel="stylesheet" href="/static/workbench.css?v=20260921-2">
+<link rel="stylesheet" href="/static/workbench.css?v=20260922-1">
 <script src="/static/showcase-story.js?v=20260921-1"></script>
 <script src="/static/showcase-mcp.js?v=20260921-3"></script>
 </head>
@@ -215,8 +215,16 @@ th{background:var(--card);color:var(--muted)}
     <h3 class="sec">场景套餐 <small class="muted">按业务场景开通网络能力</small></h3>
     <div id="wb-scene-market" class="wb-scene-grid"></div>
     <details class="wb-legacy-packages" hidden><summary>基础能力组合套餐（兼容旧订阅）</summary><div id="pkg-row"></div></details>
-    <div id="wb-network-market"></div>
     <div id="cap-list"></div>
+    <div id="wb-network-market"></div>
+    <section id="wb-home-trf" class="wb-home-trf">
+      <h3 class="sec">能力目录同步</h3>
+      <label for="wb-home-source">首页工具来源</label>
+      <select id="wb-home-source"><option value="local">本地能力</option><option value="trf">TRF 目录</option></select>
+      <p id="wb-home-trf-summary" class="muted">尚未核对</p>
+      <div class="wb-record-actions"><button id="wb-trf-publish" class="primary">同步到 TRF</button><button id="wb-trf-withdraw">取消 TRF 注册</button><button id="wb-trf-read">从 TRF 读取 / 核对</button></div>
+      <p id="wb-home-trf-note" class="muted"></p><p id="wb-home-trf-message" role="status"></p>
+    </section>
   </div>
 
   <!-- Tab 2 我的订阅 -->
@@ -453,36 +461,16 @@ async function loadMarket(){
         <span class="method-chip" style="opacity:.75">↩ MCP Server 注册</span>
       </div>
     </div>
-    <div class="stat"><b>${CAPS.filter(c=>c.status==='available').length}</b><span>项可用能力</span></div>
+    <div class="stat"><b id="wb-home-cap-count">${wbLocalHomeCaps().length}</b><span>项展示能力</span></div>
     <div class="stat"><b id="wb-af-count" style="color:#f0883e">${new Set((wb.market||[]).filter(x=>x.source==='AF').map(x=>x.server_id)).size}</b><span>个已发布能力源</span></div>
-    <div class="stat"><b>${CAPS.filter(c=>c.status==='planned').length}</b><span>项规划中</span></div>
     <div class="stat"><b>3</b><span>种调用方式</span></div>
     <div class="stat"><b>3</b><span>个场景套餐</span></div>
     <div class="stat"><span>API Key 状态</span><b style="font-size:13px" class="${apiKey()?'ok':'muted'}">${apiKey()?'已激活':'未接入'}</b></div>`;
   $('#pkg-row').innerHTML = PKGS.map(p =>
     `<div class="pkg-chip" onclick="showPkg('${p.id}')"><b>${esc(p.name)}${p.featured?'<span class="feat-badge">主推</span>':''}</b><span class="pprice">${esc(p.price)}</span><div class="pscen">${esc(p.scenario)}</div></div>`).join('');
-  const byCat = {};
-  CAPS.forEach(c => (byCat[c.category] = byCat[c.category]||[]).push(c));
-  let html = '';
-  for(const [cat, meta] of Object.entries(CATS)){
-    const list = (byCat[cat]||[]).slice().sort((a,b)=>(a.status==='planned')-(b.status==='planned')); // 规划中排到本类末尾
-    if(!list.length) continue;
-    html += `<div class="cat-title"><span class="cat-dot" style="background:${meta.color}"></span>${esc(meta.name)} <small>${list.length} 项</small></div><div class="tile-grid">`;
-    html += list.map(c => `
-      <div class="tile ${c.status==='planned'?'planned':''}" onclick="showCap('${c.id}')">
-        ${c.status==='planned'?'<span class="tbadge">规划中</span>':c.source==='third_party'?'<span class="tbadge" style="color:#f0883e;border-color:#f0883e55">third_party</span>':''}
-        <div class="ticon">${c.icon||'⚙️'}</div>
-        <div class="tname" title="${esc(c.name)}">${esc(c.name)}</div>
-        <span class="wb-standard-label">${esc(c.standard_basis?.label||'平台扩展')}</span>
-        <div class="tfoot">
-          <span class="cat-dot" style="background:${meta.color};width:7px;height:7px;margin:0"></span>
-          <span class="tprice">${esc(c.unit_price)}</span>
-        </div>
-      </div>`).join('');
-    html += '</div>';
-  }
-  $('#cap-list').innerHTML = html;
+  wbRenderHomeCatalog();
   await wbLoadScenes(); await wbLoadNetwork().catch(wbError);
+  await wbLoadTrfCatalog().catch(wbError);
 }
 
 window.showCap = async id => {
@@ -490,7 +478,7 @@ window.showCap = async id => {
   const rows = c.params.map(p=>`<tr><td class="mono">${p.name}</td><td>${p.type}</td><td>${p.required?'是':'否'}</td><td>${esc(p.description)}</td></tr>`).join('');
   const example = {}; c.params.forEach(p=>example[p.name]= p.default!==undefined?p.default:(p.enum?p.enum[0]:'...'));
   showModal(`
-    <h2>${c.icon||''} <span class="cat-dot" style="background:${CATS[c.category].color}"></span>${esc(c.name)} <span class="tier ${c.tier}">${c.tier}</span></h2>
+    <h2>${c.icon||''} <span class="cat-dot" style="background:${CATS[c.category]?.color||'#f0883e'}"></span>${esc(c.name)} <span class="tier ${c.tier}">${c.tier}</span></h2>
     <p class="muted">${esc(c.description)}</p><span class="method-chip">${esc(c.standard_basis?.label||'平台扩展')}</span>
     <div class="kv"><b>REST</b><code>${esc(c.rest_endpoint)}</code></div>
     <div class="kv"><b>MCP Tool</b><code>${c.id}</code> · <b>价格</b><span class="price">${esc(c.unit_price)}</span></div>
@@ -962,7 +950,8 @@ $('#term-send').onclick = ()=>termRequest($('#term-input').value.trim());
 $('#term-input').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#term-send').click(); });
 </script>
 <script src="/static/purchase.js?v=20260921-1"></script>
-<script src="/static/workbench.js?v=20260921-3"></script>
+<script src="/static/trf-catalog.js?v=20260922-1"></script>
+<script src="/static/workbench.js?v=20260922-1"></script>
 <script src="/static/composer.js?v=20260917-3"></script>
 </body>
 </html>

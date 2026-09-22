@@ -44,3 +44,13 @@
 #composer-params{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px}#composer-params label{flex:1;min-width:180px}#composer-params input,#composer-params select{width:100%}
 .wb-check{border-left:3px solid;padding:10px 12px;margin-top:12px;border-radius:4px;background:#12233b}.wb-check.ok{border-color:#39d2aa}.wb-check.conflict{border-color:#ff8e7b;color:#ffbeae}.wb-check p{margin:6px 0 0;font-size:12px}
 .wb-proposal{border-top:1px solid #39d2ff30;margin-top:15px;padding-top:15px}.wb-proposal>button{margin:12px 8px 0 0}.wb-proposal .pill{margin:5px 0}.wb-standard-label{display:block;font-size:10px;color:var(--muted);margin:3px 0 6px}
+.wb-home-trf{margin-top:28px;padding:20px;border:1px solid var(--border);border-radius:12px;background:var(--card)}
+.wb-home-trf select{max-width:240px;margin:6px 0 8px}
+.wb-home-trf .sec{margin-top:0}
+.wb-registration{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);white-space:nowrap}
+.wb-registration .cat-dot{width:7px;height:7px;margin:0;background:#8a97ad;box-shadow:none}
+.wb-registration-registered .cat-dot{background:#3fd19c}
+.wb-registration-unregistered .cat-dot,.wb-registration-failed .cat-dot,.wb-registration-conflict .cat-dot{background:#ff6e7e}
+.wb-registration-submitted .cat-dot{background:#ffbe55}
+.wb-home-group .tile{text-align:left}
+.wb-home-group .tfoot{flex-wrap:wrap;gap:6px}

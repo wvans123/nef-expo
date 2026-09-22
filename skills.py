@@ -46,6 +46,7 @@ class Capability:
             "intent_keywords": self.intent_keywords,
             "unit_price": self.unit_price, "source": self.source,
             "status": self.status, "icon": self.icon,
+            "toolType": capability_tool_type(self),
             "standard_basis": CAPABILITY_STANDARDS.get(self.id, {"family": "platform_extension", "label": "AF 扩展", "api_contract": "provider_defined"}),
         }
 
@@ -78,6 +79,30 @@ CATEGORIES = {
     "security": {"name": "安全·身份 Security", "color": "#f7768e"},
     "ecosystem": {"name": "生态服务 Ecosystem", "color": "#6e7bf2"},
 }
+
+TRF_TOOL_TYPES = ("nf tool", "computing tool", "sensing tool", "third-party tool")
+
+
+def capability_tool_type(cap: Capability) -> str:
+    """TRF classification is separate from the historical product categories."""
+    if cap.source == "third_party":
+        return "third-party tool"
+    if cap.category == "isac":
+        return "sensing tool"
+    if cap.category == "computing" or cap.id == "ai_inference":
+        return "computing tool"
+    # Network analytics, connectivity, positioning, data and security remain NF tools.
+    return "nf tool"
+
+
+def trf_catalog_capabilities() -> list[Capability]:
+    """Homepage/TRF offer excludes roadmap and legacy ecosystem management."""
+    return [
+        cap for cap in CAPABILITIES
+        if cap.status == "available" and cap.category != "ecosystem"
+        and cap.source == "network"
+    ]
+
 
 CAPABILITIES = [
     # ===== 通感一体 ISAC =====

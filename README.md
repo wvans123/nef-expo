@@ -14,16 +14,16 @@
 
 可见页签：**能力超市 / 订阅与鉴权 / API 直调 / MCP 接口 / 意图受理 / 自助编排 / 双向开放 · MCP**。
 
-- **能力超市**保留基础能力与三大场景套餐，首页不展示 TRF 内部目录管理。显式发布的外部工具与自助套餐展示为带图标和用途说明的“扩展能力”；未发布或取消发布的内容不展示。开通场景后留在当前页，主动点击“进入场景”才跳转。
+- **能力超市**按 TRF 四类展示已可用工具，隐藏规划中和旧生态服务；保留三大场景套餐。首页底部可同步/撤回本地能力，或切换到 TRF 目录读取展示。显式发布的外部工具与自助套餐展示为带图标和用途说明的“扩展能力”；未发布或取消发布的内容不展示。开通场景后留在当前页，主动点击“进入场景”才跳转。
 - **三个场景以 Intent 为主**：机器狗巡检、车流量检测、端网协同识别追踪。端网协同仍保留 API / Tool 参数化调用，其他基础能力保留 API / MCP 接入。
 - **自助编排**选择能力、调整步骤、检查配置冲突；可选 LLM 根据需求推荐组合，经采用和确认后保存声明式套餐，再显式发布到本地首页；套餐不发到 TRF MCP Server 接口。NEF 不因此成为自主 Agent，也不会在保存时执行步骤；网络执行与参数绑定由内部对接。
 - **双向开放**填写服务名称、描述和 URL，默认名称 `patrol-car-managementx`，URL 留空待提供。连接并发现工具后，显式点击“发布”才上首页并 POST 至 TRF；支持“取消发布”、撤回重试及未发布/发现失败记录的“删除记录”。已有记录使用“重新发现工具”，避免与首次接入混淆。无 Key 开放登记也只登记与发现，不自动发布。
-- **网络经 NEF 调用 AF**：新 TRF 契约接收六字段服务登记，其中 url 是填写的外部 MCP 地址。NEF 代理调用仍独立保留，不能将 TRF 直连与 NEF 代理混为一条调用链。内部网元以独立凭证访问，NEF 核验已发布状态、AF 账号范围、URL 允许列表和参数后转发真实 `tools/call`。取消发布立即禁止新调用；预览与调用记录接口保留供联调使用。
+- **网络经 NEF 调用 AF**：新 TRF 契约接收六个基础字段及 `isThirdParty: true`，其中 url 是填写的外部 MCP 地址。NEF 代理调用仍独立保留，不能将 TRF 直连与 NEF 代理混为一条调用链。内部网元以独立凭证访问，NEF 核验已发布状态、AF 账号范围、URL 允许列表和参数后转发真实 `tools/call`。取消发布立即禁止新调用；预览与调用记录接口保留供联调使用。
 - **第三方工具订阅**：其他账号在商城点击工具即可订阅、取消订阅，并通过“去 MCP 调用”使用。当前演示免费，PRO/MAX 不自动开通；下架暂停调用，删除清理权益。发布、订阅和网络调用授权分别管理，完整契约见 [TRF 与工具订阅参考](docs/reference/network-catalog.md#5-第三方工具的账号订阅与调用)。
 - **调用与鉴权**展示实际身份、入口权限和订阅校验回执；页面显示文字与结构化数据，媒体仅保留后端接收。场景回传仍只在具体调用页出现。
 - **真实调用**：活动页面直接发送 live 请求，移除执行方式和示例意图；Intent 可选“不指定场景”，走单独配置的通用接收地址。未配置返回待对接，不回落到模拟结果。旧后端 demo 契约仅保留兼容，HTTP 受理不等于业务完成。
 - **简化回传**：同事无需 NEF Key，向 `/api/v1/scene-feedback/{scene_id}` POST `{"final_result":"文字结果"}`，GET 同一路径即可自查。三场景通道共享，页面不登录也可读；旧带接收 Key 接口保留备用。`?ops=1` 显示“回传地址”和通知诊断，只是显示开关，不是鉴权。命令见 [curl 手册](docs/reference/manual-curl.md)。
-- **TRF 服务查询**仅在 `?ops=1` 运维视图显示，按四类 toolType 查询登记，不自动将 description 变成工具。首页仅展示已发现且显式发布的工具，并标明所属服务；现有 NF 能力与套餐仍由 NEF 管理。页面每 30 秒读取本地状态，不会自动请求 TRF。
+- **TRF 目录同步**：首页底部显式同步 23 项可用本地能力，POST 不带 isThirdParty；逐项 GET 核对后显示登记圆点，支持整体撤回。TRF 读取模式仅展示四类服务登记，不自动变成可调用工具；页面加载/定时刷新只读本地缓存。详细运维面板仍在 `?ops=1`。
 - **订阅费用与说明**：估算月费用包含等级基础价和已购场景价格，场景按购买时所选能力与折扣计价；取消后移除。PRO/MAX 可用能力可点击查看用途，完整规则见[订阅参考](docs/reference/subscription-query.md#103-nef-服务端配置)。
 - **边界**：当前目录契约是本项目的对接约定，不是 TRF 标准协议。生产网络接口仍待同事提供；本地账号、权益、登记与回传保存在内存。mTLS / OAuth、资源级策略、生产持久化未接入。
 - **本期隐藏**：对外 Skill / 场景方案、AF 智能终端不进入展示动线。对应页签隐藏，旧后端接口保留兼容但不进入本期演示。
@@ -81,7 +81,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-NefBackgroun
 | 通知范围 | `subscriptions.account_ids` / `notify_plans` | `null` 表示全部；否则填账号列表 / `scene:robot_patrol` 等完整套餐键列表 |
 | 启动清理对端套餐 | `subscriptions.reset_partner_plans_on_start` | 默认 `false`；仅在确认可删除固定测试订购者的套餐后设 `true` |
 | TRF MCP 服务发布、查询、撤回 | `registry.trf_mcp_servers_url` | 完整集合地址 `http://<TRF-IP>:<端口>/trf/api/v1/mcp-servers`；POST/GET 同址，DELETE 追加 serverName |
-| 对方访问本 NEF 的地址 | `registry.nef_base_url` | `http://<NEF电脑IP>:8069`，用于生成 MCP 代理入口 |
+| 对方访问本 NEF 的地址 | `registry.nef_base_url` | `http://<NEF电脑IP>:8069`，用于首页本地能力的单工具 MCP 入口及独立代理入口 |
 | 允许连接的外部 MCP | `registry.mcp_servers` | 按[农场联调](docs/reference/farm-integration.md#5-nef-运维配置)填精确 URL 允许列表；只登记不代表已经发布 |
 | 开放 MCP 登记归属 | `registry.open_registration_account` | 无 Key 登记的来源账号，默认 `1` |
 | 放宽 MCP 允许列表 | `registry.allow_unlisted_mcp_servers` | 默认 `false`；仅获准隔离测试网可启用，存在任意地址探测风险 |
@@ -102,7 +102,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-NefBackgroun
 | 改动 | 文件 / 位置 |
 |---|---|
 | `subscriberId`、`servicePlan`、`networkCapabilities` 等通知字段 | `subscription_notifications.py`：`_notify_plan()`、`deliver()` |
-| POST 到 TRF 的 MCP 登记正文 | `network_registry.py`：`_trf_publication()` |
+| 双向开放 POST 到 TRF 的正文（含 isThirdParty=true） | `network_registry.py`：`_trf_publication()` |
+| 首页本地能力 POST 到 TRF 的正文（省略 isThirdParty） | `trf_catalog.py`：`_payloads()`；分类在 `skills.py`：`capability_tool_type()` |
+| 首页单工具 MCP 路径和调用 | `server.py`：`capability_mcp_endpoint()` |
 | TRF GET 回包解析、DELETE 与发布状态 | `network_registry.py`：`_validate_trf_servers()`、`_delete_trf_server()`、`change_trf_server_publication()` |
 | 旧目录兼容导出正文（不用于新 TRF MCP 接口） | `catalog_publication.py` |
 | 车流量发送字段，例如 `user_request` | `config/integration.local.json` 的 `bridge.scenes.traffic_flow_detection.intent.body` |
@@ -134,7 +136,7 @@ node tests/test_purchase.cjs
 1. 顶栏注册演示账号，能力超市查看三个场景及原有基础能力卡片；点击能力仍可查看参数、价格并订阅。
 2. 填好执行地址后开通场景，进入意图受理；查看对方的真实文字结果和鉴权回执。未配置的场景只显示待对接。
 3. 自助编排中拖入或点击能力、拖拽调整顺序。交付方式、GPU 上限及目标来源收在“可选约束”中，默认不填。可选模型推荐经采用进入草稿，填写名称并确认保存；发布按钮将套餐放到本地首页，不发到 TRF MCP Server 接口，也不表示执行完成。
-4. 双向开放填写巡检小车 MCP 地址，连接并发现工具，再点击发布；首页可见后可取消发布。TRF 地址未配置时只更新本地状态并明确提示。
+4. 首页下方可“同步到 TRF”或“取消 TRF 注册”，需配置 registry.trf_mcp_servers_url 与对方可访问的 registry.nef_base_url。要只从 TRF 展示，切换“首页工具来源”为“TRF 目录”并读取；不影响本地账号订阅。双向开放填写巡检小车 MCP 地址，连接并发现工具，再点击发布；首页可见后可取消发布。TRF 地址未配置时只更新本地状态并明确提示。
 5. MCP 接口先连接 / 发现、再选工具；API 直调从已知能力开始。两者保留原版请求、参数、鉴权和响应两栏。
 6. 实际接口配置后直接调用；场景数据源用无 Key POST/GET 回传地址。机器狗配置结果地址后，发送 Intent 自动拉取并每 3 秒检查最新结果。
 
@@ -155,7 +157,7 @@ node tests/test_purchase.cjs
 
 当前联调的外发 `subscriberId` 固定为 `subscriber-001`，定义在 `subscription_notifications.py` 的 `SUBSCRIBER_ID`，无需新增配置。跳转和查询仍使用本地账号 `1/2/3`；对方会将这些账号的通知都归入同一个测试订购者。
 
-TRF 当前登记 MCP Server，服务描述不等于可调用 tool，NF 也不必是 MCP Server。首页旧能力与套餐不自动同步至该接口；新六字段 POST、GET、DELETE 及能力映射决策见 [TRF 契约](docs/reference/network-catalog.md)。旧目录导出仅保留兼容，与农场订购通知分开。
+TRF 当前登记 MCP Server，NF 无需自行实现 MCP：首页本地能力通过 NEF `/mcp/capabilities/{id}` 单工具入口包装后显式注册。首页发布省略 isThirdParty，双向开放发布附 true；四类映射、批量处理、撤回与只读目录契约见 [TRF 参考](docs/reference/network-catalog.md#8-首页本地能力同步与-trf-读取模式)。场景/自助套餐不属于服务登记，旧目录导出和农场订购通知独立保留。
 
 对接同事仅需 [场景接口对接说明](docs/reference/integration.md)；运维与网络目录边界见 [展示设计](docs/superpowers/specs/2026-06-11-frontend-demo-redesign-design.md)。
 
@@ -170,6 +172,7 @@ composition.py        配置冲突检查、限定目录的 LLM 推荐（不执�
 subscription_query.py  对外订阅查询响应模型（不含凭据）
 subscription_notifications.py  订购通知、可选能力范围与手动重试
 catalog_publication.py  旧目录兼容导出，不发到 TRF MCP 集合
+trf_catalog.py          首页本地能力批量登记、撤回与 TRF 读取缓存
 registry.py           旧第三方注册与调用台账（兼容）
 intent.py / stubs.py   旧意图与参考执行（不作为当前真实结果）
 scene_services.py     三场景契约与明确标注的演示文字

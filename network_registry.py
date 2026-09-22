@@ -62,6 +62,8 @@ _TRF_FIELDS = (
     "url",
     "serverStatus",
 )
+_TRF_OPTIONAL_FIELDS = ("isThirdParty",)
+_TRF_RESERVED_SERVER_PREFIX = "nef-cap-"
 
 
 class _ConfigError(Exception):
@@ -749,6 +751,7 @@ def _trf_publication(server: dict[str, Any]) -> dict[str, Any]:
         "description": server.get("description", ""),
         "url": server["url"],
         "serverStatus": "active",
+        "isThirdParty": True,
     }
 
 
@@ -778,7 +781,11 @@ def _validate_trf_servers(value: Any) -> list[dict[str, Any]]:
         raise _RemoteSchemaFailure("trf_too_many_servers")
     result: list[dict[str, Any]] = []
     for item in items:
-        if not isinstance(item, dict) or any(field not in item for field in _TRF_FIELDS):
+        if (
+            not isinstance(item, dict)
+            or any(field not in item for field in _TRF_FIELDS)
+            or any(field not in (*_TRF_FIELDS, *_TRF_OPTIONAL_FIELDS) for field in item)
+        ):
             raise _RemoteSchemaFailure("trf_schema_invalid")
         try:
             server_name = item["serverName"]
@@ -791,18 +798,24 @@ def _validate_trf_servers(value: Any) -> list[dict[str, Any]]:
             server_status = _checked_catalog_text(item["serverStatus"], MAX_NAME_LENGTH)
             if not server_type or not tool_type or not server_status:
                 raise ValueError("empty")
+            is_third_party = item.get("isThirdParty")
+            if "isThirdParty" in item and type(is_third_party) is not bool:
+                raise ValueError("isThirdParty")
         except (KeyError, TypeError, ValueError) as exc:
             raise _RemoteSchemaFailure("trf_schema_invalid") from exc
         # The known categories are nf/computing/sensing/third-party tool.
         # Bounded unknown values are preserved rather than misclassified.
-        result.append({
+        parsed = {
             "serverName": server_name,
             "serverType": server_type,
             "toolType": tool_type,
             "description": description,
             "url": url,
             "serverStatus": server_status,
-        })
+        }
+        if "isThirdParty" in item:
+            parsed["isThirdParty"] = is_third_party
+        result.append(parsed)
     return result
 
 
@@ -816,7 +829,11 @@ async def _read_trf_servers(
 
 
 def _same_trf_server(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    return all(left.get(field) == right.get(field) for field in _TRF_FIELDS)
+    if not all(left.get(field) == right.get(field) for field in _TRF_FIELDS):
+        return False
+    if "isThirdParty" in left:
+        return left["isThirdParty"] == right.get("isThirdParty", False)
+    return True
 
 
 def _trf_delete_url(collection_url: str, server_name: str) -> str:
@@ -1128,6 +1145,26 @@ def _market_tool_snapshot(
         "billing": "demo_free",
         "available": bool(available),
     }
+
+
+def _market_trf_registration_status(server: dict[str, Any]) -> str:
+    """Project only the new TRF collection state; legacy publishing stays unknown."""
+    if not server.get("_trf_target_url"):
+        return (
+            "unregistered"
+            if server.get("publication_status") != "published"
+            else "unknown"
+        )
+    if not server.get("trf_may_exist"):
+        return "unregistered"
+    sync_status = server.get("sync_status")
+    if sync_status == "synced":
+        return "registered"
+    if sync_status in {"syncing", "submitted"}:
+        return "submitted"
+    if sync_status == "failed":
+        return "failed"
+    return "unknown"
 
 
 def _all_market_tools_locked(*, published_only: bool) -> list[dict[str, Any]]:
@@ -1489,6 +1526,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                             "server_id": server["id"], "inputSchema": copy.deepcopy(tool["inputSchema"]),
                             "serverName": server.get("serverName", server["name"]),
                             "toolType": "third-party tool",
+                            "registration_status": _market_trf_registration_status(server),
                             "mcp_name": market["mcp_name"],
                             "price": 0,
                             "billing": "demo_free",
@@ -1555,6 +1593,12 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                     _http_error(422, "invalid_request", "name 与 serverName 必须一致")
         else:
             server_name = _require_text(payload.get("name"), "name", MAX_NAME_LENGTH)
+        if server_name.startswith(_TRF_RESERVED_SERVER_PREFIX):
+            _http_error(
+                422,
+                "reserved_server_name",
+                "serverName 的 nef-cap- 前缀保留给 NEF 内置能力",
+            )
         name = server_name
         url = _require_url(payload.get("url"))
         description = _require_text(
@@ -1888,7 +1932,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
                     record.update(
                         sync_status="submitted",
                         sync_error="trf_confirmation_unknown",
-                        sync_note="TRF POST 已提交，但集合 GET 未读回匹配的六字段记录",
+                        sync_note="TRF POST 已提交，但集合 GET 未读回匹配的契约记录",
                     )
                 return _public_record(record)
 

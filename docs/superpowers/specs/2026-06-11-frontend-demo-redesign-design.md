@@ -1,6 +1,6 @@
 # NEF 展示体验与网络目录对接设计
 
-分类：架构 / 设计决策。更新：2026-09-21。当前范围以本文为准，旧实施计划仅作历史记录。
+分类：架构 / 设计决策。更新：2026-09-22。当前范围以本文为准，旧实施计划仅作历史记录。
 
 ## 1. 展示范围
 
@@ -61,11 +61,11 @@ NEF 承担目录汇聚、接入授权、能力和场景开放、套餐定义与�
 `network_registry.py` 按 2026-09-21 的 TRF MCP 集合约定实现。唯一接口参考见 [TRF 契约与能力映射](../../reference/network-catalog.md)，不在设计文档复制完整字段与错误表。
 
 - TRF 登记 MCP 服务，NEF 管对外能力与套餐；NF 不必是 MCP Server。server description 不能冒充可调用工具，实际工具来自 tools/list。
-- 首页现有 NF 能力模型保持；外部工具需发现并显式发布，按 toolType 分类并标明 serverName。TRF 查询只在 `?ops=1` 运维视图显示，不自动导入工具或套餐。
-- 新配置 `registry.trf_mcp_servers_url` 统一 GET、POST、DELETE；发布六字段并 GET 匹配，撤回 DELETE 后 GET 确认缺席。本地发布状态与远端同步状态分别记录。
+- 首页现有 NF 能力模型保持；外部工具需发现并显式发布，按 toolType 分类并标明 serverName。首页下方新增显式 TRF 同步/撤回与只读展示来源切换；详细运维仍在 `?ops=1`，读取服务不会自动导入可执行工具或套餐。
+- 新配置 `registry.trf_mcp_servers_url` 统一 GET、POST、DELETE；外部发布六字段加 isThirdParty=true 并 GET 匹配，撤回 DELETE 后 GET 确认缺席。本地发布状态与远端同步状态分别记录。
 - 发布只增加可见性；消费者按账号显式订阅单个工具后，北向 MCP 才可调用。当前为演示免费，不产生农场通知或 TRF 重复发布。提供方下架暂停调用，删除登记清理订阅。完整接口见 TRF 契约第 5 节。
 - 失败/草稿记录可删除；已发布或远端撤回未确认时须先撤回，不能丢失记录。注册状态仍是内存态，重启清空。
-- 自助套餐只本地发布，旧能力/场景不推送到 MCP Server 集合。若未来开放 NEF 自身为一个网络可发现 MCP 服务，需另行明确身份、分类、认证及公开范围。
+- 自助套餐只本地发布，场景套餐不推送到 MCP Server 集合。首页可用基础能力通过 NEF 单工具 MCP 适配端点显式同步，分类、认证与登记边界见本文末尾及 TRF 契约第 8 节。
 - 旧 catalog_url/publish_url/withdraw_url 与本地元数据导出保留后端兼容，活动页不再加载 catalog-ui.js，不将旧报文混入新 TRF 接口。
 
 ## 4. MCP Server JSON 注册与工具发现
@@ -86,7 +86,7 @@ NEF 承担目录汇聚、接入授权、能力和场景开放、套餐定义与�
 
 ### 4.1 网络目录登记什么
 
-`GET /api/v1/network/servers/{id}/publication` 预览六字段服务登记；发布才发送 POST。name、description、url 来自表单，其余值由后端预制；url 按约定为原始外部 MCP 地址。TRF 消费者直接访问该地址时，不经过 NEF 的代理权限核验。
+`GET /api/v1/network/servers/{id}/publication` 预览六字段及 isThirdParty=true 的服务登记；发布才发送 POST。name、description、url 来自表单，其余值由后端预制；url 按约定为原始外部 MCP 地址。TRF 消费者直接访问该地址时，不经过 NEF 的代理权限核验。
 
 服务描述、TRF 四类 toolType 与 NEF 能力/套餐的映射边界见唯一 [TRF 契约](../../reference/network-catalog.md)。不要将 NF 描述或套餐虚构成服务器。旧 NEF 代理地址 + 工具数组格式仅为 legacy publish_url 部署保留。
 
@@ -118,7 +118,7 @@ NEF 承担目录汇聚、接入授权、能力和场景开放、套餐定义与�
 }
 ```
 
-`nef_base_url` 用于独立 NEF 代理入口，必须由运维配置，不从入站 Host 猜测；新六字段 TRF 发布不依赖此字段。`NEF_DIRECTORY_TOKEN` 用于 NEF 向内部目录发布 / 拉取；`NEF_AF_TOKEN` 用于 NEF 访问 AF；`NEF_NW_AGENT_TOKEN` 用于内部网元访问 NEF。配置了凭证变量但未设置实际值时不得降级为匿名上游请求。所有地址由运维指定；不设置真实接口时不伪造联调成功。演示账户可自助注册，因此本原型仅用于获准测试网络；这些控制不等于生产级 mTLS / OAuth 与租户管理。
+`nef_base_url` 用于独立 NEF 代理入口，必须由运维配置，不从入站 Host 猜测；外部 AF 发布不依赖此字段，首页本地单工具 MCP 入口发布需要它。`NEF_DIRECTORY_TOKEN` 用于 NEF 向内部目录发布 / 拉取；`NEF_AF_TOKEN` 用于 NEF 访问 AF；`NEF_NW_AGENT_TOKEN` 用于内部网元访问 NEF。配置了凭证变量但未设置实际值时不得降级为匿名上游请求。所有地址由运维指定；不设置真实接口时不伪造联调成功。演示账户可自助注册，因此本原型仅用于获准测试网络；这些控制不等于生产级 mTLS / OAuth 与租户管理。
 
 ## 5. 套餐构建接口
 
@@ -155,3 +155,7 @@ Python 覆盖场景订阅、三场景 Intent、API / MCP、真实 HTTP 转发、
 本地受控服务验证可以证明序列化与网络请求链路，不能替代真实 TRF、场景服务和网络侧执行环境联调。
 
 2026-09-10 旧代理发布兼容链路验收（不是当前六字段 TRF 协议）：`tests/test_network_gateway.py` 在真实本地 TCP 链路上验证目录发布 → 从发布 endpoint 连接 NEF → tools/list → tools/call → AF 结果返回，并覆盖 AF / 网络凭证分离、授权撤销、schema 拒绝、isError 保留、发布内容无 AF 原始 URL。它不替代伙伴真实网络联调。
+
+### 2026-09-22 首页目录同步
+
+首页用与 TRF 相同的四类 toolType，隐藏规划中与 ecosystem。可用本地能力由 NEF 单工具 `/mcp/capabilities/{id}` 适配端点包装，保留真实调用的账号权限与订阅校验；显式批量同步逐条 POST 六字段且不带 isThirdParty，不包装套餐。同步状态从 TRF 读回核对，部分失败独立显示；撤回只针对本平台确认或记录过的登记。TRF 来源模式只展示服务信息，不把未知 schema 的服务当成可调用工具。唯一接口参考见 [TRF 契约](../../reference/network-catalog.md#8-首页本地能力同步与-trf-读取模式)。

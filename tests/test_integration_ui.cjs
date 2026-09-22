@@ -18,7 +18,7 @@ fs.mkdirSync(output,{recursive:true});
       await page.waitForFunction(()=>wb.scenes.length===3&&CAPS.length>0);
       assert.deepEqual(await page.evaluate(()=>wb.scenes.map(s=>s.price)),[115.68,119.76,119.6]);
       assert.equal(await page.locator('.wb-trf-management').isVisible(),false);
-      assert.doesNotMatch(await page.locator('#pane-market').innerText(),/ARF|TRF|网络与自建目录/);
+      assert.doesNotMatch(await page.locator('#pane-market').innerText(),/ARF|网络与自建目录/);
       const peer=(await (await context.request.get(origin+'/__fixture__/peer')).json()).url;
       assert.equal(new URL(peer).hostname,'127.0.0.1');
       const probe=async()=> (await (await context.request.get(peer+'/probe')).json()).requests;
@@ -201,7 +201,7 @@ fs.mkdirSync(output,{recursive:true});
       assert.equal((await publishedTool()).name,'inspect_frame');
       const publication=JSON.parse((await probe()).findLast(r=>r.path===trfPath&&r.method==='POST').body);
       assert.deepEqual(publication,{serverName,serverType:'Streamable HTTP',toolType:'third-party tool',
-        description:await page.locator('#wb-server-description').inputValue(),url:peer+'/mcp',serverStatus:'active'});
+        description:await page.locator('#wb-server-description').inputValue(),url:peer+'/mcp',serverStatus:'active',isThirdParty:true});
       assert.equal((await publishedTool()).serverName,serverName);
       assert.equal((await publishedTool()).toolType,'third-party tool');
       assert.equal(await page.locator('[data-delete-server="'+serverId+'"]').count(),0);

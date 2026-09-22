@@ -25,8 +25,9 @@ def trf_server(
     *,
     tool_type: str = "third-party tool",
     description: str = "patrol server",
+    is_third_party: bool | None = True,
 ) -> dict:
-    return {
+    result = {
         "serverName": name,
         "serverType": "Streamable HTTP",
         "toolType": tool_type,
@@ -34,6 +35,9 @@ def trf_server(
         "url": url,
         "serverStatus": "active",
     }
+    if is_third_party is not None:
+        result["isThirdParty"] = is_third_party
+    return result
 
 
 def register_and_discover(
@@ -109,7 +113,9 @@ def test_exact_post_raw_url_preview_and_market_projection(
         "description",
         "url",
         "serverStatus",
+        "isThirdParty",
     }
+    assert json.loads(post["body"])["isThirdParty"] is True
     assert json.loads(post["body"])["url"] == raw_url
     assert "tools" not in json.loads(post["body"])
     assert "account" not in json.loads(post["body"])
@@ -117,6 +123,7 @@ def test_exact_post_raw_url_preview_and_market_projection(
     item = client.get("/api/v1/network/market").json()["items"][0]
     assert item["serverName"] == record["serverName"]
     assert item["toolType"] == "third-party tool"
+    assert item["registration_status"] == "registered"
 
 
 @pytest.mark.parametrize("envelope", ["array", "items", "data"])
@@ -131,7 +138,12 @@ def test_trf_get_supports_envelopes_and_four_categories_without_tool_discovery(
         "third-party tool",
     ]
     values = [
-        trf_server(f"server-{index}", f"http://example.invalid/{index}", tool_type=kind)
+        trf_server(
+            f"server-{index}",
+            f"http://example.invalid/{index}",
+            tool_type=kind,
+            is_third_party=None,
+        )
         for index, kind in enumerate(categories)
     ]
     body = values if envelope == "array" else {envelope: values}
@@ -144,6 +156,39 @@ def test_trf_get_supports_envelopes_and_four_categories_without_tool_discovery(
     assert all(set(item) == set(network_registry._TRF_FIELDS) for item in response.json()["servers"])
     assert all("tools" not in item for item in response.json()["servers"])
     assert [request["method"] for request in http_fixture.requests] == ["GET"]
+
+
+def test_optional_third_party_marker_schema_and_matching():
+    base = trf_server(
+        "nef-cap-12345678-demo",
+        "http://nef.invalid/mcp/capabilities/demo",
+        tool_type="nf tool",
+        description="[Demo] capability",
+        is_third_party=None,
+    )
+    parsed = network_registry._validate_trf_servers([
+        {**base, "isThirdParty": False},
+    ])
+    assert parsed[0]["isThirdParty"] is False
+    assert network_registry._same_trf_server(parsed[0], base) is True
+    assert network_registry._same_trf_server(
+        {**base, "isThirdParty": True},
+        base,
+    ) is False
+
+    af = trf_server("af-server", "http://af.invalid/mcp")
+    assert network_registry._same_trf_server(
+        {key: value for key, value in af.items() if key != "isThirdParty"},
+        af,
+    ) is True
+    assert network_registry._same_trf_server(
+        {**af, "isThirdParty": False},
+        af,
+    ) is False
+    with pytest.raises(network_registry._RemoteSchemaFailure):
+        network_registry._validate_trf_servers([
+            {**base, "isThirdParty": "false"},
+        ])
 
 
 def test_trf_get_not_configured_and_schema_failure(client, http_fixture, monkeypatch):
@@ -264,6 +309,9 @@ def test_explicit_server_name_without_any_publish_url_uses_trf_preview_and_retri
     assert pending.json()["sync_status"] == "pending"
     assert pending.json()["trf_may_exist"] is False
     assert len(http_fixture.requests) == initial_request_count
+    assert client.get(
+        "/api/v1/network/market"
+    ).json()["items"][0]["registration_status"] == "unknown"
 
     collection_url = http_fixture.url("/trf/api/v1/mcp-servers")
     configure(
@@ -313,6 +361,23 @@ def test_explicit_server_name_keeps_legacy_publish_when_publish_url_is_configure
     assert published.status_code == 200
     assert published.json()["sync_status"] == "synced"
     assert sent == [preview.json()]
+    assert client.get(
+        "/api/v1/network/market"
+    ).json()["items"][0]["registration_status"] == "unknown"
+
+
+def test_reserved_builtin_catalog_prefix_cannot_be_registered(client, monkeypatch):
+    configure(monkeypatch)
+    denied = client.post(
+        "/api/v1/network/servers",
+        headers=headers(),
+        json={
+            "serverName": "nef-cap-12345678-target_detection",
+            "url": "http://example.invalid/mcp",
+        },
+    )
+    assert denied.status_code == 422
+    assert denied.json()["detail"]["code"] == "reserved_server_name"
 
 
 def test_config_change_withdraws_first_target_not_new_collection(

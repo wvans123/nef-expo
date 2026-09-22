@@ -95,7 +95,7 @@ def test_compact_scenes_manual_trf_management_and_published_market():
     assert 'Intent 驱动 · 按场景开通' not in html and '>INTENT</span>' not in js
     assert '基础能力组合' in js and 'data-scene-cap' in js
     assert "'/api/v1/network/trf/servers'" in js and '30000' in js
-    assert '自助编排套餐' in js and 'const items=wb.market' in js
+    assert '自助编排套餐' in client.get('/static/trf-catalog.js').text and 'wbRenderHomeCatalog()' in js
     assert 'wbToolIcon' in js
     scenes=client.get('/api/v1/services').json()['services']
     assert all(s['provenance']['source']=='preset' and s['provenance']['components'] for s in scenes)
@@ -104,7 +104,7 @@ def test_compact_scenes_manual_trf_management_and_published_market():
 def test_network_gateway_story_and_publication_are_visible():
     html=client.get('/').text;js=client.get('/static/workbench.js').text
     market=html.split('id="pane-market"')[1].split('<!-- Tab 2')[0]
-    assert 'TRF' not in market and 'registry-strip' not in market
+    assert 'id="wb-home-trf"' in market and 'registry-strip' not in market
     assert 'ARF' not in html and 'ARF' not in js
     assert '<div class="ops-only"><details class="wb-trf-management">' in html
     assert 'value="patrol-car-managementx"' in html
