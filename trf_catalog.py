@@ -92,6 +92,7 @@ def _payloads(base: str | None) -> dict[str, dict[str, Any]]:
                 else ""
             ),
             "serverStatus": "active",
+            "isThirdParty": False,
         }
     return values
 

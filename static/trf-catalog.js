@@ -1,6 +1,6 @@
 /* Homepage taxonomy and explicit TRF synchronization. Reading the page never polls TRF. */
 const wbTrf={
-  source:localStorage.getItem('nef_market_source')==='trf'?'trf':'local',
+  source:document.body.classList.contains('ops')&&localStorage.getItem('nef_market_source')==='trf'?'trf':'local',
   snapshot:null,busy:false,message:'',revision:0,
 };
 const wbToolTypes=[
@@ -60,14 +60,15 @@ function wbRenderTrfControls(){
   $('#wb-trf-publish').disabled=!!busy||!snap?.configured||!snap?.base_configured;
   $('#wb-trf-withdraw').disabled=!!busy||!snap?.can_withdraw;
   $('#wb-trf-read').disabled=!!busy||!snap?.configured;
+  $('#wb-trf-read').textContent=remote?'刷新目录':'核对状态';
   const counts=snap?.summary;
-  const summary=counts?`本地能力 ${counts.total} 项 · 已注册 ${counts.registered} 项`:'尚未核对';
+  const summary=counts?`可用能力 ${counts.total} 项 · 已注册 ${counts.registered} 项`:'尚未核对';
   $('#wb-home-trf-summary').textContent=remote?`TRF 目录 ${snap?.remote_items?.length||0} 项${snap?.ignored_count?' · 未识别类型 '+snap.ignored_count+' 项未展示':''}`:summary;
-  let note=remote?'仅展示四类服务登记；读取不会注册、订阅或自动连接服务。':'同步所有已开放的本地能力；场景套餐和第三方发布由各自入口管理。';
+  let note=remote?'仅展示服务登记，不自动开通调用权限。':'同步当前可用能力。';
   if(!snap?.configured)note+=' TRF 地址待配置。';
   else if(!remote&&!snap.base_configured)note+=' NEF 对外访问地址待配置。';
   if(snap?.last_checked)note+=' 上次核对：'+new Date(typeof snap.last_checked==='number'?snap.last_checked*1000:snap.last_checked).toLocaleString();
-  if(snap?.status==='failed'||snap?.status==='stale')note+=' 读取失败，当前显示上次记录。';
+  if(snap?.status==='failed'||snap?.status==='stale')note+=' 状态核对失败，显示上次结果。';
   $('#wb-home-trf-note').textContent=note;
   $('#wb-home-trf-message').textContent=wbTrf.message;
 }
@@ -81,15 +82,15 @@ async function wbLoadTrfCatalog(){
 async function wbTrfAction(action){
   if(!apiKey())return toast('请先注册或选择账号',false);
   if(wbTrf.busy)return;
-  const epoch=wb.epoch;wbTrf.revision++;wbTrf.busy=true;wbTrf.message=action==='refresh'?'正在读取 TRF…':'正在逐项处理，请稍候…';wbRenderTrfControls();
+  const epoch=wb.epoch;wbTrf.revision++;wbTrf.busy=true;wbTrf.message=action==='refresh'?'正在核对注册状态…':'正在逐项处理，请稍候…';wbRenderTrfControls();
   try{
     wbTrf.snapshot=await api('/api/v1/network/trf/catalog/'+action,{method:'POST'});
     if(epoch!==wb.epoch){wbTrf.message='';return;}
     const s=wbTrf.snapshot,failed=(s.items||[]).filter(i=>['failed','conflict','submitted'].includes(i.registration_status));
     wbTrf.message=action==='unpublish'&&s.can_withdraw?'仍有登记未能确认撤回（可能在之前的 TRF 地址），请重试或核对对端记录。':
       failed.length?`${failed.length} 项失败或尚待确认，请查看卡片状态后重试。`:
-      s.status==='failed'||s.status==='stale'?'TRF 读取未完成，保留上次记录。':
-      action==='refresh'?'已读取 TRF 目录与登记状态。':action==='publish'?'同步处理完成，状态以 TRF 读回为准。':'已处理撤回，状态以 TRF 读回为准。';
+      s.status==='failed'||s.status==='stale'?'状态核对未完成，保留上次记录。':
+      action==='refresh'?'注册状态已更新。':action==='publish'?'同步处理完成，请查看登记状态。':'撤回处理完成，请查看登记状态。';
     wbRenderHomeCatalog();
   }catch(e){if(epoch===wb.epoch)wbTrf.message=wbMessage(e);}
   finally{wbTrf.busy=false;wbRenderTrfControls();}

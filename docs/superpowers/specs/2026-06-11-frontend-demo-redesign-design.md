@@ -61,7 +61,7 @@ NEF 承担目录汇聚、接入授权、能力和场景开放、套餐定义与�
 `network_registry.py` 按 2026-09-21 的 TRF MCP 集合约定实现。唯一接口参考见 [TRF 契约与能力映射](../../reference/network-catalog.md)，不在设计文档复制完整字段与错误表。
 
 - TRF 登记 MCP 服务，NEF 管对外能力与套餐；NF 不必是 MCP Server。server description 不能冒充可调用工具，实际工具来自 tools/list。
-- 首页现有 NF 能力模型保持；外部工具需发现并显式发布，按 toolType 分类并标明 serverName。首页下方新增显式 TRF 同步/撤回与只读展示来源切换；详细运维仍在 `?ops=1`，读取服务不会自动导入可执行工具或套餐。
+- 首页现有 NF 能力模型保持；外部工具需发现并显式发布，按 toolType 分类并标明 serverName。首页下方提供 TRF 同步/撤回与状态核对；只读目录来源切换收在 `?ops=1` 的折叠设置中，普通页保持本地能力展示，读取服务不会自动导入可执行工具或套餐。
 - 新配置 `registry.trf_mcp_servers_url` 统一 GET、POST、DELETE；外部发布六字段加 isThirdParty=true 并 GET 匹配，撤回 DELETE 后 GET 确认缺席。本地发布状态与远端同步状态分别记录。
 - 发布只增加可见性；消费者按账号显式订阅单个工具后，北向 MCP 才可调用。当前为演示免费，不产生农场通知或 TRF 重复发布。提供方下架暂停调用，删除登记清理订阅。完整接口见 TRF 契约第 5 节。
 - 失败/草稿记录可删除；已发布或远端撤回未确认时须先撤回，不能丢失记录。注册状态仍是内存态，重启清空。
@@ -158,4 +158,4 @@ Python 覆盖场景订阅、三场景 Intent、API / MCP、真实 HTTP 转发、
 
 ### 2026-09-22 首页目录同步
 
-首页用与 TRF 相同的四类 toolType，隐藏规划中与 ecosystem。可用本地能力由 NEF 单工具 `/mcp/capabilities/{id}` 适配端点包装，保留真实调用的账号权限与订阅校验；显式批量同步逐条 POST 六字段且不带 isThirdParty，不包装套餐。同步状态从 TRF 读回核对，部分失败独立显示；撤回只针对本平台确认或记录过的登记。TRF 来源模式只展示服务信息，不把未知 schema 的服务当成可调用工具。唯一接口参考见 [TRF 契约](../../reference/network-catalog.md#8-首页本地能力同步与-trf-读取模式)。
+首页用与 TRF 相同的四类 toolType，隐藏规划中与 ecosystem。可用本地能力由 NEF 单工具 `/mcp/capabilities/{id}` 适配端点包装，保留真实调用的账号权限与订阅校验；显式批量同步逐条 POST 六个基础字段及 isThirdParty=false，与外部 true 的注册结构一致，不包装套餐。同步状态从 TRF 读回核对，部分失败独立显示；撤回只针对本平台确认或记录过的登记。TRF 来源预览收进运维折叠设置，只展示服务信息，不把未知 schema 的服务当成可调用工具。唯一接口参考见 [TRF 契约](../../reference/network-catalog.md#8-首页本地能力同步与-trf-读取模式)。

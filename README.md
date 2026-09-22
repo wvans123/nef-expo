@@ -14,7 +14,7 @@
 
 可见页签：**能力超市 / 订阅与鉴权 / API 直调 / MCP 接口 / 意图受理 / 自助编排 / 双向开放 · MCP**。
 
-- **能力超市**按 TRF 四类展示已可用工具，隐藏规划中和旧生态服务；保留三大场景套餐。首页底部可同步/撤回本地能力，或切换到 TRF 目录读取展示。显式发布的外部工具与自助套餐展示为带图标和用途说明的“扩展能力”；未发布或取消发布的内容不展示。开通场景后留在当前页，主动点击“进入场景”才跳转。
+- **能力超市**按 TRF 四类展示已可用工具，隐藏规划中和旧生态服务；保留三大场景套餐。首页底部可同步/撤回本地能力、核对状态；TRF 目录来源切换收在运维视图的折叠设置中。显式发布的外部工具与自助套餐展示为带图标和用途说明的“扩展能力”；未发布或取消发布的内容不展示。开通场景后留在当前页，主动点击“进入场景”才跳转。
 - **三个场景以 Intent 为主**：机器狗巡检、车流量检测、端网协同识别追踪。端网协同仍保留 API / Tool 参数化调用，其他基础能力保留 API / MCP 接入。
 - **自助编排**选择能力、调整步骤、检查配置冲突；可选 LLM 根据需求推荐组合，经采用和确认后保存声明式套餐，再显式发布到本地首页；套餐不发到 TRF MCP Server 接口。NEF 不因此成为自主 Agent，也不会在保存时执行步骤；网络执行与参数绑定由内部对接。
 - **双向开放**填写服务名称、描述和 URL，默认名称 `patrol-car-managementx`，URL 留空待提供。连接并发现工具后，显式点击“发布”才上首页并 POST 至 TRF；支持“取消发布”、撤回重试及未发布/发现失败记录的“删除记录”。已有记录使用“重新发现工具”，避免与首次接入混淆。无 Key 开放登记也只登记与发现，不自动发布。
@@ -23,7 +23,7 @@
 - **调用与鉴权**展示实际身份、入口权限和订阅校验回执；页面显示文字与结构化数据，媒体仅保留后端接收。场景回传仍只在具体调用页出现。
 - **真实调用**：活动页面直接发送 live 请求，移除执行方式和示例意图；Intent 可选“不指定场景”，走单独配置的通用接收地址。未配置返回待对接，不回落到模拟结果。旧后端 demo 契约仅保留兼容，HTTP 受理不等于业务完成。
 - **简化回传**：同事无需 NEF Key，向 `/api/v1/scene-feedback/{scene_id}` POST `{"final_result":"文字结果"}`，GET 同一路径即可自查。三场景通道共享，页面不登录也可读；旧带接收 Key 接口保留备用。`?ops=1` 显示“回传地址”和通知诊断，只是显示开关，不是鉴权。命令见 [curl 手册](docs/reference/manual-curl.md)。
-- **TRF 目录同步**：首页底部显式同步 23 项可用本地能力，POST 不带 isThirdParty；逐项 GET 核对后显示登记圆点，支持整体撤回。TRF 读取模式仅展示四类服务登记，不自动变成可调用工具；页面加载/定时刷新只读本地缓存。详细运维面板仍在 `?ops=1`。
+- **TRF 目录同步**：首页底部显式同步 23 项可用本地能力，POST 带 `isThirdParty: false`；逐项 GET 核对后显示登记圆点，支持整体撤回。普通首页只展示同步操作和状态；`?ops=1` 中的“目录来源设置”可预览 TRF 四类服务登记，不自动变成可调用工具，也不影响普通商城来源。页面加载/定时刷新只读本地缓存。
 - **订阅费用与说明**：估算月费用包含等级基础价和已购场景价格，场景按购买时所选能力与折扣计价；取消后移除。PRO/MAX 可用能力可点击查看用途，完整规则见[订阅参考](docs/reference/subscription-query.md#103-nef-服务端配置)。
 - **边界**：当前目录契约是本项目的对接约定，不是 TRF 标准协议。生产网络接口仍待同事提供；本地账号、权益、登记与回传保存在内存。mTLS / OAuth、资源级策略、生产持久化未接入。
 - **本期隐藏**：对外 Skill / 场景方案、AF 智能终端不进入展示动线。对应页签隐藏，旧后端接口保留兼容但不进入本期演示。
@@ -103,7 +103,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-NefBackgroun
 |---|---|
 | `subscriberId`、`servicePlan`、`networkCapabilities` 等通知字段 | `subscription_notifications.py`：`_notify_plan()`、`deliver()` |
 | 双向开放 POST 到 TRF 的正文（含 isThirdParty=true） | `network_registry.py`：`_trf_publication()` |
-| 首页本地能力 POST 到 TRF 的正文（省略 isThirdParty） | `trf_catalog.py`：`_payloads()`；分类在 `skills.py`：`capability_tool_type()` |
+| 首页本地能力 POST 到 TRF 的正文（isThirdParty=false） | `trf_catalog.py`：`_payloads()`；分类在 `skills.py`：`capability_tool_type()` |
 | 首页单工具 MCP 路径和调用 | `server.py`：`capability_mcp_endpoint()` |
 | TRF GET 回包解析、DELETE 与发布状态 | `network_registry.py`：`_validate_trf_servers()`、`_delete_trf_server()`、`change_trf_server_publication()` |
 | 旧目录兼容导出正文（不用于新 TRF MCP 接口） | `catalog_publication.py` |
@@ -136,7 +136,7 @@ node tests/test_purchase.cjs
 1. 顶栏注册演示账号，能力超市查看三个场景及原有基础能力卡片；点击能力仍可查看参数、价格并订阅。
 2. 填好执行地址后开通场景，进入意图受理；查看对方的真实文字结果和鉴权回执。未配置的场景只显示待对接。
 3. 自助编排中拖入或点击能力、拖拽调整顺序。交付方式、GPU 上限及目标来源收在“可选约束”中，默认不填。可选模型推荐经采用进入草稿，填写名称并确认保存；发布按钮将套餐放到本地首页，不发到 TRF MCP Server 接口，也不表示执行完成。
-4. 首页下方可“同步到 TRF”或“取消 TRF 注册”，需配置 registry.trf_mcp_servers_url 与对方可访问的 registry.nef_base_url。要只从 TRF 展示，切换“首页工具来源”为“TRF 目录”并读取；不影响本地账号订阅。双向开放填写巡检小车 MCP 地址，连接并发现工具，再点击发布；首页可见后可取消发布。TRF 地址未配置时只更新本地状态并明确提示。
+4. 首页下方可“同步到 TRF”“取消 TRF 注册”或“核对状态”，需配置 registry.trf_mcp_servers_url 与对方可访问的 registry.nef_base_url。TRF 目录预览在 `/?ops=1#market` 的“目录来源设置”中，将展示来源切为“TRF 目录”后点“刷新目录”；普通首页仍展示本地能力，不影响账号订阅。双向开放填写巡检小车 MCP 地址，连接并发现工具，再点击发布；首页可见后可取消发布。TRF 地址未配置时只更新本地状态并明确提示。
 5. MCP 接口先连接 / 发现、再选工具；API 直调从已知能力开始。两者保留原版请求、参数、鉴权和响应两栏。
 6. 实际接口配置后直接调用；场景数据源用无 Key POST/GET 回传地址。机器狗配置结果地址后，发送 Intent 自动拉取并每 3 秒检查最新结果。
 
@@ -157,7 +157,7 @@ node tests/test_purchase.cjs
 
 当前联调的外发 `subscriberId` 固定为 `subscriber-001`，定义在 `subscription_notifications.py` 的 `SUBSCRIBER_ID`，无需新增配置。跳转和查询仍使用本地账号 `1/2/3`；对方会将这些账号的通知都归入同一个测试订购者。
 
-TRF 当前登记 MCP Server，NF 无需自行实现 MCP：首页本地能力通过 NEF `/mcp/capabilities/{id}` 单工具入口包装后显式注册。首页发布省略 isThirdParty，双向开放发布附 true；四类映射、批量处理、撤回与只读目录契约见 [TRF 参考](docs/reference/network-catalog.md#8-首页本地能力同步与-trf-读取模式)。场景/自助套餐不属于服务登记，旧目录导出和农场订购通知独立保留。
+TRF 当前登记 MCP Server，NF 无需自行实现 MCP：首页本地能力通过 NEF `/mcp/capabilities/{id}` 单工具入口包装后显式注册。首页发布带 `isThirdParty: false`，双向开放发布带 `true`，使用同一注册结构；四类映射、批量处理、撤回与只读目录契约见 [TRF 参考](docs/reference/network-catalog.md#8-首页本地能力同步与-trf-读取模式)。场景/自助套餐不属于服务登记，旧目录导出和农场订购通知独立保留。
 
 对接同事仅需 [场景接口对接说明](docs/reference/integration.md)；运维与网络目录边界见 [展示设计](docs/superpowers/specs/2026-06-11-frontend-demo-redesign-design.md)。
 

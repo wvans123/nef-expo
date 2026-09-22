@@ -87,13 +87,14 @@ def test_payload_classification_exclusions_and_cache_only_get(
             "description",
             "url",
             "serverStatus",
+            "isThirdParty",
         }
         assert payload["serverName"].startswith("nef-cap-")
         assert payload["serverType"] == "Streamable HTTP"
         assert payload["toolType"] == capability_tool_type(CAP_INDEX[capability_id])
         assert payload["description"].startswith(f"[{CAP_INDEX[capability_id].name}] ")
         assert payload["url"] == f"{base}/mcp/capabilities/{capability_id}"
-        assert "isThirdParty" not in payload
+        assert payload["isThirdParty"] is False
 
     response = catalog_client.get("/api/v1/network/trf/catalog")
     assert response.status_code == 200
@@ -186,8 +187,8 @@ def test_publish_skips_exact_handles_partial_failure_and_unconfirmed(
         payloads[caps[1].id]["serverName"],
         payloads[caps[2].id]["serverName"],
     }
-    assert all(set(payload) == set(trf_catalog.registry._TRF_FIELDS) for payload in posted)
-    assert all("isThirdParty" not in payload for payload in posted)
+    assert all(set(payload) == set(trf_catalog.registry._TRF_FIELDS) | {"isThirdParty"} for payload in posted)
+    assert all(payload["isThirdParty"] is False for payload in posted)
     assert [request["method"] for request in http_fixture.requests].count("GET") == 2
     assert response.json()["status"] == "partial"
     assert response.json()["can_withdraw"] is True
@@ -365,7 +366,8 @@ def test_refresh_recovers_exact_registration_and_missing_base_never_posts(
     target = http_fixture.url("/trf/api/v1/mcp-servers")
     base = "http://nef.example:8069"
     payload = trf_catalog._payloads(base)[cap.id]
-    remote = [{**payload, "isThirdParty": False}]
+    # Older TRF GET responses can still omit the optional field.
+    remote = [{key: value for key, value in payload.items() if key != "isThirdParty"}]
     http_fixture.add(
         "GET",
         "/trf/api/v1/mcp-servers",

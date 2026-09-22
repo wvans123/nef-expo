@@ -21,7 +21,7 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 
 表单“连接并发现工具”负责首次登记、握手、读取工具；已有记录的“重新发现工具”只重读该服务的工具，需先取消发布再操作；发现失败也保留“删除记录”。点击“发布”才上首页并发给 TRF；“取消发布”先本地下架，再撤回远端。远端撤回尚未确认时保留记录与重试入口，不能直接删除而丢失撤回信息。
 
-首页最下方提供本地能力的同步、撤回、读取核对按钮及“本地能力 / TRF 目录”展示来源切换。双向开放的详细 TRF 运维面板仍只在 `/?ops=1#afreg` 显示；此参数只是显示开关，写入及上游读取仍要求账号 Key 与 `af:register` scope。页面加载或 30 秒本地刷新不会自动请求 TRF。
+首页最下方只展示“同步到 TRF”“取消 TRF 注册”“核对状态”及登记状态。来源切换收在 `/?ops=1#market` 的“目录来源设置”折叠区，普通页不显示；双向开放的详细 TRF 运维面板仍只在 `/?ops=1#afreg` 显示。此参数只是显示开关，写入及上游读取仍要求账号 Key 与 `af:register` scope。页面加载或 30 秒本地刷新不会自动请求 TRF。
 
 只改 `config/integration.local.json` 中的 `registry`：
 
@@ -56,7 +56,7 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 }
 ```
 
-`serverType` 按更正后的枚举发送 `Streamable HTTP`，由 `_trf_publication()` 生成。固定值由后端生成，前端不能覆盖。注意字段大小写为 `isThirdParty`，不是 `isthirdparty`；首页本地能力发布完全省略该字段，不发送 false；若 GET 为其补默认 false 可匹配，补 true 则为冲突。不附加工具数组、source_account、NEF Key 或套餐字段。
+`serverType` 按更正后的枚举发送 `Streamable HTTP`，由 `_trf_publication()` 生成。固定值由后端生成，前端不能覆盖。字段大小写为 `isThirdParty`：首页本地能力显式发送布尔 false，双向开放发送布尔 true，两处统一使用七字段注册结构。GET 若返回该字段须与外发值相同，旧 GET 省略时保持兼容。不附加工具数组、source_account、NEF Key 或套餐字段。
 
 ### 查询与确认
 
@@ -122,7 +122,7 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 
 1. 同事提供实际 TRF 集合地址、GET 完整回包、认证方式和重复 serverName 的行为。
 2. 将巡检小车地址加入允许列表，页面填写三个字段并发现真实工具。
-3. 发布后核对 TRF 六字段记录、首页工具来源；取消后核对 DELETE 与 GET 缺席，最后删除本地记录。
+3. 发布后核对 TRF 基础字段及 isThirdParty、首页工具所属服务；取消后核对 DELETE 与 GET 缺席，最后删除本地记录。
 4. 真实工具调用单独验收；查询 TRF 不授予订阅或执行权限。
 
 `tests/test_trf_mcp_registry.py` 覆盖 HTTP 契约和失败边界；`tests/test_integration_ui.cjs` 与 `tests/test_catalog_ui.cjs` 在 `tests/workbench_fixture.py --port 8071` 隔离服务上验证桌面/手机页面，后者现在验证运维查询而非旧目录导出。截图在忽略上传的 `.runtime/` 中。测试不访问真实 TRF 或正式 8069 账号。
@@ -166,10 +166,11 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
   "toolType": "sensing tool",
   "description": "[目标检测] 检测指定区域内的物体（人、车辆、无人机等），返回目标类型、位置和置信度",
   "url": "http://<NEF-IP>:8069/mcp/capabilities/target_detection",
-  "serverStatus": "active"
+  "serverStatus": "active",
+  "isThirdParty": false
 }
 ```
 
 单工具入口 `POST /mcp/capabilities/{capability_id}` 支持 initialize、通知、ping、tools/list、tools/call，只发现/允许当前能力名，仍要求 NEF 账号 Key 与 mcp:tools。调用复用既有权益判定并强制 live，未配业务地址明确返回错误；不回退演示结果。tools/call 通知不会执行业务。TRF 只保存公开入口，不携带账号 Key。
 
-底部“首页工具来源”只切换本浏览器显示，选择“TRF 目录”后点击读取即可展示四类记录；不会反向发布、自动连接 MCP 或创建订阅。未知类型跳过；读取失败保留上次内容并提示过期，不以空列表掩盖失败。`tests/test_trf_catalog.py`、`tests/test_capability_mcp.py` 与桌面 `tests/test_home_trf_ui.cjs` 验证这些边界，真实 IP 暂不测试。
+运维页底部展开“目录来源设置”，将展示来源切为“TRF 目录”后点击“刷新目录”，即可预览四类记录；不会反向发布、自动连接 MCP 或创建订阅。选择只保存在当前浏览器，并且仅在 `?ops=1` 中生效，返回普通首页始终展示本地能力。未知类型跳过；读取失败保留上次内容并提示过期，不以空列表掩盖失败。`tests/test_trf_catalog.py`、`tests/test_capability_mcp.py` 与桌面 `tests/test_home_trf_ui.cjs` 验证这些边界，真实 IP 暂不测试。

@@ -6,11 +6,17 @@
 
 ## 当前验收与 Windows 后台（2026-09-22）
 
+2026-09-22 11:41 通过 Windows 任务 `NEF-Expo` 再次重启，加载本地同步 isThirdParty=false 和首页同步区简化。监听 PID `10772`，父进程 `svchost.exe`，任务运行中，实例 `14fe82405ad72a1e`；首页和 Tunnel `/ready` 均为 200。TRF 仍未配置，未请求真实现场地址；重启清空内存账号和订阅。
+
+本次 23 项 TRF 定向测试通过，保留一条依赖弃用提示；1440px 电脑页面验证七字段 false/true 报文、同步/撤回、重复提交跳过、普通页隐藏来源设置、运维页折叠目录预览，以及保存的预览来源不影响普通商城。测试仅访问本机模拟服务，8071 夹具已停止。
+
+### 同日 09:25 部署与验收快照（已被上述重启替代）
+
 2026-09-22 09:25 左右通过 Windows 任务 `NEF-Expo` 重启加载首页四类目录同步与可选 isThirdParty。监听 PID `33776`，父进程 `svchost.exe` PID `3252`，任务 `Running`，实例 `37ec24afcf326d1e`；首页和 Tunnel `/ready` 均为 200。Chrome 正式首页已核对网络 12 / 计算 4 / 感知 7 项及第三方分组，规划项和生态服务不展示，底部同步区可见。本机 TRF 地址仍未配置，状态为 `not_configured`，卡片为“未核对”，同步/读取按钮禁用；没有访问旧现场 IP。
 
 本轮 74 项定向测试通过（单工具 MCP/页面/既有 MCP 34 项，TRF 外部登记与订阅/网关 35 项，首页同步状态 5 项），未跑全量测试；保留依赖弃用提示。电脑端 1440px 在隔离夹具验证 23 项同步、重复点击不重复 POST、批量撤回不删除其他四类服务、TRF GET 展示、外部 isThirdParty=true 及订阅入口，MCP 客户端协议测试通过。本次没有新增或验收独立手机应用。测试对端均为本机模拟服务，8071 夹具已停止，真实 TRF 联调仍待地址与回包；重启清空了内存账号、订阅和登记。
 
-操作入口在首页底部：本地能力模式支持“同步到 TRF”“取消 TRF 注册”和读取核对；TRF 目录模式只读服务登记。真实部署只需按 [README 配置表](../README.md#2-post-地址只改这一份文件)填写 `registry.trf_mcp_servers_url` 与 `registry.nef_base_url`。四类映射、报文、批量失败与撤回边界的唯一契约见 [TRF 参考](reference/network-catalog.md#8-首页本地能力同步与-trf-读取模式)。
+操作入口在首页底部：“同步到 TRF”“取消 TRF 注册”“核对状态”。本地同步显式携带 isThirdParty=false，双向开放为 true。来源切换只在 `/?ops=1#market` 的“目录来源设置”折叠区显示；TRF 目录预览不会影响普通商城来源。真实部署只需按 [README 配置表](../README.md#2-post-地址只改这一份文件)填写 `registry.trf_mcp_servers_url` 与 `registry.nef_base_url`。四类映射、报文、批量失败与撤回边界的唯一契约见 [TRF 参考](reference/network-catalog.md#8-首页本地能力同步与-trf-读取模式)。
 
 ## 2026-09-21 部署与验收记录（已被上述重启替代）
 

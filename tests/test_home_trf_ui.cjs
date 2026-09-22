@@ -19,6 +19,9 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     assert.deepEqual(await page.locator('.wb-home-group').evaluateAll(els=>els.map(el=>el.dataset.toolType)),
       ['nf tool','computing tool','sensing tool','third-party tool']);
     assert.doesNotMatch(await page.locator('#pane-market').innerText(),/规划中|生态服务/);
+    assert.equal(await page.locator('#wb-home-source-settings').isVisible(),false);
+    assert.equal(await page.locator('#wb-trf-read').innerText(),'核对状态');
+    assert.doesNotMatch(await page.locator('#wb-home-trf').innerText(),/首页工具来源|目录来源设置|从 TRF 读取/);
     const offered=await page.evaluate(()=>wbLocalHomeCaps().filter(c=>c.source==='network'));
     const card=page.locator('[data-home-cap="target_detection"]');
     assert.match(await card.innerText(),/未核对/);
@@ -42,14 +45,19 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
       assert(cap);assert.equal(payload.toolType,cap.toolType);
       assert.equal(payload.serverType,'Streamable HTTP');
       assert.equal(payload.serverStatus,'active');
-      assert(!Object.hasOwn(payload,'isThirdParty'));
-      assert.equal(Object.keys(payload).length,6);
+      assert.equal(payload.isThirdParty,false);
+      assert.equal(Object.keys(payload).length,7);
     }
     await page.locator('#wb-trf-publish').click();
     await page.waitForFunction(()=>!wbTrf.busy);
     assert.equal((await writes()).length,posts.length,'Already registered rows must not be reposted');
     await page.locator('#wb-home-trf').scrollIntoViewIfNeeded();
     await page.screenshot({path:path.join(output,'synchronized-desktop.png')});
+    await page.goto(origin+'/?ops=1#market');
+    await page.waitForFunction(()=>wbTrf.snapshot&&CAPS.length);
+    assert.equal(await page.locator('#wb-home-source-settings').isVisible(),true);
+    assert.equal(await page.locator('#wb-home-source').isVisible(),false);
+    await page.locator('#wb-home-source-settings summary').click();
     await page.locator('#wb-home-source').selectOption('trf');
     assert.equal(await page.locator('[data-home-cap]').count(),0);
     assert.equal(await page.locator('[data-home-trf]').count(),offered.length+4);
@@ -61,6 +69,16 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     await page.reload();
     await page.waitForFunction(()=>wbTrf.snapshot&&wbTrf.source==='trf');
     assert.equal(await page.locator('[data-home-trf]').count(),offered.length+4);
+    // A saved operations preview must not silently replace the ordinary shop.
+    await page.goto(origin);
+    await page.waitForFunction(()=>wbTrf.snapshot&&CAPS.length);
+    assert.equal(await page.evaluate(()=>wbTrf.source),'local');
+    assert.equal(await page.locator('[data-home-cap]').count(),offered.length);
+    assert.equal(await page.locator('#wb-trf-publish').isVisible(),true);
+    assert.equal(await page.locator('#wb-home-source-settings').isVisible(),false);
+    await page.goto(origin+'/?ops=1#market');
+    await page.waitForFunction(()=>wbTrf.snapshot&&wbTrf.source==='trf');
+    await page.locator('#wb-home-source-settings summary').click();
     await page.locator('#wb-home-source').selectOption('local');
     await page.locator('#wb-trf-withdraw').click();
     await page.locator('#wb-trf-confirm-withdraw').click();

@@ -219,10 +219,13 @@ th{background:var(--card);color:var(--muted)}
     <div id="wb-network-market"></div>
     <section id="wb-home-trf" class="wb-home-trf">
       <h3 class="sec">能力目录同步</h3>
-      <label for="wb-home-source">首页工具来源</label>
-      <select id="wb-home-source"><option value="local">本地能力</option><option value="trf">TRF 目录</option></select>
+      <details id="wb-home-source-settings" class="ops-only">
+        <summary>目录来源设置</summary>
+        <label for="wb-home-source">展示来源</label>
+        <select id="wb-home-source"><option value="local">本地能力</option><option value="trf">TRF 目录</option></select>
+      </details>
       <p id="wb-home-trf-summary" class="muted">尚未核对</p>
-      <div class="wb-record-actions"><button id="wb-trf-publish" class="primary">同步到 TRF</button><button id="wb-trf-withdraw">取消 TRF 注册</button><button id="wb-trf-read">从 TRF 读取 / 核对</button></div>
+      <div class="wb-record-actions"><button id="wb-trf-publish" class="primary">同步到 TRF</button><button id="wb-trf-withdraw">取消 TRF 注册</button><button id="wb-trf-read">核对状态</button></div>
       <p id="wb-home-trf-note" class="muted"></p><p id="wb-home-trf-message" role="status"></p>
     </section>
   </div>
@@ -950,7 +953,7 @@ $('#term-send').onclick = ()=>termRequest($('#term-input').value.trim());
 $('#term-input').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#term-send').click(); });
 </script>
 <script src="/static/purchase.js?v=20260921-1"></script>
-<script src="/static/trf-catalog.js?v=20260922-1"></script>
+<script src="/static/trf-catalog.js?v=20260922-2"></script>
 <script src="/static/workbench.js?v=20260922-1"></script>
 <script src="/static/composer.js?v=20260917-3"></script>
 </body>
