@@ -38,12 +38,16 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     await page.locator('#wb-trf-publish').click();
     await page.waitForFunction(()=>!wbTrf.busy&&wbTrf.snapshot.items.every(t=>t.registration_status==='registered'));
     assert.match(await card.innerText(),/已注册/);
+    assert.match(await page.locator('#wb-home-trf-summary').innerText(),/MCP Server 3 个 · 已注册 3 个 · 覆盖能力 23 项/);
+    assert.match(await page.locator('#wb-home-trf-note').innerText(),/description/);
     const posts=await writes();
-    assert.equal(posts.length,offered.length);
+    assert.equal(posts.length,3);
+    assert.deepEqual(posts.map(row=>JSON.parse(row.body).toolType).sort(),['computing tool','nf tool','sensing tool']);
     for(const row of posts){
       const payload=JSON.parse(row.body);
-      const cap=offered.find(c=>payload.url.endsWith('/mcp/capabilities/'+c.id));
-      assert(cap);assert.equal(payload.toolType,cap.toolType);
+      assert.equal(payload.url,origin);
+      assert(offered.some(c=>c.toolType===payload.toolType));
+      assert(payload.serverName.startsWith('nef-group-'));
       assert.equal(payload.serverType,'Streamable HTTP');
       assert.equal(payload.serverStatus,'active');
       assert.equal(payload.isThirdParty,false);
@@ -61,7 +65,7 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     await page.locator('#wb-home-source-settings summary').click();
     await page.locator('#wb-home-source').selectOption('trf');
     assert.equal(await page.locator('[data-home-cap]').count(),0);
-    assert.equal(await page.locator('[data-home-trf]').count(),offered.length+4);
+    assert.equal(await page.locator('[data-home-trf]').count(),3+4);
     assert.equal(await page.locator('#wb-trf-publish').isVisible(),false);
     await page.locator('[data-home-trf="trf:fixture-nf"]').click();
     assert.match(await page.locator('#modal').innerText(),/尚未发现工具参数/);
@@ -69,7 +73,7 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     await page.locator('#wb-trf-detail-close').click();
     await page.reload();
     await page.waitForFunction(()=>wbTrf.snapshot&&wbTrf.source==='trf');
-    assert.equal(await page.locator('[data-home-trf]').count(),offered.length+4);
+    assert.equal(await page.locator('[data-home-trf]').count(),3+4);
     // A saved operations preview must not silently replace the ordinary shop.
     await page.goto(origin);
     await page.waitForFunction(()=>wbTrf.snapshot&&CAPS.length);
@@ -89,8 +93,8 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     await page.locator('#wb-trf-confirm-withdraw').click();
     await page.waitForFunction(()=>!wbTrf.busy&&wbTrf.snapshot.items.every(t=>t.registration_status==='unregistered'));
     const deletes=(await probe()).filter(r=>r.method==='DELETE'&&r.path.startsWith('/trf/api/v1/mcp-servers/'));
-    assert.equal(deletes.length,offered.length);
-    assert(deletes.every(r=>r.path.includes('/nef-cap-')));
+    assert.equal(deletes.length,3);
+    assert(deletes.every(r=>r.path.includes('/nef-group-')));
     await page.locator('#wb-home-source').selectOption('trf');
     assert.equal(await page.locator('[data-home-trf]').count(),4);
     await page.locator('#wb-home-source').selectOption('local');
@@ -98,6 +102,9 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     await page.route('**/api/v1/network/trf/catalog/refresh',async route=>{
       const snapshot=await (await context.request.get(origin+'/api/v1/network/trf/catalog')).json();
       snapshot.status='failed';
+      snapshot.summary={registered:0,unregistered:0,unknown:3,submitted:0,failed:0,total:3};
+      snapshot.groups=snapshot.groups.map(item=>({...item,registration_status:'unknown',sync_error:'upstream_http_error',
+        sync_diagnostic:{code:'upstream_http_error',method:'GET',http_status:503}}));
       snapshot.items=snapshot.items.map(item=>({...item,registration_status:'unknown',sync_error:'upstream_http_error',
         sync_diagnostic:{code:'upstream_http_error',method:'GET',http_status:503}}));
       await route.fulfill({json:snapshot});
@@ -105,6 +112,8 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     await page.locator('#wb-trf-read').click();
     await page.waitForFunction(()=>!wbTrf.busy&&wbTrf.snapshot.status==='failed');
     assert.match(await page.locator('#wb-home-trf-note').innerText(),/GET HTTP 503/);
+    assert.doesNotMatch(await page.locator('#wb-home-trf-summary').innerText(),/已注册 0/);
+    assert.match(await page.locator('#wb-home-trf-summary').innerText(),/待确认 3/);
     assert.match(await card.locator('.wb-registration').getAttribute('title'),/GET HTTP 503/);
     assert.doesNotMatch(await page.locator('#wb-home-trf-message').innerText(),/已更新|处理完成/);
     await page.locator('#wb-home-trf').scrollIntoViewIfNeeded();
@@ -133,6 +142,6 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     await page.screenshot({path:path.join(output,'four-types-desktop.png')});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
     assert.deepEqual(errors,[]);
-    console.log(`Homepage TRF desktop passed: ${offered.length} local capabilities, 4 types, flag, batch sync/withdraw, no duplicate writes, safe GET mode and external subscription.`);
+    console.log(`Homepage TRF desktop passed: 3 internal MCP registrations covering ${offered.length} capabilities, normalized GET fields, accurate counts, withdrawal, failed-read status and external subscription.`);
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -114,7 +114,7 @@ CF-Access-Client-Secret: <Client Secret>
 |---|---|
 | `trf_mcp_servers_url` | TRF MCP 集合地址，发布 POST、查询 GET、撤回 DELETE 追加 serverName；空时不外发 |
 | `token_env` | NEF 向目录发送 Bearer Key 所用环境变量名 |
-| `nef_base_url` | 网络客户端能访问的 NEF 地址，用于独立代理链路；AF 发布不依赖此字段；首页本地能力单工具入口发布需要此字段 |
+| `nef_base_url` | 网络客户端能访问的 NEF 根地址，用于独立代理链路及首页三个分类登记的临时 url；AF 发布不依赖此字段 |
 | `mcp_servers` | 精确匹配登记 URL 的允许列表；页面登记不会自动加入允许列表 |
 | `open_registration_account` | 开放登记来源账号，默认 `1` |
 | `allow_unlisted_mcp_servers` | 默认 false；获准隔离测试网才可放宽，风险见 6.0 |
@@ -232,7 +232,7 @@ initialize -> notifications/initialized -> tools/list（必要时继续分页）
 
 | sync_status | 含义 |
 |---|---|
-| synced | 发布后基础字段读回匹配，GET 若带 isThirdParty 则须为 true；撤回后确认同名记录缺席 |
+| synced | 发布后 serverName、toolType、url 读回匹配，GET 若带 isThirdParty 则须为 true；描述/运行状态可不同，url 允许末尾斜杠差异；撤回后确认同名记录缺席 |
 | submitted | 写请求已获成功 HTTP 响应，但尚无法读回确认 |
 | pending | 已在本地发布，TRF 地址尚未配置 |
 | failed | 配置、请求或响应格式错误；本地状态不伪装成远端成功 |
@@ -244,7 +244,7 @@ initialize -> notifications/initialized -> tools/list（必要时继续分页）
 
 `DELETE /api/v1/network/servers/{server_id}`。发现失败、草稿、确认撤回后的记录可删除，页面对应“删除记录”。已发布、繁忙或 TRF 撤回未确认返回 409，需先完成撤回。私有登记仅归属账号可删，open 登记可由具有 af:register scope 的其他账号管理。
 
-自助套餐的 `/packages/{id}/publish`、`/unpublish` 在新协议下只更新本地展示，不发到 TRF MCP 集合。首页可用基础能力可通过独立的批量同步入口注册真实 NEF 单工具适配端点；场景不发送，详见 [首页同步](network-catalog.md#8-首页本地能力同步与-trf-读取模式)。
+自助套餐的 `/packages/{id}/publish`、`/unpublish` 在新协议下只更新本地展示，不发到 TRF MCP 集合。首页内部能力按 nf tool、computing tool、sensing tool 注册三个 MCP Server，url 暂用 NEF 根地址；场景不发送，详见 [首页同步](network-catalog.md#8-首页本地能力同步与-trf-读取模式)。
 
 ### 6.5 查看状态
 
@@ -349,7 +349,7 @@ HTTP 错误通常为 `{"detail":{"code":"...","message":"..."}}`；NEF 账号认
 | 4 | 农场用账号1 Key 登记 | 返回真实 server_id，source_account=1 |
 | 5 | 调用 discover | discovered，工具名和参数与农场一致 |
 | 6 | 查看 publication | 六字段及 isThirdParty=true；url 是登记的 MCP 地址，不含 Key |
-| 7 | 调用 publish，TRF 读回确认 | synced；GET 中同 serverName 的基础字段匹配，若带 isThirdParty 则须为 true |
+| 7 | 调用 publish，TRF 读回确认 | synced；GET 中同 serverName 的 toolType、url 匹配，若带 isThirdParty 则须为 true |
 | 8 | 单独验收外部 MCP 直连或 NEF gateway_path | tools/list 与登记一致；只读 tools/call 返回实际数据 |
 | 9 | 检查异常 | 错账号不能操作私有登记，开放登记可跨账号操作；错网络 Key 拒绝；参数错误不触发农场执行 |
 

@@ -63,7 +63,14 @@ _TRF_FIELDS = (
     "serverStatus",
 )
 _TRF_OPTIONAL_FIELDS = ("isThirdParty",)
-_TRF_RESERVED_SERVER_PREFIX = "nef-cap-"
+_TRF_RESERVED_SERVER_PREFIX = ("nef-cap-", "nef-group-")
+_TRF_FIELD_ALIASES = {
+    "serverName": "server_name",
+    "serverType": "server_type",
+    "toolType": "tool_type",
+    "serverStatus": "server_status",
+    "isThirdParty": "is_third_party",
+}
 
 
 class _ConfigError(Exception):
@@ -788,7 +795,7 @@ def _validate_trf_servers(value: Any) -> list[dict[str, Any]]:
             raise _RemoteSchemaFailure("trf_response_rejected")
         if value.get("code") not in (None, 0, "0", 200, "200"):
             raise _RemoteSchemaFailure("trf_response_rejected")
-        keys = [key for key in ("data", "items", "servers", "records") if key in value]
+        keys = [key for key in ("data", "items", "servers", "records", "mcpServers", "mcp_servers") if key in value]
         if len(keys) != 1:
             raise _RemoteSchemaFailure("trf_schema_invalid")
         value = value[keys[0]]
@@ -812,21 +819,26 @@ def _validate_trf_servers(value: Any) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     names: set[str] = set()
     for item in items:
-        if (
-            not isinstance(item, dict)
-            or any(field not in item for field in _TRF_FIELDS)
-        ):
+        if not isinstance(item, dict):
+            raise _RemoteSchemaFailure("trf_schema_invalid")
+        item = dict(item)
+        for field, alias in _TRF_FIELD_ALIASES.items():
+            if alias in item:
+                if field in item and (item[field] != item[alias] or type(item[field]) is not type(item[alias])):
+                    raise _RemoteSchemaFailure("trf_schema_invalid")
+                item[field] = item[alias]
+        if any(field not in item for field in ("serverName", "toolType", "url")):
             raise _RemoteSchemaFailure("trf_schema_invalid")
         try:
             server_name = item["serverName"]
             if not isinstance(server_name, str) or not _TRF_SERVER_NAME.fullmatch(server_name):
                 raise ValueError("serverName")
-            server_type = _checked_catalog_text(item["serverType"], MAX_NAME_LENGTH)
+            server_type = _checked_catalog_text(item.get("serverType", ""), MAX_NAME_LENGTH)
             tool_type = _checked_catalog_text(item["toolType"], MAX_NAME_LENGTH)
-            description = _checked_catalog_text(item["description"], MAX_DESCRIPTION_LENGTH)
+            description = _checked_catalog_text(item.get("description", ""), MAX_DESCRIPTION_LENGTH)
             url = _checked_url(item["url"])
-            server_status = _checked_catalog_text(item["serverStatus"], MAX_NAME_LENGTH)
-            if not server_type or not tool_type or not server_status:
+            server_status = _checked_catalog_text(item.get("serverStatus", ""), MAX_NAME_LENGTH)
+            if not tool_type:
                 raise ValueError("empty")
             is_third_party = item.get("isThirdParty")
             if "isThirdParty" in item and type(is_third_party) is not bool:
@@ -869,7 +881,10 @@ async def _read_trf_servers(
 
 
 def _same_trf_server(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    if not all(left.get(field) == right.get(field) for field in _TRF_FIELDS):
+    # Existence is an identity check, not a byte-for-byte echo of POST metadata.
+    if not all(left.get(field) == right.get(field) for field in ("serverName", "toolType")):
+        return False
+    if not left.get("url") or left["url"].rstrip("/") != right.get("url", "").rstrip("/"):
         return False
     if "isThirdParty" in left:
         return left["isThirdParty"] == right.get("isThirdParty", False)
@@ -1638,7 +1653,7 @@ def build_router(auth: Callable[[str | None, str | None], tuple[str, dict]]) -> 
             _http_error(
                 422,
                 "reserved_server_name",
-                "serverName 的 nef-cap- 前缀保留给 NEF 内置能力",
+                "serverName 的 nef-group- 和 nef-cap- 前缀保留给 NEF 内部登记",
             )
         name = server_name
         url = _require_url(payload.get("url"))

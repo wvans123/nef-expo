@@ -65,6 +65,11 @@ def by_capability(response):
     }
 
 
+def payload_for_cap(base, capability_id):
+    tool_type = capability_tool_type(CAP_INDEX[capability_id])
+    return next(payload for payload in trf_catalog._payloads(base).values() if payload["toolType"] == tool_type)
+
+
 def test_payload_classification_exclusions_and_cache_only_get(
     catalog_client, http_fixture, monkeypatch
 ):
@@ -73,13 +78,9 @@ def test_payload_classification_exclusions_and_cache_only_get(
     configure_catalog(monkeypatch, target=target, base=base)
 
     payloads = trf_catalog._payloads(base)
-    expected = {cap.id for cap in trf_catalog_capabilities()}
+    expected = {"nf", "computing", "sensing"}
     assert set(payloads) == expected
-    assert "capability_register" not in payloads
-    assert "revenue_share" not in payloads
-    assert all(CAP_INDEX[capability_id].status == "available" for capability_id in payloads)
-    assert all(CAP_INDEX[capability_id].category != "ecosystem" for capability_id in payloads)
-    for capability_id, payload in payloads.items():
+    for group_id, payload in payloads.items():
         assert set(payload) == {
             "serverName",
             "serverType",
@@ -89,11 +90,11 @@ def test_payload_classification_exclusions_and_cache_only_get(
             "serverStatus",
             "isThirdParty",
         }
-        assert payload["serverName"].startswith("nef-cap-")
+        assert payload["serverName"].startswith("nef-group-")
         assert payload["serverType"] == "Streamable HTTP"
-        assert payload["toolType"] == capability_tool_type(CAP_INDEX[capability_id])
-        assert payload["description"].startswith(f"[{CAP_INDEX[capability_id].name}] ")
-        assert payload["url"] == f"{base}/mcp/capabilities/{capability_id}"
+        assert payload["toolType"] == group_id + " tool"
+        assert all(cap.name in payload["description"] for cap in trf_catalog._group_capabilities()[group_id])
+        assert payload["url"] == base
         assert payload["isThirdParty"] is False
 
     response = catalog_client.get("/api/v1/network/trf/catalog")
@@ -106,6 +107,10 @@ def test_payload_classification_exclusions_and_cache_only_get(
     assert body["can_withdraw"] is False
     assert body["remote_items"] == []
     assert body["summary"]["total"] == len(expected)
+    assert body["capability_summary"]["total"] == 23
+    assert len(body["groups"]) == 3
+    assert {item["capability_id"] for item in body["items"]} == {cap.id for cap in trf_catalog_capabilities()}
+    assert not {"capability_register", "revenue_share"} & set(by_capability(response))
     assert http_fixture.requests == []
     serialized = json.dumps(body)
     assert target not in serialized
@@ -148,7 +153,7 @@ def test_publish_skips_exact_handles_partial_failure_and_unconfirmed(
     target = http_fixture.url("/trf/api/v1/mcp-servers")
     base = "http://nef.example:8069"
     configure_catalog(monkeypatch, target=target, base=base)
-    payloads = trf_catalog._payloads(base)
+    payloads = {cap.id: payload_for_cap(base, cap.id) for cap in caps}
     remote = [{**payloads[caps[0].id], "isThirdParty": False}]
     posted: list[dict] = []
 
@@ -176,6 +181,7 @@ def test_publish_skips_exact_handles_partial_failure_and_unconfirmed(
     assert items[caps[0].id]["registration_status"] == "registered"
     assert items[caps[1].id] == {
         "capability_id": caps[1].id,
+        "group_id": "computing",
         "serverName": payloads[caps[1].id]["serverName"],
         "toolType": payloads[caps[1].id]["toolType"],
         "registration_status": "submitted",
@@ -207,10 +213,10 @@ def test_refresh_directory_ignores_unknown_type_and_conflict_is_not_overwritten(
         base=base,
         token_env="TRF_TOKEN",
     )
-    payloads = trf_catalog._payloads(base)
+    payloads = {cap.id: payload_for_cap(base, cap.id) for cap in caps}
     conflict = {
         **payloads[caps[0].id],
-        "description": "different owner",
+        "url": "http://different-owner.invalid",
     }
     unknown = {
         "serverName": "operator-unknown",
@@ -303,7 +309,7 @@ def test_unpublish_keeps_old_target_results_out_of_current_context(
     http_fixture.add("POST", "/a/mcp-servers", publish_a)
     http_fixture.add("POST", "/b/mcp-servers", publish_b)
     configure_catalog(monkeypatch, target=target_a, base=base)
-    payload_a = trf_catalog._payloads(base)[cap.id]
+    payload_a = payload_for_cap(base, cap.id)
     http_fixture.add(
         "DELETE",
         "/a/mcp-servers/" + payload_a["serverName"],
@@ -315,7 +321,7 @@ def test_unpublish_keeps_old_target_results_out_of_current_context(
     ).json()["items"][0]["registration_status"] == "registered"
 
     configure_catalog(monkeypatch, target=target_b, base=base)
-    payload_b = trf_catalog._payloads(base)[cap.id]
+    payload_b = payload_for_cap(base, cap.id)
 
     def delete_b(request):
         assert request["body"] == b""
@@ -365,7 +371,7 @@ def test_refresh_recovers_exact_registration_and_missing_base_never_posts(
     cap = use_capabilities(monkeypatch, "target_detection")[0]
     target = http_fixture.url("/trf/api/v1/mcp-servers")
     base = "http://nef.example:8069"
-    payload = trf_catalog._payloads(base)[cap.id]
+    payload = payload_for_cap(base, cap.id)
     # Older TRF GET responses can still omit the optional field.
     remote = [{key: value for key, value in payload.items() if key != "isThirdParty"}]
     http_fixture.add(
@@ -404,7 +410,7 @@ def test_collection_metadata_trailing_slash_and_withdraw_after_restart(
     configure_catalog(monkeypatch, target=target + "/", base=base)
     remote: list[dict] = []
     foreign = {
-        **trf_catalog._payloads(base)[cap.id],
+        **payload_for_cap(base, cap.id),
         "serverName": "unrelated-service",
         "isThirdParty": True,
     }
@@ -426,7 +432,7 @@ def test_collection_metadata_trailing_slash_and_withdraw_after_restart(
 
     # A restart loses the local cache, not the remote registration.
     trf_catalog.reset_state_for_tests()
-    payload = trf_catalog._payloads(base)[cap.id]
+    payload = payload_for_cap(base, cap.id)
 
     def delete(request):
         assert request["body"] == b""
@@ -479,7 +485,7 @@ def test_post_and_delete_errors_report_the_actual_method(
     assert by_capability(failed)[cap.id]["sync_diagnostic"] == {
         "code": "upstream_http_error", "method": "POST", "http_status": 400,
     }
-    remote.append(trf_catalog._payloads("http://nef.example:8069")[cap.id])
+    remote.append(payload_for_cap("http://nef.example:8069", cap.id))
     http_fixture.add("DELETE", path + "/" + remote[0]["serverName"],
                      lambda _r: (405, {}, b"private-delete-body"))
     failed = catalog_client.post("/api/v1/network/trf/catalog/unpublish", headers=headers())
@@ -488,3 +494,84 @@ def test_post_and_delete_errors_report_the_actual_method(
     }
     assert failed.json()["can_withdraw"] is True
     assert "private-delete-body" not in failed.text
+
+
+def test_three_group_posts_and_changed_get_metadata_count_as_registered(
+    catalog_client, http_fixture, monkeypatch
+):
+    path = "/trf/api/v1/mcp-servers"
+    base = "http://nef.example:8069"
+    configure_catalog(monkeypatch, target=http_fixture.url(path), base=base)
+    remote: list[dict] = []
+
+    def read(_request):
+        return json_response({"code": 200, "data": {"mcp_servers": [
+            {
+                "server_name": item["serverName"], "tool_type": item["toolType"],
+                "url": item["url"] + "/", "description": "TRF normalized description",
+                "server_type": "Streamable HTTP", "server_status": "inactive",
+                "is_third_party": False, "id": index,
+            }
+            for index, item in enumerate(remote)
+        ]}})
+
+    def publish(request):
+        remote.append(json.loads(request["body"]))
+        return 201, {}, b""
+
+    http_fixture.add("GET", path, read)
+    http_fixture.add("POST", path, publish)
+    response = catalog_client.post("/api/v1/network/trf/catalog/publish", headers=headers())
+    data = response.json()
+    assert {item["toolType"] for item in remote} == {"nf tool", "computing tool", "sensing tool"}
+    assert len(remote) == 3
+    assert all(item["url"] == base and item["isThirdParty"] is False for item in remote)
+    assert data["summary"]["registered"] == data["summary"]["total"] == 3
+    assert data["capability_summary"]["registered"] == data["capability_summary"]["total"] == 23
+    assert data["status"] == "synced"
+    assert all(group["metadata_differences"] == ["description", "serverStatus"] for group in data["groups"])
+    for item in data["items"]:
+        group = next(group for group in data["groups"] if item["capability_id"] in group["capability_ids"])
+        assert item["serverName"] == group["serverName"]
+        assert item["registration_status"] == group["registration_status"] == "registered"
+    catalog_client.post("/api/v1/network/trf/catalog/publish", headers=headers())
+    assert [r["method"] for r in http_fixture.requests].count("POST") == 3
+    assert all(r["path"] == path for r in http_fixture.requests)
+
+
+def test_legacy_records_only_withdraw_explicitly_and_never_count_as_groups(
+    catalog_client, http_fixture, monkeypatch
+):
+    path = "/trf/api/v1/mcp-servers"
+    base = "http://nef.example:8069"
+    configure_catalog(monkeypatch, target=http_fixture.url(path), base=base)
+    legacy = trf_catalog._legacy_payloads(base)["legacy:target_detection"]
+    foreign = {**legacy, "serverName": "unrelated-mcp", "isThirdParty": True}
+    spoofed = {**trf_catalog._legacy_payloads(base)["legacy:target_tracking"],
+               "url": "http://someone-else.invalid/mcp"}
+    remote = [legacy, foreign, spoofed]
+    http_fixture.add("GET", path, lambda _r: json_response({"items": remote}))
+    http_fixture.add("POST", path, lambda request: (remote.append(json.loads(request["body"])) or (201, {}, b"")))
+    refreshed = catalog_client.post("/api/v1/network/trf/catalog/refresh", headers=headers()).json()
+    assert refreshed["summary"]["registered"] == 0
+    assert refreshed["summary"]["unregistered"] == 3
+    assert [item["serverName"] for item in refreshed["legacy_items"]] == [legacy["serverName"]]
+    published = catalog_client.post("/api/v1/network/trf/catalog/publish", headers=headers()).json()
+    assert published["summary"]["registered"] == 3
+    assert legacy in remote
+    assert not any(r["method"] == "DELETE" for r in http_fixture.requests)
+
+    def delete(request):
+        name = request["path"].rsplit("/", 1)[1]
+        remote[:] = [item for item in remote if item["serverName"] != name]
+        return 204, {}, b""
+
+    for item in [legacy, *trf_catalog._payloads(base).values()]:
+        http_fixture.add("DELETE", path + "/" + item["serverName"], delete)
+    trf_catalog.reset_state_for_tests()
+    withdrawn = catalog_client.post("/api/v1/network/trf/catalog/unpublish", headers=headers()).json()
+    assert withdrawn["summary"]["unregistered"] == 3
+    assert withdrawn["legacy_items"] == []
+    assert withdrawn["can_withdraw"] is False
+    assert remote == [foreign, spoofed]
+    assert [r["method"] for r in http_fixture.requests].count("DELETE") == 4

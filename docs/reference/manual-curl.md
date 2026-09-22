@@ -112,7 +112,7 @@ nef DELETE /api/v1/network/servers/<server_id>
 
 将 `<...>` 整段替换后执行。Intent 会真实发给配置的现场地址，场景开通/取消会通知农场；discover 只发现工具，publish 才在首页发布并 POST 至 TRF，unpublish 本地下架并向首次发布集合地址追加 serverName 发 DELETE，随后 GET 确认缺席；确认后才可 DELETE 本地登记。TRF 地址统一填 `registry.trf_mcp_servers_url`，正文与状态见 [TRF 契约](network-catalog.md)。发现失败/从未发布的记录可直接 DELETE。旧 sync 是 publish 别名；预览 publication 只返回报文。旧无路径回传 `POST /api/v1/scene-feedback` 要把 KEY 暂时换成 feedback-access 的 receiver_key，不能使用账号 Key 写入。媒体读取 `GET /api/v1/exhibition/channels/<id>/media/<asset_id>` 则用账号 Key。
 
-首页本地能力批量发布需先填写 nef_base_url；publish 逐项 POST 六个基础字段及 isThirdParty=false，unpublish 只撤回本平台条目。双向开放使用同一结构，isThirdParty=true。GET catalog 只读缓存，POST refresh 才向 TRF GET；普通页对应“核对状态”，目录来源预览收在 `?ops=1` 的折叠设置中。
+首页发布需先填写 nef_base_url；publish 按 nf tool、computing tool、sensing tool 发出最多三条 POST，七字段结构中 isThirdParty=false、url 暂用 NEF 自身根地址。summary 统计三个 MCP Server，capability_summary 统计它们覆盖的 23 项能力；GET 核对服务名、分类、URL 和可选标识，兼容驼峰/下划线字段、描述改写及尾斜杠。unpublish 撤回可核对归属的分类登记及旧版逐能力登记，不删除第三方条目。双向开放仍为 isThirdParty=true。GET catalog 只读缓存，POST refresh 才向相同的 /trf/api/v1/mcp-servers 发 GET；普通页对应“核对状态”，目录来源预览收在 `?ops=1` 的折叠设置中。
 
 使用订阅者账号 Key 执行市场订阅，不要复用发布者账号。订阅本身免费且不外发；真正 tools/call 使用 tools/list 返回的准确 mcp_name 和实际 inputSchema，可能触发现场操作，按获准业务意图调用。完整契约见 [第三方工具订阅](network-catalog.md#5-第三方工具的账号订阅与调用)。
 

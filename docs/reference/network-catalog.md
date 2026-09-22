@@ -13,7 +13,7 @@
 
 TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`。报文字段沿用已经约定的驼峰 `toolType`，不同时发送 `tool_type`。外部接入固定最后一类。首页也按这四类展示，隐藏规划中能力和旧“生态服务”；历史 category 与既有订阅接口保留兼容。
 
-首页本地能力由 NEF 的单工具 MCP 适配入口包装后显式同步，见第 8 节。NF 自身不必实现 MCP。TRF 读取模式只展示服务登记；description 不会被自动变成工具参数、订阅权益或可执行步骤。场景与自助套餐不属于这个 MCP Server 集合，不随首页工具一起发送。
+首页本地能力按 `nf tool`、`computing tool`、`sensing tool` 合并为三个 MCP Server 登记，见第 8 节；不是每项能力一个 Server。三个 url 暂时都填写 NEF 自身根地址，分类 MCP 调用地址之后再对齐，不把当前根地址声称为已验证的 MCP 调用入口。TRF 读取模式只展示服务登记；description 不会被自动变成工具参数、订阅权益或可执行步骤。场景与自助套餐不属于这个集合。
 
 ## 2. 页面和配置
 
@@ -36,7 +36,7 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 
 这是 registry 子对象片段，不要覆盖整个统一配置。一个集合地址用于 GET、POST 以及追加 serverName 的 DELETE；未取得地址时保留 null，不填占位 IP。`mcp_servers` 是精确 URL 允许列表，表单登记不会自动授权。认证如需 Bearer，`token_env` 填服务端环境变量名，不写密钥值。
 
-首页发布本地能力需要上述两端地址：`trf_mcp_servers_url` 是 NEF 发送登记请求的接收方；`nef_base_url` 是 TRF 客户端随后访问 NEF 的根地址，程序在它后面追加 `/mcp/capabilities/<能力ID>`。只填 TRF 地址可以查询目录，但不能生成本地能力的调用地址。`nef_base_url` 填对方能访问的本机 IP 加端口，或本平台可达域名；不填 TRF 地址、`0.0.0.0` 或 `/mcp` 路径。内网部署按 README 使用 `python start.py` 监听 `0.0.0.0:8069`；仅监听 `127.0.0.1` 的 Windows 后台须通过已配置的 Tunnel 访问，不能直接使用局域网 IP。
+首页发布需要两个地址：`trf_mcp_servers_url` 是接收登记请求的 TRF 集合地址；`nef_base_url` 是 NEF 自身根地址，三个分类登记的 url 暂时直接使用它，不追加单能力路径。只填 TRF 地址可以查询目录，但不能生成登记中的 NEF 地址。`nef_base_url` 填对方能访问的本机 IP 加端口，或本平台可达域名；不填 TRF 地址、`0.0.0.0` 或 `/mcp` 路径。内网部署按 README 使用 `python start.py` 监听 `0.0.0.0:8069`；仅监听 `127.0.0.1` 的 Windows 后台须通过已配置的 Tunnel 访问，不能直接使用局域网 IP。
 
 这两个配置不会从浏览器的 Host 自动猜测。修改 JSON 后刷新或核对即可，不需要为地址变更重启清空账号；如果页面仍与文件不一致，先确认访问的 NEF 机器及端口，再检查进程是否设置了覆盖统一文件的 `NEF_REGISTRY_CONFIG` 或 `NEF_INTEGRATION_CONFIG`。页面的“本 NEF 的访问地址”提示对应 `registry.nef_base_url`；真实可达性仍需由对方验证。
 
@@ -64,11 +64,11 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 
 ### 查询与确认
 
-`GET {trf_mcp_servers_url}`，无正文。支持完整数组，以及 `items`、`data`、`servers`、`records` 列表包装；也支持两层包装，例如 `{"code":200,"message":"OK","data":{"items":[...],"total":23}}`。每项包含六个基础字段；可选布尔 `isThirdParty` 会保留，数据库 `id`、时间戳等额外字段会忽略，不因这些字段而整批失败。
+`GET {trf_mcp_servers_url}`，无正文。支持完整数组，以及 `items`、`data`、`servers`、`records`、`mcpServers`、`mcp_servers` 列表包装；也支持两层包装，例如 `{"code":200,"message":"OK","data":{"items":[...],"total":3}}`。GET 至少返回 serverName、toolType、url；兼容 server_name / tool_type / server_type / server_status / is_third_party 别名，若同时返回两种名称且值冲突则报错。未返回的描述、类型、运行状态保留为空，不自行填 active；可选布尔 isThirdParty 保留。数据库 id、时间戳等额外字段忽略。POST 仍使用约定的七个驼峰字段，不发别名。
 
-包装中的 `code` 可省略或为 `0` / `200`（兼容字符串）；明确 `success:false`、非空 `error` 或其他 code 返回 `trf_response_rejected`。`total` / `totalCount` / `totalElements` 若存在必须等于列表长度；非空下一页游标、hasMore、pagination 或多页标志返回 `trf_incomplete_list`，不把不完整列表用于“未登记/已删除”的判断。未知包装、缺失基础字段及重复 serverName 返回 `trf_schema_invalid`，不会当作空目录。真实 TRF 如采用其他成功 code 或分页契约，需提供回包后调整适配。运维查询保留未知类型供排查；首页仅显示四种约定类型，并报告跳过数量。
+包装中的 `code` 可省略或为 `0` / `200`（兼容字符串）；明确 `success:false`、非空 `error` 或其他 code 返回 `trf_response_rejected`。`total` / `totalCount` / `totalElements` 若存在必须等于列表长度；非空下一页游标、hasMore、pagination 或多页标志返回 `trf_incomplete_list`，不把不完整列表用于“未登记/已删除”的判断。未知包装、缺失身份字段及重复 serverName 返回 `trf_schema_invalid`，不会当作空目录。真实 TRF 如采用其他成功 code 或分页契约，需提供回包后调整适配。运维查询保留未知类型供排查；首页仅显示四种约定类型，并报告跳过数量。
 
-发布的 HTTP 2xx 不直接等于同步成功：随后 GET，读回基础字段一致的记录才记 `synced`；若 GET 带 `isThirdParty`，值也须匹配。为兼容旧 GET 可省略该字段，但这不证明它已被对方保存。查不到匹配项或查询暂不可用记 `submitted`，请求或 schema 错误按实际记录。GET 读取确认不证明后续工具可执行。
+发布的 HTTP 2xx 不直接等于同步成功：随后 GET，以 serverName、toolType、url 确认服务身份（url 允许末尾斜杠差异）；若 GET 带 isThirdParty，值也须匹配。description、serverType、serverStatus 不要求逐字回显，首页用 metadata_differences 提示差异，不因此把存在的登记计成 0。已登记不等于运行状态 active，也不证明后续工具可执行。旧 GET 可省略 isThirdParty，但这不证明它已被对方保存。查不到匹配项或查询暂不可用记 submitted，请求或 schema 错误按实际记录。
 
 ### 撤回
 
@@ -148,39 +148,41 @@ POST 和 GET 使用同一个 `registry.trf_mcp_servers_url`，统一去掉末尾
 | sensing tool | 目标检测/追踪、环境重构、融合、车流量感知/预测、感知虚拟围栏 |
 | third-party tool | 双向开放发现并发布的工具；由其发布者单独同步 |
 
-当前本地同步集为 23 项（网络 12、计算 4、感知 7），只选 `available`、非 ecosystem 的内置能力；规划项、旧能力注册/收益结算、场景套餐、自助套餐均不发送。TRF 注册不等于执行接口已接通，也不会赋予订阅。
+当前 23 项可用能力归入三个登记：nf tool 覆盖网络 12 项，computing tool 覆盖计算 4 项，sensing tool 覆盖感知 7 项。只选 available、非 ecosystem 的内置能力；规划项、旧能力注册/收益结算、场景套餐、自助套餐不发送。description 列出该类能力名称，url 暂时直接使用 nef_base_url。TRF 注册不等于执行接口已接通，也不会赋予订阅。
 
 ### 首页按钮调用的 NEF 接口
 
 | 方法 / 路径 | 行为 |
 |---|---|
-| GET `/api/v1/network/trf/catalog` | 无 Key 只读本进程缓存与配置就绪标志，不访问 TRF；items 是本地能力登记状态，remote_items 是四类服务目录 |
+| GET `/api/v1/network/trf/catalog` | 无 Key 只读缓存；groups 为三个分类登记，summary 统计 Server 数；items 将分类状态投影到能力卡，capability_summary 统计能力数；legacy_items 为可核对的旧登记；remote_items 为四类服务目录 |
 | POST `/api/v1/network/trf/catalog/refresh` | 无正文；带账号 Key + af:register，向 TRF 发 GET，核对状态并更新展示目录 |
-| POST `/api/v1/network/trf/catalog/publish` | 同上鉴权；先 GET，跳过已匹配条目，再对未登记能力逐项 POST，最后 GET 确认 |
+| POST `/api/v1/network/trf/catalog/publish` | 同上鉴权；先 GET，跳过已匹配分类，再对未登记分类 POST（最多三次），最后 GET 确认 |
 | POST `/api/v1/network/trf/catalog/unpublish` | 同上鉴权；仅 DELETE 本平台本批已发送或已精确匹配的条目，再 GET 确认；不删除第三方/同名冲突记录 |
 
-按钮是一次页面操作；现有 TRF 契约一次 POST 只接受一个 MCP Server，因此批量同步是多次单条 POST，不虚构数组批量接口。部分失败保留逐项结果可重试；同名不同内容为冲突，不覆盖。撤回保留首次目标，配置改址后不会误删新环境同名登记。
+按钮是一次页面操作；现有 TRF 契约一次 POST 只接受一个 MCP Server，因此同步是三次单条 POST，不虚构数组批量接口。部分失败保留逐类结果可重试；同名但地址、分类或第三方标识不同为冲突，不覆盖。撤回保留首次目标，配置改址后不会误删新环境同名登记。
 
 首页取消按钮在已配置 TRF 和 NEF 地址时即可使用，包括本进程尚无登记缓存的情况；点击后先 GET 精确匹配，再按 serverName DELETE。GET 失败或不完整时不盲目 POST/DELETE，也不显示“处理完成”。失败项保留 `sync_error`；可用时附 `sync_diagnostic: {code, method, http_status}`，例如 GET / HTTP 503 或 POST / HTTP 400。页面底部与状态点提示显示具体原因，不回显地址、响应原文或凭证。`can_withdraw` 表示进程内仍有待确认撤回的登记，不再作为取消按钮的唯一启用条件。
 
-状态包括 `unknown`（灰，尚未核对）、`registered`（绿，读回一致）、`unregistered`（红，读回缺席）、`submitted`（黄，已提交待确认）、`failed`、`conflict`。不把预设、旧成功缓存或 HTTP 200 一律当成已经注册。缓存与发送记录仍为内存；重启后需显式读取核对，只有与本机当前配置和能力完整匹配的登记才恢复可撤回状态。
+状态包括 unknown（灰，尚未核对）、registered（绿，服务身份已确认）、unregistered（红，读回缺席）、submitted（黄，已提交待确认）、failed、conflict。首页显示“MCP Server 3 个 · 已注册 3 个 · 覆盖能力 23 项”，卡片跟随所属分类；GET 失败显示待确认及原因，不把未知状态写成“已注册 0”。缓存与发送记录仍为内存；重启后需显式读取核对服务身份，不能按名称前缀直接删除。
 
 ### 发往 TRF 的本地能力报文
 
-`serverName = "nef-cap-" + sha256(nef_base_url去尾斜线)前8位 + "-" + capability_id`。这个前缀预留给 NEF 内置能力，外部登记不得使用。例：
+`serverName = "nef-group-" + sha256(nef_base_url去尾斜线)前8位 + "-" + group_id`，group_id 为 nf / computing / sensing。nef-group- 及旧 nef-cap- 前缀均保留给 NEF，外部登记不得使用。例：
 
 ```json
 {
-  "serverName": "nef-cap-<base-hash>-target_detection",
+  "serverName": "nef-group-<base-hash>-sensing",
   "serverType": "Streamable HTTP",
   "toolType": "sensing tool",
-  "description": "[目标检测] 检测指定区域内的物体（人、车辆、无人机等），返回目标类型、位置和置信度",
-  "url": "http://<NEF-IP>:8069/mcp/capabilities/target_detection",
+  "description": "NEF 感知能力，包括：目标检测、目标追踪等",
+  "url": "http://<NEF-IP>:8069",
   "serverStatus": "active",
   "isThirdParty": false
 }
 ```
 
-单工具入口 `POST /mcp/capabilities/{capability_id}` 支持 initialize、通知、ping、tools/list、tools/call，只发现/允许当前能力名，仍要求 NEF 账号 Key 与 mcp:tools。调用复用既有权益判定并强制 live，未配业务地址明确返回错误；不回退演示结果。tools/call 通知不会执行业务。TRF 只保存公开入口，不携带账号 Key。
+旧单工具入口 `POST /mcp/capabilities/{capability_id}` 继续保留兼容和原有鉴权，但不再作为首页 TRF 同步单元。三个分类当前只做服务登记，后续分类 MCP 调用 URL 待确认；不携带账号 Key。
+
+升级后 GET 识别旧版 nef-cap- 登记时，须同时匹配本 NEF 地址哈希、能力名、单工具 URL、toolType 及可选 false 标识。它们显示在 legacy_items，不计入三个 Server，也不会在同步时自动删除。显式“取消 TRF 注册”会撤回已核对归属的分类及旧条目；随后再同步即可只保留三个分类。第三方、未知条目或同名不同地址不删除。
 
 运维页底部展开“目录来源设置”，将展示来源切为“TRF 目录”后点击“刷新目录”，即可预览四类记录；不会反向发布、自动连接 MCP 或创建订阅。选择只保存在当前浏览器，并且仅在 `?ops=1` 中生效，返回普通首页始终展示本地能力。未知类型跳过；读取失败保留上次内容并提示过期，不以空列表掩盖失败。`tests/test_trf_catalog.py`、`tests/test_capability_mcp.py` 与桌面 `tests/test_home_trf_ui.cjs` 验证这些边界，真实 IP 暂不测试。

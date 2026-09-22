@@ -26,7 +26,7 @@ function wbTrfFailureText(item){
     upstream_request_failed:'无法连接 TRF，请核对地址及网络',
     redirect_not_allowed:'TRF 返回重定向，请配置最终集合地址',
     missing_operator_token:'TRF 鉴权凭证未配置',
-    trf_name_conflict:'同名服务内容不同，未覆盖或删除',
+    trf_name_conflict:'同名服务的地址、分类或第三方标识不同，未覆盖或删除',
     trf_confirmation_unknown:'请求已提交，GET 尚未确认结果',
     nef_base_not_configured:'NEF 对外访问地址未配置',
     trf_not_configured:'TRF 集合地址未配置',
@@ -38,7 +38,7 @@ function wbTrfFailureText(item){
 }
 function wbRegistrationDot(status='unknown',item=null){
   const label=wbRegistrationLabels[status]||'未核对';
-  const detail=wbTrfFailureText(item);
+  const detail=wbTrfFailureText(item)||(item?.metadata_differences?.length?'登记已存在，以下字段不同或未返回：'+item.metadata_differences.join(', '):'');
   return `<span class="wb-registration wb-registration-${esc(status)}" title="TRF · ${esc(label)}${detail?' · '+esc(detail):''}" aria-label="TRF · ${esc(label)}"><span class="cat-dot"></span><span>${esc(label)}</span></span>`;
 }
 function wbLocalHomeCaps(){return CAPS.filter(c=>c.status==='available'&&c.category!=='ecosystem');}
@@ -96,14 +96,26 @@ function wbRenderTrfControls(){
   $('#wb-trf-read').disabled=!!busy||!snap?.configured;
   $('#wb-trf-read').textContent=remote?'刷新目录':'核对状态';
   const counts=snap?.summary;
-  const summary=counts?`可用能力 ${counts.total} 项 · 已注册 ${counts.registered} 项`:'尚未核对';
+  let summary='尚未核对';
+  if(counts){
+    const state=[];
+    if(counts.registered||(!counts.unknown&&!counts.failed))state.push(`已注册 ${counts.registered} 个`);
+    if(counts.unregistered)state.push(`未注册 ${counts.unregistered} 个`);
+    if(counts.unknown)state.push(`待确认 ${counts.unknown} 个`);
+    if(counts.failed)state.push(`失败或冲突 ${counts.failed} 个`);
+    summary=`MCP Server ${counts.total} 个 · ${state.join(' · ')} · 覆盖能力 ${snap.capability_summary?.total||0} 项`;
+  }
   $('#wb-home-trf-summary').textContent=remote?`TRF 目录 ${snap?.remote_items?.length||0} 项${snap?.ignored_count?' · 未识别类型 '+snap.ignored_count+' 项未展示':''}`:summary;
-  let note=remote?'仅展示服务登记，不自动开通调用权限。':'同步当前可用能力。';
+  let note=remote?'仅展示服务登记，不自动开通调用权限。':'';
   if(!snap?.configured)note+=' TRF 地址待配置。';
   else if(!remote&&!snap.base_configured)note+=' 还需配置本 NEF 的访问地址，供 TRF 调用这些能力（registry.nef_base_url）。';
-  if(snap?.last_checked)note+=' 上次核对：'+new Date(typeof snap.last_checked==='number'?snap.last_checked*1000:snap.last_checked).toLocaleString();
-  const failures=[...new Set((snap?.items||[]).filter(i=>i.sync_error).map(wbTrfFailureText))];
+  if(snap?.last_checked)note+=' 上次 GET 读到 '+(snap.remote_items.length+(snap.ignored_count||0))+' 条服务；核对时间：'+new Date(typeof snap.last_checked==='number'?snap.last_checked*1000:snap.last_checked).toLocaleString()+'。';
+  if(snap?.legacy_items?.length)note+=' 检测到 '+snap.legacy_items.length+' 条旧版逐能力登记；取消注册会一并撤回已核对归属的旧记录。';
+  const records=[...(snap?.groups||[]),...(snap?.legacy_items||[])];
+  const failures=[...new Set(records.filter(i=>i.sync_error).map(wbTrfFailureText))];
   if(failures.length)note+=' '+failures.slice(0,3).join('；');
+  const drift=(snap?.groups||[]).filter(group=>group.metadata_differences?.length);
+  if(drift.length)note+=' '+drift.map(group=>group.name+'已注册，以下字段不同或未返回：'+group.metadata_differences.join(', ')).join('；');
   $('#wb-home-trf-note').textContent=note;
   $('#wb-home-trf-message').textContent=wbTrf.message;
 }
@@ -121,7 +133,7 @@ async function wbTrfAction(action){
   try{
     wbTrf.snapshot=await api('/api/v1/network/trf/catalog/'+action,{method:'POST'});
     if(epoch!==wb.epoch){wbTrf.message='';return;}
-    const s=wbTrf.snapshot,failed=(s.items||[]).filter(i=>i.sync_error||['failed','conflict','submitted'].includes(i.registration_status));
+    const s=wbTrf.snapshot,failed=[...(s.groups||[]),...(s.legacy_items||[])].filter(i=>i.sync_error||['failed','conflict','submitted'].includes(i.registration_status));
     wbTrf.message=s.status==='not_configured'?'配置尚未完成，未发送 TRF 请求。':
       action==='unpublish'&&s.can_withdraw?'仍有登记未能确认撤回（可能在之前的 TRF 地址），请查看下方错误或核对对端记录。':
       failed.length?`${failed.length} 项失败或尚待确认，请查看卡片状态后重试。`:
@@ -137,7 +149,7 @@ $('#wb-home-source').onchange=e=>{
 $('#wb-trf-read').onclick=()=>wbTrfAction('refresh');
 $('#wb-trf-publish').onclick=()=>wbTrfAction('publish');
 $('#wb-trf-withdraw').onclick=()=>{
-  showModal('<h2>取消本地能力的 TRF 注册</h2><p>仅撤回本平台登记的本地能力，不删除第三方服务，也不取消账号订阅。</p><div class="wb-modal-actions"><button id="wb-trf-keep">保留</button><button id="wb-trf-confirm-withdraw">确认撤回</button></div>');
+  showModal('<h2>取消内部 MCP Server 的 TRF 注册</h2><p>撤回三个分类的登记及能核对归属的旧版逐能力登记。不删除第三方服务，也不取消账号订阅。</p><div class="wb-modal-actions"><button id="wb-trf-keep">保留</button><button id="wb-trf-confirm-withdraw">确认撤回</button></div>');
   $('#wb-trf-keep').onclick=hideModal;
   $('#wb-trf-confirm-withdraw').onclick=()=>{hideModal();wbTrfAction('unpublish');};
 };

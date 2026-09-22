@@ -32,7 +32,11 @@ class Peer(BaseHTTPRequestHandler):
         if self.path=='/latest':return self.respond({'final_result':'Local fixture perception result'})
         if self.path=='/trf/api/v1/mcp-servers':
             return self.respond({'code':200,'message':'OK','data':[
-                {**item,'id':index,'createdAt':'2026-09-22'}
+                {'server_name':item['serverName'],'server_type':item['serverType'],
+                 'tool_type':item['toolType'],'description':'TRF normalized: '+item['description'],
+                 'url':item['url'].rstrip('/')+'/', 'server_status':item['serverStatus'],
+                 **({'is_third_party':item['isThirdParty']} if 'isThirdParty' in item else {}),
+                 'id':index,'createdAt':'2026-09-22'}
                 for index,item in enumerate(self.servers.values())]})
         self.respond({'items':[{'id':'fixture.vision','name':'联调视觉工具','kind':'tool','description':'本地验证目录，不是生产网络数据','inputSchema':{'type':'object','properties':{}}},{'id':'fixture.patrol','name':'联调巡检套餐','kind':'package','description':'本地目录契约验证'}]})
     def do_DELETE(self):

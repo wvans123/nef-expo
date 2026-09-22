@@ -23,6 +23,11 @@ _STATE_LOCK = threading.RLock()
 _STATES: dict[tuple[str, str], dict[str, Any]] = {}
 _MANAGED: dict[tuple[str, str], dict[str, Any]] = {}
 _BUSY = False
+_GROUPS = {
+    "nf": ("nf tool", "网络功能能力"),
+    "computing": ("computing tool", "计算能力"),
+    "sensing": ("sensing tool", "感知能力"),
+}
 
 
 def reset_state_for_tests() -> None:
@@ -70,31 +75,51 @@ def _capabilities() -> list[Any]:
     ]
 
 
-def _server_name(base: str | None, capability_id: str) -> str:
+def _server_name(base: str | None, group_id: str) -> str:
     digest = hashlib.sha256((base or "").encode("utf-8")).hexdigest()[:8]
-    return f"nef-cap-{digest}-{capability_id}"
+    return f"nef-group-{digest}-{group_id}"
+
+
+def _group_capabilities() -> dict[str, list[Any]]:
+    capabilities = _capabilities()
+    return {
+        group_id: [cap for cap in capabilities if capability_tool_type(cap) == tool_type]
+        for group_id, (tool_type, _name) in _GROUPS.items()
+    }
 
 
 def _payloads(base: str | None) -> dict[str, dict[str, Any]]:
     values: dict[str, dict[str, Any]] = {}
-    for cap in _capabilities():
-        tool_type = capability_tool_type(cap)
-        if tool_type not in TRF_TOOL_TYPES:
+    for group_id, caps in _group_capabilities().items():
+        if not caps:
             continue
-        values[cap.id] = {
-            "serverName": _server_name(base, cap.id),
+        tool_type, name = _GROUPS[group_id]
+        values[group_id] = {
+            "serverName": _server_name(base, group_id),
             "serverType": "Streamable HTTP",
             "toolType": tool_type,
-            "description": f"[{cap.name}] {cap.description}",
-            "url": (
-                f"{base}/mcp/capabilities/{cap.id}"
-                if base
-                else ""
-            ),
+            "description": f"NEF {name}，包括：" + "、".join(cap.name for cap in caps),
+            "url": base or "",
             "serverStatus": "active",
             "isThirdParty": False,
         }
     return values
+
+
+def _legacy_payloads(base: str | None) -> dict[str, dict[str, Any]]:
+    """Recognize the previous release only for explicit withdrawal, never POST it."""
+    if not base:
+        return {}
+    digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:8]
+    return {
+        "legacy:" + cap.id: {
+            "serverName": f"nef-cap-{digest}-{cap.id}",
+            "toolType": capability_tool_type(cap),
+            "url": f"{base}/mcp/capabilities/{cap.id}",
+            "isThirdParty": False,
+        }
+        for cap in _capabilities()
+    }
 
 
 def _new_state(context: dict[str, Any]) -> dict[str, Any]:
@@ -119,7 +144,7 @@ def _state_for(context: dict[str, Any]) -> dict[str, Any]:
 
 def _set_item(
     state: dict[str, Any],
-    capability_id: str,
+    entry_id: str,
     registration_status: str,
     sync_error: str | registry._RemoteFailure | None = None,
 ) -> None:
@@ -129,7 +154,7 @@ def _set_item(
         item["sync_diagnostic"] = registry._trf_error_detail(sync_error)
     elif sync_error:
         item["sync_error"] = sync_error
-    state["items"][capability_id] = item
+    state["items"][entry_id] = item
 
 
 def _remote_projection(
@@ -173,14 +198,14 @@ def _remember(
     state_key: tuple[str, str],
     target: str,
     token_env: str | None,
-    capability_id: str,
+    entry_id: str,
     payload: dict[str, Any],
 ) -> None:
     _MANAGED[(target, payload["serverName"])] = {
         "state_key": state_key,
         "target": target,
         "token_env": token_env,
-        "capability_id": capability_id,
+        "entry_id": entry_id,
         "payload": copy.deepcopy(payload),
     }
 
@@ -214,28 +239,44 @@ def _apply_remote(
     state["remote_items"] = projected
     state["ignored_count"] = ignored
     state["last_checked"] = _now()
-    for capability_id, payload in payloads.items():
+    for entry_id, payload in payloads.items():
         if not context["base"]:
-            _set_item(state, capability_id, "unknown", "nef_base_not_configured")
+            _set_item(state, entry_id, "unknown", "nef_base_not_configured")
             continue
         exact, same_name = _matching(remote, payload)
         if exact:
-            _set_item(state, capability_id, "registered")
+            _set_item(state, entry_id, "registered")
+            candidate = next(item for item in remote if item["serverName"] == payload["serverName"])
+            differences = [
+                field for field in ("description", "serverType", "serverStatus")
+                if candidate.get(field) != payload[field]
+            ]
+            if differences:
+                state["items"][entry_id]["metadata_differences"] = differences
             if recover and context["target"]:
                 _remember(
                     context["key"],
                     context["target"],
                     context["token_env"],
-                    capability_id,
+                    entry_id,
                     payload,
                 )
         elif same_name:
-            _set_item(state, capability_id, "conflict", "trf_name_conflict")
-        elif absent_overrides and capability_id in absent_overrides:
-            status, error = absent_overrides[capability_id]
-            _set_item(state, capability_id, status, error)
+            _set_item(state, entry_id, "conflict", "trf_name_conflict")
+        elif absent_overrides and entry_id in absent_overrides:
+            status, error = absent_overrides[entry_id]
+            _set_item(state, entry_id, status, error)
         else:
-            _set_item(state, capability_id, "unregistered")
+            _set_item(state, entry_id, "unregistered")
+    if recover and context["target"]:
+        for entry_id, payload in _legacy_payloads(context["base"]).items():
+            exact, _same_name = _matching(remote, payload)
+            if exact:
+                _set_item(state, entry_id, "registered")
+                _remember(context["key"], context["target"], context["token_env"], entry_id, payload)
+            elif not any(item["serverName"] == payload["serverName"] for item in remote):
+                state["items"].pop(entry_id, None)
+                _forget(context["target"], payload["serverName"])
 
 
 def _mark_read_failure(
@@ -247,16 +288,16 @@ def _mark_read_failure(
     with _STATE_LOCK:
         state = _state_for(context)
         state["status"] = "stale" if state["last_checked"] else "failed"
-        for capability_id in _payloads(context["base"]):
-            previous = state["items"].get(capability_id, {})
+        for entry_id in _payloads(context["base"]):
+            previous = state["items"].get(entry_id, {})
             if (
                 preserve_submissions
                 and previous.get("registration_status") in {"submitted", "failed"}
             ):
                 if not previous.get("sync_error"):
-                    _set_item(state, capability_id, previous["registration_status"], failure)
+                    _set_item(state, entry_id, previous["registration_status"], failure)
             else:
-                _set_item(state, capability_id, "unknown", failure)
+                _set_item(state, entry_id, "unknown", failure)
 
 
 def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
@@ -265,6 +306,7 @@ def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
         "registered": statuses.count("registered"),
         "unregistered": statuses.count("unregistered"),
         "unknown": sum(status in {"unknown", "submitted"} for status in statuses),
+        "submitted": statuses.count("submitted"),
         "failed": sum(status in {"failed", "conflict"} for status in statuses),
         "total": len(statuses),
     }
@@ -281,14 +323,17 @@ def _response(
         busy = _BUSY if busy_override is None else busy_override
         can_withdraw = bool(_MANAGED)
     payloads = _payloads(context["base"])
-    items: list[dict[str, Any]] = []
-    for capability_id, payload in payloads.items():
+    groups: list[dict[str, Any]] = []
+    members = _group_capabilities()
+    for group_id, payload in payloads.items():
         stored = current["items"].get(
-            capability_id,
+            group_id,
             {"registration_status": "unknown"},
         )
         item = {
-            "capability_id": capability_id,
+            "group_id": group_id,
+            "name": _GROUPS[group_id][1],
+            "capability_ids": [cap.id for cap in members[group_id]],
             "serverName": payload["serverName"],
             "toolType": payload["toolType"],
             "registration_status": stored["registration_status"],
@@ -297,7 +342,21 @@ def _response(
             item["sync_error"] = stored["sync_error"]
         if stored.get("sync_diagnostic"):
             item["sync_diagnostic"] = stored["sync_diagnostic"]
-        items.append(item)
+        if stored.get("metadata_differences"):
+            item["metadata_differences"] = stored["metadata_differences"]
+        groups.append(item)
+    items = [
+        {**{key: value for key, value in group.items() if key not in {"name", "capability_ids"}},
+         "capability_id": capability_id}
+        for group in groups
+        for capability_id in group["capability_ids"]
+    ]
+    legacy_items = [
+        {"serverName": payload["serverName"], **current["items"][entry_id]}
+        for entry_id, payload in _legacy_payloads(context["base"]).items()
+        if entry_id in current["items"]
+        and current["items"][entry_id]["registration_status"] != "unregistered"
+    ]
     return {
         "configured": bool(context["valid"] and context["target"]),
         "base_configured": bool(context["valid"] and context["base"]),
@@ -305,10 +364,13 @@ def _response(
         "status": current["status"],
         "last_checked": current["last_checked"],
         "items": items,
+        "groups": groups,
+        "legacy_items": legacy_items,
         "remote_items": current["remote_items"],
         "ignored_count": current["ignored_count"],
         "can_withdraw": can_withdraw,
-        "summary": _summary(items),
+        "summary": _summary(groups),
+        "capability_summary": _summary(items),
     }
 
 
@@ -377,8 +439,8 @@ def build_router(
                 state = _state_for(context)
                 if not context["valid"]:
                     state["status"] = "failed"
-                    for capability_id in _payloads(None):
-                        _set_item(state, capability_id, "unknown", "invalid_config")
+                    for entry_id in _payloads(None):
+                        _set_item(state, entry_id, "unknown", "invalid_config")
                     return _response(context, state=state, busy_override=False)
                 if not context["target"]:
                     state["status"] = "not_configured"
@@ -415,8 +477,8 @@ def build_router(
                 payloads = _payloads(context["base"])
                 if not context["valid"]:
                     state["status"] = "failed"
-                    for capability_id in payloads:
-                        _set_item(state, capability_id, "failed", "invalid_config")
+                    for entry_id in payloads:
+                        _set_item(state, entry_id, "failed", "invalid_config")
                     return _response(context, state=state, busy_override=False)
                 if not context["target"] or not context["base"]:
                     state["status"] = "not_configured"
@@ -425,8 +487,8 @@ def build_router(
                         if not context["target"]
                         else "nef_base_not_configured"
                     )
-                    for capability_id in payloads:
-                        _set_item(state, capability_id, "failed", error)
+                    for entry_id in payloads:
+                        _set_item(state, entry_id, "failed", error)
                     return _response(context, state=state, busy_override=False)
 
             try:
@@ -447,21 +509,21 @@ def build_router(
                 state["status"] = "loaded"
 
             attempted: dict[str, tuple[str, str | registry._RemoteFailure | None]] = {}
-            for capability_id, payload in payloads.items():
+            for entry_id, payload in payloads.items():
                 with _STATE_LOCK:
-                    current = _state_for(context)["items"][capability_id]
+                    current = _state_for(context)["items"][entry_id]
                     if current["registration_status"] in {"registered", "conflict"}:
                         continue
                     _remember(
                         context["key"],
                         context["target"],
                         context["token_env"],
-                        capability_id,
+                        entry_id,
                         payload,
                     )
                     _set_item(
                         _state_for(context),
-                        capability_id,
+                        entry_id,
                         "submitted",
                     )
                 try:
@@ -472,16 +534,16 @@ def build_router(
                         payload=payload,
                     )
                 except registry._RemoteFailure as exc:
-                    attempted[capability_id] = ("failed", exc)
+                    attempted[entry_id] = ("failed", exc)
                     with _STATE_LOCK:
                         _set_item(
                             _state_for(context),
-                            capability_id,
+                            entry_id,
                             "failed",
                             exc,
                         )
                 else:
-                    attempted[capability_id] = (
+                    attempted[entry_id] = (
                         "submitted",
                         "trf_confirmation_unknown",
                     )
@@ -593,7 +655,7 @@ def build_router(
                                 state = _managed_state(record)
                                 _set_item(
                                     state,
-                                    record["capability_id"],
+                                    record["entry_id"],
                                     "unknown",
                                     exc,
                                 )
@@ -607,19 +669,19 @@ def build_router(
                 deleted: list[dict[str, Any]] = []
                 for record in records:
                     exact, same_name = _matching(before, record["payload"])
-                    capability_id = record["capability_id"]
+                    entry_id = record["entry_id"]
                     if not exact:
                         with _STATE_LOCK:
                             state = _managed_state(record)
                             if same_name:
                                 _set_item(
                                     state,
-                                    capability_id,
+                                    entry_id,
                                     "conflict",
                                     "trf_name_conflict",
                                 )
                             else:
-                                _set_item(state, capability_id, "unregistered")
+                                _set_item(state, entry_id, "unregistered")
                                 _forget(
                                     record["target"],
                                     record["payload"]["serverName"],
@@ -636,7 +698,7 @@ def build_router(
                             state = _managed_state(record)
                             _set_item(
                                 state,
-                                capability_id,
+                                entry_id,
                                 "failed",
                                 exc,
                             )
@@ -646,7 +708,7 @@ def build_router(
                         with _STATE_LOCK:
                             _set_item(
                                 _managed_state(record),
-                                capability_id,
+                                entry_id,
                                 "submitted",
                                 "trf_confirmation_unknown",
                             )
@@ -664,7 +726,7 @@ def build_router(
                             state = _managed_state(record)
                             _set_item(
                                 state,
-                                record["capability_id"],
+                                record["entry_id"],
                                 "submitted",
                                 exc,
                             )
@@ -690,21 +752,21 @@ def build_router(
                         if exact:
                             _set_item(
                                 state,
-                                record["capability_id"],
+                                record["entry_id"],
                                 "submitted",
                                 "trf_confirmation_unknown",
                             )
                         elif same_name:
                             _set_item(
                                 state,
-                                record["capability_id"],
+                                record["entry_id"],
                                 "conflict",
                                 "trf_name_conflict",
                             )
                         else:
                             _set_item(
                                 state,
-                                record["capability_id"],
+                                record["entry_id"],
                                 "unregistered",
                             )
                             _forget(

@@ -406,18 +406,35 @@ def test_explicit_server_name_keeps_legacy_publish_when_publish_url_is_configure
     ).json()["items"][0]["registration_status"] == "unknown"
 
 
-def test_reserved_builtin_catalog_prefix_cannot_be_registered(client, monkeypatch):
+@pytest.mark.parametrize("server_name", ["nef-cap-12345678-target_detection", "nef-group-12345678-nf"])
+def test_reserved_builtin_catalog_prefix_cannot_be_registered(client, monkeypatch, server_name):
     configure(monkeypatch)
     denied = client.post(
         "/api/v1/network/servers",
         headers=headers(),
         json={
-            "serverName": "nef-cap-12345678-target_detection",
+            "serverName": server_name,
             "url": "http://example.invalid/mcp",
         },
     )
     assert denied.status_code == 422
     assert denied.json()["detail"]["code"] == "reserved_server_name"
+
+
+def test_get_identity_matching_does_not_require_post_metadata_echo():
+    expected = trf_server("nef-group-12345678-nf", "http://nef.invalid", tool_type="nf tool", is_third_party=False)
+    parsed = network_registry._validate_trf_servers({"mcp_servers": [{
+        "server_name": expected["serverName"], "tool_type": expected["toolType"],
+        "url": "http://nef.invalid/", "is_third_party": False,
+    }]})[0]
+    assert parsed["description"] == parsed["serverStatus"] == parsed["serverType"] == ""
+    assert network_registry._same_trf_server(parsed, expected)
+    for field, value in [("url", "http://other.invalid"), ("toolType", "sensing tool"), ("isThirdParty", True)]:
+        assert not network_registry._same_trf_server({**parsed, field: value}, expected)
+    with pytest.raises(network_registry._RemoteSchemaFailure):
+        network_registry._validate_trf_servers([{**expected, "server_name": "contradictory-name"}])
+    with pytest.raises(network_registry._RemoteSchemaFailure):
+        network_registry._validate_trf_servers([{"server_name": "missing-url", "tool_type": "nf tool"}])
 
 
 def test_config_change_withdraws_first_target_not_new_collection(
