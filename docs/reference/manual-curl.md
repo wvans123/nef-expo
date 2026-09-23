@@ -119,6 +119,8 @@ nef DELETE /api/v1/network/servers/<server_id>
 
 首页发布需先填写 nef_base_url；publish 按 nf tool、computing tool、sensing tool 发出最多三条 POST，七字段结构中 isThirdParty=false、url 分别是 NEF 根地址加 `/mcp/groups/nf/mcp`、`/mcp/groups/computing/mcp`、`/mcp/groups/sensing/mcp`。summary 统计三个 MCP Server，capability_summary 统计它们覆盖的 23 项能力；GET 核对服务名、分类、URL 和可选标识，兼容驼峰/下划线字段、描述改写及尾斜杠。与旧同名根地址或旧分类路径精确匹配时先 DELETE、GET 确认缺席再 POST 新端点；其他冲突不自动覆盖。unpublish 撤回可核对归属的分类登记及旧版逐能力登记，不删除第三方条目。双向开放仍为 isThirdParty=true。GET catalog 只读缓存，POST refresh 才向相同的 /trf/api/v1/mcp-servers 发 GET；普通页对应“核对状态”，目录来源预览收在 `?ops=1` 的折叠设置中。
 
+这三个 POST 是 NEF 内部目录操作：可用任一有效 NEF 账号 Key，不要求 `af:register` scope；账号只用于拦截匿名操作，不进入向 TRF 发送的报文和共享状态。切换账号后先读同一个 GET catalog，重复发布会跳过已登记项。双向开放的 AF MCP 登记仍使用独立的账号权限。
+
 使用订阅者账号 Key 执行市场订阅，不要复用发布者账号。订阅本身免费且不外发；真正 tools/call 使用 tools/list 返回的准确 mcp_name 和实际 inputSchema，可能触发现场操作，按获准业务意图调用。完整契约见 [第三方工具订阅](network-catalog.md#5-第三方工具的账号订阅与调用)。
 
 ## 4. NEF 实际发出的内容

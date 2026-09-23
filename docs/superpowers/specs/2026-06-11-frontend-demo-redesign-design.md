@@ -158,4 +158,4 @@ Python 覆盖场景订阅、三场景 Intent、API / MCP、真实 HTTP 转发、
 
 ### 2026-09-22 首页目录同步
 
-首页用与 TRF 相同的四类 toolType，隐藏规划中与 ecosystem。可用本地能力由 NEF 单工具 `/mcp/capabilities/{id}` 适配端点包装，保留真实调用的账号权限与订阅校验；显式批量同步逐条 POST 六个基础字段及 isThirdParty=false，与外部 true 的注册结构一致，不包装套餐。同步状态从 TRF 读回核对，部分失败独立显示；撤回只针对本平台确认或记录过的登记。TRF 来源预览收进运维折叠设置，只展示服务信息，不把未知 schema 的服务当成可调用工具。唯一接口参考见 [TRF 契约](../../reference/network-catalog.md#8-首页本地能力同步与-trf-读取模式)。
+首页用与 TRF 相同的四类 toolType，隐藏规划中与 ecosystem。可用本地能力按 nf、computing、sensing 三类由 NEF 提供 `/mcp/groups/{group_id}/mcp` 端点，公开 `tools/list`，调用仍检查账号权限与订阅；显式同步最多三个 MCP Server，POST 带 isThirdParty=false，不包装套餐。同步及核对状态由 NEF 实例共享，不绑定 AF 账号；任一有效 NEF Key 可触发，匿名不可写入。同步状态从 TRF 读回核对，部分失败独立显示；撤回只针对本平台确认或记录过的登记。TRF 来源预览收进运维折叠设置，只展示服务信息，不把未知 schema 的服务当成可调用工具。唯一接口参考见 [TRF 契约](../../reference/network-catalog.md#8-首页本地能力同步与-trf-读取模式)。

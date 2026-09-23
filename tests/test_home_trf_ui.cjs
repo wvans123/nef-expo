@@ -60,6 +60,21 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     await page.locator('#wb-trf-publish').click();
     await page.waitForFunction(()=>!wbTrf.busy);
     assert.equal((await writes()).length,posts.length,'Already registered rows must not be reposted');
+    const firstAccount=await page.locator('#acct-select').inputValue();
+    await page.locator('#btn-register-acct').click();
+    await page.locator('#wb-account-name').fill('home-trf-second-'+Date.now());
+    await page.locator('#wb-account-create').click();
+    await page.waitForFunction(first=>current!==first&&
+      document.querySelector('#acct-select').value===current&&
+      !!apiKey()&&wbTrf.snapshot?.summary.registered===3,firstAccount);
+    assert.notEqual(await page.locator('#acct-select').inputValue(),firstAccount);
+    assert.match(await card.innerText(),/已注册/);
+    await page.locator('#wb-trf-publish').click();
+    await page.waitForFunction(()=>!wbTrf.busy);
+    assert.equal((await writes()).length,posts.length,'Switching account must not register the NEF twice');
+    await page.locator('#acct-select').selectOption(firstAccount);
+    await page.waitForFunction(()=>wbTrf.snapshot?.summary.registered===3);
+    assert.match(await card.innerText(),/已注册/);
     await page.locator('#wb-home-trf').scrollIntoViewIfNeeded();
     await page.screenshot({path:path.join(output,'synchronized-desktop.png')});
     await page.goto(origin+'/?ops=1#market');

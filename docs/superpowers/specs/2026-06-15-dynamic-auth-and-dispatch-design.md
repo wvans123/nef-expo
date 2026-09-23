@@ -154,7 +154,7 @@
 
 ## 六、测试
 
-首页 TRF 登记与调用授权分开：`/api/v1/network/trf/catalog` 仅公开去掉 URL/凭据的目录缓存；刷新上游、发布、撤回要求 `af:register`。本地 `/mcp/capabilities/{id}` 单工具入口要求 `mcp:tools`，复用既有订阅和 live 调用检查；登记不会授予权益，通知不会执行工具。TRF 读取模式只展示服务描述，不转成可调用工具。
+首页 TRF 登记与调用授权分开：`/api/v1/network/trf/catalog` 仅公开去掉 URL/凭据的目录缓存；刷新上游、发布、撤回由 NEF 实例执行，要求任一有效 NEF Key，但不要求 `af:register`，状态不按 AF 账号分区。三分类 MCP 的公开 `tools/list` 不要求 Key，`tools/call` 仍要求 `mcp:tools`、订阅及 live 调用检查；登记不会授予权益，通知不会执行工具。TRF 读取模式只展示服务描述，不转成可调用工具。
 
 - `nef_auth.pipeline` 七级、decision=allow（已授权调用）。
 - 402 payload 含 pipeline 且 ⑥ authz=denied。

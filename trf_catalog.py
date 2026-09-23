@@ -471,7 +471,7 @@ def build_router(
     async def refresh_catalog(
         authorization: str | None = Header(default=None),
     ):
-        auth(authorization, "af:register")
+        auth(authorization, None)
         _begin_operation()
         context = _context()
         try:
@@ -508,7 +508,7 @@ def build_router(
     async def publish_catalog(
         authorization: str | None = Header(default=None),
     ):
-        auth(authorization, "af:register")
+        auth(authorization, None)
         _begin_operation()
         context = _context()
         try:
@@ -651,7 +651,7 @@ def build_router(
     async def unpublish_catalog(
         authorization: str | None = Header(default=None),
     ):
-        auth(authorization, "af:register")
+        auth(authorization, None)
         _begin_operation()
         context = _context()
         try:

@@ -23,7 +23,7 @@
 - **调用与鉴权**展示实际身份、入口权限和订阅校验回执；页面显示文字与结构化数据，媒体仅保留后端接收。场景回传仍只在具体调用页出现。
 - **真实调用**：活动页面直接发送 live 请求，移除执行方式和示例意图；Intent 可选“不指定场景”，走单独配置的通用接收地址。未配置返回待对接，不回落到模拟结果。旧后端 demo 契约仅保留兼容，HTTP 受理不等于业务完成。
 - **简化回传**：同事无需 NEF Key，向 `/api/v1/scene-feedback/{scene_id}` POST `{"final_result":"文字结果"}`，GET 同一路径即可自查。三场景通道共享，页面不登录也可读；旧带接收 Key 接口保留备用。`?ops=1` 显示“回传地址”和通知诊断，只是显示开关，不是鉴权。命令见 [curl 手册](docs/reference/manual-curl.md)。
-- **TRF 目录同步**：23 项可用本地能力按 nf tool、computing tool、sensing tool 注册为三个 MCP Server，POST 带 `isThirdParty: false`，url 分别指向 `nef_base_url/mcp/groups/{nf|computing|sensing}/mcp`。TRF 无 Key 可读取各组工具定义，调用仍需账号 Key 和权益。页面分开统计 Server 与覆盖能力数，卡片跟随所属分类。GET 以服务名、类型、URL 和可选标识核对；查询失败显示待确认。同步可迁移同名且精确匹配的旧根地址或旧分类路径登记，其他冲突不自动覆盖。`?ops=1` 可预览 TRF 四类服务登记；页面加载只读本地缓存。
+- **TRF 目录同步**：23 项可用本地能力按 nf tool、computing tool、sensing tool 注册为三个 MCP Server，POST 带 `isThirdParty: false`，url 分别指向 `nef_base_url/mcp/groups/{nf|computing|sensing}/mcp`。登记主体和状态属于 NEF 实例，不属于 AF 账号；任一有效 NEF 账号 Key 可操作，无需 `af:register` scope，未登录不可向 TRF 写入。换账号仍看到同一登记，不重复 POST。TRF 无 Key 可读取各组工具定义，调用仍需账号 Key 和权益。页面分开统计 Server 与覆盖能力数，卡片跟随所属分类。GET 以服务名、类型、URL 和可选标识核对；查询失败显示待确认。同步可迁移同名且精确匹配的旧根地址或旧分类路径登记，其他冲突不自动覆盖。`?ops=1` 可预览 TRF 四类服务登记；页面加载只读本地缓存。
 - **订阅费用与说明**：开通场景同时开通所选子能力，首页和详情显示“套餐已包含”，API / MCP 可直接使用；不重复收取子能力月费。取消场景只撤回该场景来源，保留单订或其他套餐仍覆盖的能力。估算费用包含等级基础价和购买时保存的场景价，PRO/MAX 可用能力可点击查看用途；规则见[订阅参考](docs/reference/subscription-query.md#103-nef-服务端配置)。
 - **边界**：当前目录契约是本项目的对接约定，不是 TRF 标准协议。生产网络接口仍待同事提供；本地账号、权益、登记与回传保存在内存。mTLS / OAuth、资源级策略、生产持久化未接入。
 - **本期隐藏**：对外 Skill / 场景方案、AF 智能终端不进入展示动线。对应页签隐藏，旧后端接口保留兼容但不进入本期演示。

@@ -21,7 +21,7 @@ TRF 四类为 `nf tool`、`computing tool`、`sensing tool`、`third-party tool`
 
 表单“连接并发现工具”负责首次登记、握手、读取工具；已有记录的“重新发现工具”只重读该服务的工具，需先取消发布再操作；发现失败也保留“删除记录”。点击“发布”才上首页并发给 TRF；“取消发布”先本地下架，再撤回远端。远端撤回尚未确认时保留记录与重试入口，不能直接删除而丢失撤回信息。
 
-首页最下方只展示“同步到 TRF”“取消 TRF 注册”“核对状态”及登记状态。来源切换收在 `/?ops=1#market` 的“目录来源设置”折叠区，普通页不显示；双向开放的详细 TRF 运维面板仍只在 `/?ops=1#afreg` 显示。此参数只是显示开关，写入及上游读取仍要求账号 Key 与 `af:register` scope。页面加载或 30 秒本地刷新不会自动请求 TRF。
+首页最下方只展示“同步到 TRF”“取消 TRF 注册”“核对状态”及登记状态。来源切换收在 `/?ops=1#market` 的“目录来源设置”折叠区，普通页不显示；双向开放的详细 TRF 运维面板仍只在 `/?ops=1#afreg` 显示。此参数只是显示开关。首页内部目录操作由 NEF 实例执行：仍要求任一有效 NEF 账号 Key 以阻止匿名写入，但不要求 `af:register` scope，账号不进入 TRF 报文或登记状态；双向开放仍按其独立的 AF 权限管理。页面加载或 30 秒本地刷新不会自动请求 TRF。
 
 只改 `config/integration.local.json` 中的 `registry`：
 
@@ -82,7 +82,7 @@ POST 和 GET 使用同一个 `registry.trf_mcp_servers_url`，统一去掉末尾
 
 ## 4. 页面调用 NEF 的接口
 
-均需 `Authorization: Bearer <NEF账号Key>` 与 `af:register` scope，公开市场除外。
+本节双向开放登记接口需 `Authorization: Bearer <NEF账号Key>` 与 `af:register` scope，公开市场除外；首页内部目录操作见第 8 节，使用任一有效账号 Key，不要求 AF scope。
 
 | 方法 / 路径 | 正文与行为 |
 |---|---|
@@ -155,7 +155,7 @@ POST 和 GET 使用同一个 `registry.trf_mcp_servers_url`，统一去掉末尾
 | 方法 / 路径 | 行为 |
 |---|---|
 | GET `/api/v1/network/trf/catalog` | 无 Key 只读缓存；groups 为三个分类登记，summary 统计 Server 数；items 将分类状态投影到能力卡，capability_summary 统计能力数；legacy_items 为可核对的旧登记；remote_items 为四类服务目录 |
-| POST `/api/v1/network/trf/catalog/refresh` | 无正文；带账号 Key + af:register，向 TRF 发 GET，核对状态并更新展示目录 |
+| POST `/api/v1/network/trf/catalog/refresh` | 无正文；任一有效 NEF 账号 Key（不要求 AF scope），NEF 向 TRF 发 GET，核对全局状态 |
 | POST `/api/v1/network/trf/catalog/publish` | 同上鉴权；先 GET，跳过已匹配分类，再对未登记分类 POST（最多三次），最后 GET 确认 |
 | POST `/api/v1/network/trf/catalog/unpublish` | 同上鉴权；仅 DELETE 本平台本批已发送或已精确匹配的条目，再 GET 确认；不删除第三方/同名冲突记录 |
 
@@ -163,7 +163,7 @@ POST 和 GET 使用同一个 `registry.trf_mcp_servers_url`，统一去掉末尾
 
 首页取消按钮在已配置 TRF 和 NEF 地址时即可使用，包括本进程尚无登记缓存的情况；点击后先 GET 精确匹配，再按 serverName DELETE。GET 失败或不完整时不盲目 POST/DELETE，也不显示“处理完成”。失败项保留 `sync_error`；可用时附 `sync_diagnostic: {code, method, http_status}`，例如 GET / HTTP 503 或 POST / HTTP 400。页面底部与状态点提示显示具体原因，不回显地址、响应原文或凭证。`can_withdraw` 表示进程内仍有待确认撤回的登记，不再作为取消按钮的唯一启用条件。
 
-状态包括 unknown（灰，尚未核对）、registered（绿，服务身份已确认）、unregistered（红，读回缺席）、submitted（黄，已提交待确认）、failed、conflict。首页显示“MCP Server 3 个 · 已注册 3 个 · 覆盖能力 23 项”，卡片跟随所属分类；GET 失败显示待确认及原因，不把未知状态写成“已注册 0”。缓存与发送记录仍为内存；重启后需显式读取核对服务身份，不能按名称前缀直接删除。
+状态包括 unknown（灰，尚未核对）、registered（绿，服务身份已确认）、unregistered（红，读回缺席）、submitted（黄，已提交待确认）、failed、conflict。首页显示“MCP Server 3 个 · 已注册 3 个 · 覆盖能力 23 项”，卡片跟随所属分类；GET 失败显示待确认及原因，不把未知状态写成“已注册 0”。缓存与发送记录按 NEF 的 TRF/自身地址组合共享，与当前 AF 账号无关；换账号读到同一状态，重复同步先核对并跳过已登记项。重启后需显式读取核对服务身份，不能按名称前缀直接删除。
 
 ### 发往 TRF 的本地能力报文
 

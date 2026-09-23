@@ -119,10 +119,11 @@ def test_payload_classification_exclusions_and_cache_only_get(
     assert catalog_client.post(
         "/api/v1/network/trf/catalog/refresh"
     ).status_code == 401
-    assert catalog_client.post(
+    read_only_account = catalog_client.post(
         "/api/v1/network/trf/catalog/refresh",
         headers=headers("caller-list"),
-    ).status_code == 403
+    )
+    assert read_only_account.status_code == 200
 
     with trf_catalog._STATE_LOCK:
         trf_catalog._BUSY = True
@@ -538,6 +539,39 @@ def test_three_group_posts_and_changed_get_metadata_count_as_registered(
     catalog_client.post("/api/v1/network/trf/catalog/publish", headers=headers())
     assert [r["method"] for r in http_fixture.requests].count("POST") == 3
     assert all(r["path"] == path for r in http_fixture.requests)
+
+
+def test_internal_catalog_state_is_shared_across_accounts(
+    catalog_client, http_fixture, monkeypatch
+):
+    use_capabilities(monkeypatch, "target_detection")
+    path = "/trf/api/v1/mcp-servers"
+    base = "http://nef.example:8069"
+    configure_catalog(monkeypatch, target=http_fixture.url(path), base=base)
+    remote = []
+    http_fixture.add("GET", path, lambda _r: json_response(remote))
+    http_fixture.add("POST", path, lambda r: (remote.append(json.loads(r["body"])) or (201, {}, b"")))
+
+    def delete(request):
+        remote[:] = [item for item in remote if item["serverName"] != request["path"].rsplit("/", 1)[-1]]
+        return 204, {}, b""
+
+    payload = trf_catalog._payloads(base)["sensing"]
+    http_fixture.add("DELETE", path + "/" + payload["serverName"], delete)
+    a = headers("caller-a")
+    b = headers("caller-list")
+    assert catalog_client.post("/api/v1/network/trf/catalog/publish").status_code == 401
+    published = catalog_client.post("/api/v1/network/trf/catalog/publish", headers=a).json()
+    assert published["summary"]["registered"] == 1
+    assert catalog_client.get("/api/v1/network/trf/catalog").json()["summary"]["registered"] == 1
+    assert catalog_client.post("/api/v1/network/trf/catalog/refresh", headers=b).json()["summary"]["registered"] == 1
+    assert catalog_client.post("/api/v1/network/trf/catalog/publish", headers=b).json()["summary"]["registered"] == 1
+    assert [r["method"] for r in http_fixture.requests].count("POST") == 1
+    withdrawn = catalog_client.post("/api/v1/network/trf/catalog/unpublish", headers=b).json()
+    assert withdrawn["summary"]["unregistered"] == 1
+    assert catalog_client.get("/api/v1/network/trf/catalog").json()["summary"]["unregistered"] == 1
+    assert remote == []
+    assert [r["method"] for r in http_fixture.requests].count("DELETE") == 1
 
 
 def test_legacy_records_only_withdraw_explicitly_and_never_count_as_groups(
