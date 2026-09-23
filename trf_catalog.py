@@ -88,6 +88,11 @@ def _group_capabilities() -> dict[str, list[Any]]:
     }
 
 
+def group_capabilities(group_id: str) -> list[Any] | None:
+    """Return the public catalog for a known MCP group, including empty groups."""
+    return _group_capabilities().get(group_id)
+
+
 def _payloads(base: str | None) -> dict[str, dict[str, Any]]:
     values: dict[str, dict[str, Any]] = {}
     for group_id, caps in _group_capabilities().items():
@@ -99,11 +104,31 @@ def _payloads(base: str | None) -> dict[str, dict[str, Any]]:
             "serverType": "Streamable HTTP",
             "toolType": tool_type,
             "description": f"NEF {name}，包括：" + "、".join(cap.name for cap in caps),
-            "url": base or "",
+            "url": f"{base}/mcp/groups/{group_id}/mcp" if base else "",
             "serverStatus": "active",
             "isThirdParty": False,
         }
     return values
+
+
+def _old_group_payloads(base: str | None) -> dict[str, dict[str, Any]]:
+    """The prior release advertised the same names at the non-MCP root URL."""
+    if not base:
+        return {}
+    return {group_id: {**payload, "url": base} for group_id, payload in _payloads(base).items()}
+
+
+def _previous_group_payloads(base: str | None) -> dict[str, list[dict[str, Any]]]:
+    if not base:
+        return {}
+    roots = _old_group_payloads(base)
+    return {
+        group_id: [
+            roots[group_id],
+            {**payload, "url": f"{base}/mcp/groups/{group_id}"},
+        ]
+        for group_id, payload in _payloads(base).items()
+    }
 
 
 def _legacy_payloads(base: str | None) -> dict[str, dict[str, Any]]:
@@ -235,6 +260,7 @@ def _apply_remote(
     absent_overrides: dict[str, tuple[str, str | registry._RemoteFailure | None]] | None = None,
 ) -> None:
     payloads = _payloads(context["base"])
+    previous_group_payloads = _previous_group_payloads(context["base"])
     projected, ignored = _remote_projection(remote)
     state["remote_items"] = projected
     state["ignored_count"] = ignored
@@ -262,7 +288,21 @@ def _apply_remote(
                     payload,
                 )
         elif same_name:
-            _set_item(state, entry_id, "conflict", "trf_name_conflict")
+            old = next((
+                candidate for candidate in previous_group_payloads.get(entry_id, [])
+                if _matching(remote, candidate)[0]
+            ), None)
+            old_exact = (
+                old is not None
+                and len([item for item in remote if item["serverName"] == payload["serverName"]]) == 1
+            )
+            if old_exact and absent_overrides and entry_id in absent_overrides:
+                status, error = absent_overrides[entry_id]
+                _set_item(state, entry_id, status, error)
+            else:
+                _set_item(state, entry_id, "conflict", "trf_legacy_group_url" if old_exact else "trf_name_conflict")
+            if old_exact and recover and context["target"]:
+                _remember(context["key"], context["target"], context["token_env"], entry_id, old)
         elif absent_overrides and entry_id in absent_overrides:
             status, error = absent_overrides[entry_id]
             _set_item(state, entry_id, status, error)
@@ -512,8 +552,33 @@ def build_router(
             for entry_id, payload in payloads.items():
                 with _STATE_LOCK:
                     current = _state_for(context)["items"][entry_id]
-                    if current["registration_status"] in {"registered", "conflict"}:
+                    if current["registration_status"] == "registered":
                         continue
+                    migrating = (
+                        current["registration_status"] == "conflict"
+                        and current.get("sync_error") == "trf_legacy_group_url"
+                    )
+                    if current["registration_status"] == "conflict" and not migrating:
+                        continue
+                if migrating:
+                    try:
+                        await registry._delete_trf_server(
+                            context["target"], payload["serverName"],
+                            token_env=context["token_env"],
+                        )
+                        remaining = await _read_remote(context["target"], context["token_env"])
+                    except (registry._RemoteSchemaFailure, registry._RemoteFailure) as exc:
+                        attempted[entry_id] = ("failed", exc)
+                        with _STATE_LOCK:
+                            _set_item(_state_for(context), entry_id, "failed", exc)
+                        continue
+                    if any(item["serverName"] == payload["serverName"] for item in remaining):
+                        attempted[entry_id] = ("conflict", "trf_legacy_group_url")
+                        continue
+                    with _STATE_LOCK:
+                        _forget(context["target"], payload["serverName"])
+                        _set_item(_state_for(context), entry_id, "unregistered")
+                with _STATE_LOCK:
                     _remember(
                         context["key"],
                         context["target"],

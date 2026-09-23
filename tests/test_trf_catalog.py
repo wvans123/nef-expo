@@ -94,7 +94,7 @@ def test_payload_classification_exclusions_and_cache_only_get(
         assert payload["serverType"] == "Streamable HTTP"
         assert payload["toolType"] == group_id + " tool"
         assert all(cap.name in payload["description"] for cap in trf_catalog._group_capabilities()[group_id])
-        assert payload["url"] == base
+        assert payload["url"] == f"{base}/mcp/groups/{group_id}/mcp"
         assert payload["isThirdParty"] is False
 
     response = catalog_client.get("/api/v1/network/trf/catalog")
@@ -525,7 +525,8 @@ def test_three_group_posts_and_changed_get_metadata_count_as_registered(
     data = response.json()
     assert {item["toolType"] for item in remote} == {"nf tool", "computing tool", "sensing tool"}
     assert len(remote) == 3
-    assert all(item["url"] == base and item["isThirdParty"] is False for item in remote)
+    assert all(item["url"] == f"{base}/mcp/groups/{group_id}/mcp" and item["isThirdParty"] is False
+               for group_id, item in zip(("nf", "computing", "sensing"), remote))
     assert data["summary"]["registered"] == data["summary"]["total"] == 3
     assert data["capability_summary"]["registered"] == data["capability_summary"]["total"] == 23
     assert data["status"] == "synced"
@@ -575,3 +576,93 @@ def test_legacy_records_only_withdraw_explicitly_and_never_count_as_groups(
     assert withdrawn["can_withdraw"] is False
     assert remote == [foreign, spoofed]
     assert [r["method"] for r in http_fixture.requests].count("DELETE") == 4
+
+
+@pytest.mark.parametrize("previous_suffix", ["", "/mcp/groups/{group_id}"])
+def test_existing_group_registration_migrates_only_when_exactly_owned(
+    catalog_client, http_fixture, monkeypatch, previous_suffix
+):
+    use_capabilities(monkeypatch, "target_detection", "compute_offload")
+    path = "/trf/api/v1/mcp-servers"
+    base = "http://nef.example:8069"
+    configure_catalog(monkeypatch, target=http_fixture.url(path), base=base)
+    old = trf_catalog._old_group_payloads(base)
+    remote = [
+        {**old[group_id], "url": base + previous_suffix.format(group_id=group_id)}
+        for group_id in ("sensing", "computing")
+    ]
+    http_fixture.add("GET", path, lambda _r: json_response(remote))
+    deletes = []
+
+    def delete(request):
+        deletes.append(request["path"].rsplit("/", 1)[1])
+        remote[:] = [item for item in remote if item["serverName"] != deletes[-1]]
+        return 204, {}, b""
+
+    for payload in old.values():
+        http_fixture.add("DELETE", path + "/" + payload["serverName"], delete)
+    http_fixture.add("POST", path, lambda r: (remote.append(json.loads(r["body"])) or (201, {}, b"")))
+    result = catalog_client.post(
+        "/api/v1/network/trf/catalog/publish", headers=headers()
+    ).json()
+    assert result["summary"]["registered"] == 2
+    assert set(deletes) == {item["serverName"] for item in old.values()}
+    assert {item["url"] for item in remote} == {
+        f"{base}/mcp/groups/sensing/mcp", f"{base}/mcp/groups/computing/mcp",
+    }
+
+
+def test_conflicting_root_registration_is_not_removed(
+    catalog_client, http_fixture, monkeypatch
+):
+    use_capabilities(monkeypatch, "target_detection")
+    path = "/trf/api/v1/mcp-servers"
+    base = "http://nef.example:8069"
+    configure_catalog(monkeypatch, target=http_fixture.url(path), base=base)
+    impostor = {**trf_catalog._old_group_payloads(base)["sensing"], "isThirdParty": True}
+    http_fixture.add("GET", path, lambda _r: json_response([impostor]))
+    result = catalog_client.post("/api/v1/network/trf/catalog/publish", headers=headers()).json()
+    assert result["groups"][0]["sync_error"] == "trf_name_conflict"
+    assert [r["method"] for r in http_fixture.requests] == ["GET", "GET"]
+
+
+def test_root_migration_delete_failure_keeps_old_url_and_does_not_post(
+    catalog_client, http_fixture, monkeypatch
+):
+    use_capabilities(monkeypatch, "target_detection")
+    path = "/trf/api/v1/mcp-servers"
+    base = "http://nef.example:8069"
+    configure_catalog(monkeypatch, target=http_fixture.url(path), base=base)
+    old = trf_catalog._old_group_payloads(base)["sensing"]
+    http_fixture.add("GET", path, lambda _r: json_response([old]))
+    http_fixture.add("DELETE", path + "/" + old["serverName"],
+                     lambda _r: (503, {}, b"private-detail"))
+    result = catalog_client.post("/api/v1/network/trf/catalog/publish", headers=headers()).json()
+    assert result["groups"][0]["sync_diagnostic"] == {
+        "code": "upstream_http_error", "method": "DELETE", "http_status": 503,
+    }
+    assert [r["method"] for r in http_fixture.requests] == ["GET", "DELETE", "GET"]
+    assert "private-detail" not in json.dumps(result)
+
+
+def test_old_root_registration_can_be_withdrawn_after_state_reset(
+    catalog_client, http_fixture, monkeypatch
+):
+    use_capabilities(monkeypatch, "target_detection")
+    path = "/trf/api/v1/mcp-servers"
+    base = "http://nef.example:8069"
+    configure_catalog(monkeypatch, target=http_fixture.url(path), base=base)
+    old = trf_catalog._old_group_payloads(base)["sensing"]
+    remote = [old]
+    http_fixture.add("GET", path, lambda _r: json_response(remote))
+
+    def delete(_request):
+        remote.clear()
+        return 204, {}, b""
+
+    http_fixture.add("DELETE", path + "/" + old["serverName"], delete)
+    trf_catalog.reset_state_for_tests()
+    result = catalog_client.post("/api/v1/network/trf/catalog/unpublish", headers=headers()).json()
+    assert result["summary"]["unregistered"] == 1
+    assert remote == []
+    assert [r["method"] for r in http_fixture.requests].count("DELETE") == 1

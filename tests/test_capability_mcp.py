@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import server
+import trf_catalog
 from skills import CAPABILITIES, TRF_TOOL_TYPES, capability_tool_type, trf_catalog_capabilities
 
 
@@ -70,3 +71,62 @@ def test_registered_does_not_mean_entitled_or_execution_ready(client, monkeypatc
     unavailable_result = client.post(path, headers=auth, json=request).json()["result"]
     assert unavailable_result["isError"] is True
     assert json.loads(unavailable_result["content"][0]["text"])["http_status"] == 503
+
+
+def test_three_group_endpoints_allow_public_discovery_but_not_anonymous_calls(client, monkeypatch):
+    exposed = set()
+    for group_id, caps in trf_catalog._group_capabilities().items():
+        url = trf_catalog._payloads("http://nef.example:8069")[group_id]["url"]
+        path = url.removeprefix("http://nef.example:8069")
+        assert path == f"/mcp/groups/{group_id}/mcp"
+        initialize = client.post(path, json={
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-03-26"},
+        })
+        assert initialize.status_code == 200
+        assert initialize.json()["result"]["serverInfo"]["name"] == f"nef-group-{group_id}"
+        assert client.post(path, json={"jsonrpc": "2.0", "method": "notifications/initialized"}).status_code == 202
+        listing = client.post(path, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        tools = listing.json()["result"]["tools"]
+        assert {tool["name"] for tool in tools} == {cap.id for cap in caps}
+        assert all(set(tool) == {"name", "description", "inputSchema"} for tool in tools)
+        assert client.get(path).json() == {"tools": tools}
+        assert client.get(path, headers={"Accept": "text/event-stream"}).status_code == 405
+        old_path = f"/mcp/groups/{group_id}"
+        assert client.get(old_path).json() == {"tools": tools}
+        assert client.post(old_path, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).json() == listing.json()
+        exposed.update(tool["name"] for tool in tools)
+        call = {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": {"name": caps[0].id, "arguments": {}}}
+        assert client.post(path, json=call).status_code == 401
+        call.pop("id")
+        assert client.post(path, json=call).status_code == 202
+    assert exposed == {cap.id for cap in trf_catalog_capabilities()}
+    assert len(exposed) == 23
+    assert client.get("/mcp/groups/unknown").status_code == 404
+    assert client.get("/mcp/groups/unknown/mcp").status_code == 404
+    assert client.post("/mcp/groups/unknown", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).status_code == 404
+
+
+def test_group_calls_reuse_scope_entitlement_and_live_dispatch(client, monkeypatch):
+    account = client.post("/api/v1/register", json={"account": "group-call"}).json()
+    auth = {"Authorization": "Bearer " + account["api_key"]}
+    path = "/mcp/groups/sensing/mcp"
+    call = {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+            "params": {"name": "target_detection", "arguments": {"area": "test-area"}}}
+    unpaid = client.post(path, headers=auth, json=call).json()["result"]
+    assert unpaid["payment_required"] is True
+    call["params"]["name"] = "compute_offload"
+    assert client.post(path, headers=auth, json=call).json()["error"]["code"] == -32602
+    call["params"]["name"] = "target_detection"
+    server.API_KEYS[account["api_key"]]["scopes"].discard("mcp:tools")
+    assert client.post(path, headers=auth, json=call).status_code == 403
+    assert client.post(path, headers=auth, json={"jsonrpc": "2.0", "id": 5, "method": "tools/list"}).status_code == 200
+    server.API_KEYS[account["api_key"]]["scopes"].add("mcp:tools")
+    client.post("/api/v1/account/plan", headers=auth, json={"plan": "pro"})
+    calls = []
+    monkeypatch.setattr(server.exhibition, "forward",
+                        lambda kind, value: calls.append((kind, value)) or {"text": "live-group"})
+    result = client.post(path, headers=auth, json=call).json()["result"]
+    assert "live-group" in result["content"][0]["text"]
+    assert calls[0][1]["capability_id"] == "target_detection"

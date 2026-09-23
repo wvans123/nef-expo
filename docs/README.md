@@ -1,6 +1,6 @@
 # 文档索引
 
-更新：2026-09-22。主线：能力供给 → 套餐定义 / MCP 连接发现 → 显式发布 / 取消发布 → 场景订阅 → Intent 与文字结果。首页按四种 toolType 展示已可用能力，底部支持同步/撤回及状态核对，TRF 目录来源切换仅在运维折叠设置中；不展示规划中及旧生态服务。API / MCP 北向接入作为并行开放方式保留。
+更新：2026-09-23。主线：能力供给 → 套餐定义 / MCP 连接发现 → 显式发布 / 取消发布 → 场景订阅 → Intent 与文字结果。首页按四种 toolType 展示已可用能力，底部支持同步/撤回及状态核对，TRF 目录来源切换仅在运维折叠设置中；不展示规划中及旧生态服务。API / MCP 北向接入作为并行开放方式保留。
 
 ## 用户指南
 - [项目说明](../README.md)：换电脑下载、前台启动与 Windows 独立后台任务、统一 POST 地址配置和修改接口的文件位置；维护中，部署入口以此为准。
@@ -20,7 +20,7 @@
 - [套餐订购通知与订阅查询](reference/subscription-query.md)：场景所选子能力同步授权、权益来源与取消保留、避免子能力重复计费；固定 `subscriberId=subscriber-001`、折扣计价、取消 DELETE、通知过滤与回包；后端兼容空选择，页面至少选一项；查询另含 external_tool_subscriptions。
 - [统一对接配置](../config/integration.example.json)：`start.py` 自动生成本地配置，集中设置订购、折扣、开放 MCP、TRF 发布及 Intent / 结果地址；已有 local 文件不覆盖、不上传。
 - [旧订购通知配置](../config/subscription.example.json)：兼容独立配置模式，新部署优先使用统一文件。
-- [TRF MCP Server 契约与能力映射](reference/network-catalog.md)：内部三分类 MCP Server 登记（23 项能力映射到 3 个 Server，url 暂用 NEF 根地址）、统一七字段 POST、GET 服务身份核对及字段别名兼容、Server/能力分开计数、旧逐能力记录安全撤回；真实 IP/回包待提供。
+- [TRF MCP Server 契约与能力映射](reference/network-catalog.md)：内部三分类 MCP Server 登记（23 项能力映射到 3 个以 `/mcp` 结尾的端点）、统一七字段 POST、GET 服务身份核对、Server/能力分开计数、旧地址迁移与逐能力记录撤回；真实 IP/回包待提供。
 - [农场平台联调](reference/farm-integration.md)：套餐查询、无 Key MCP 登记发现、显式发布/撤回及网络代理调用；同一接入流程用于巡检小车，真实地址待提供。
 - [网络目录配置](../config/registry.example.json)：运维侧 TRF MCP 集合地址和独立 NEF 代理入口、内部调用方授权及 MCP 服务允许列表示例；不含实际密钥。
 - [配置模板](../config/bridge.example.json)：从接口契约配套维护的可复制配置；示例域名不可用，必须按实际接口替换。
