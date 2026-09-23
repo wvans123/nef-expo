@@ -45,7 +45,11 @@ const output=path.resolve('.runtime/home-trf-ui');fs.mkdirSync(output,{recursive
     assert.deepEqual(posts.map(row=>JSON.parse(row.body).toolType).sort(),['computing tool','nf tool','sensing tool']);
     for(const row of posts){
       const payload=JSON.parse(row.body);
-      assert.equal(payload.url,origin);
+      const group={'nf tool':'nf','computing tool':'computing','sensing tool':'sensing'}[payload.toolType];
+      assert.equal(payload.url,origin+'/mcp/groups/'+group+'/mcp');
+      const discovery=await context.request.post(payload.url,{data:{jsonrpc:'2.0',id:1,method:'tools/list'}});
+      assert.equal(discovery.status(),200);
+      assert((await discovery.json()).result.tools.length>0);
       assert(offered.some(c=>c.toolType===payload.toolType));
       assert(payload.serverName.startsWith('nef-group-'));
       assert.equal(payload.serverType,'Streamable HTTP');

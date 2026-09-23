@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 import exhibition
 import subscription_notifications
+import trf_catalog
 from scene_services import SCENES, catalog as scene_catalog, tool_definition, demo_result
 from starlette.concurrency import run_in_threadpool
 
@@ -1721,6 +1722,79 @@ async def capability_mcp_endpoint(
                 or not isinstance(params.get("arguments", {}), dict)):
             return {"jsonrpc": "2.0", "id": rid, "error": {
                 "code": -32602, "message": "该入口仅允许调用当前能力，arguments 需为对象"}}
+        try:
+            return await run_in_threadpool(
+                mcp_tools_call, McpCallReq(id=rid, params=params), authorization, "live"
+            )
+        except HTTPException as exc:
+            if exc.status_code in (401, 403):
+                raise
+            import json
+            return {"jsonrpc": "2.0", "id": rid, "result": {
+                "isError": True, "content": [{"type": "text", "text": json.dumps(
+                    {"http_status": exc.status_code, "detail": exc.detail}, ensure_ascii=False
+                )}]}}
+    return {"jsonrpc": "2.0", "id": rid,
+            "error": {"code": -32601, "message": "不支持的方法"}}
+
+
+def _group_tools(group_id: str) -> list[dict]:
+    caps = trf_catalog.group_capabilities(group_id)
+    if caps is None:
+        raise HTTPException(404, "分类 MCP Server 不存在")
+    return [cap.mcp_tool() for cap in caps]
+
+
+@app.get("/mcp/groups/{group_id}")
+@app.get("/mcp/groups/{group_id}/mcp")
+def group_mcp_tools_get(group_id: str, response: Response, accept: str = Header("")):
+    """Non-MCP JSON fallback for TRF's direct GET; MCP SSE GET is unsupported."""
+    tools = _group_tools(group_id)
+    if "text/event-stream" in accept:
+        raise HTTPException(405, "此端点不提供 SSE 流；使用 POST tools/list")
+    response.headers["Cache-Control"] = "no-store"
+    return {"tools": tools}
+
+
+@app.post("/mcp/groups/{group_id}")
+@app.post("/mcp/groups/{group_id}/mcp")
+async def group_mcp_endpoint(
+    group_id: str, request: Request, authorization: str = Header(None)
+):
+    """Three public discovery endpoints; calls retain the NEF account boundary."""
+    tools = _group_tools(group_id)
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "需要 JSON-RPC 对象")
+    if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
+        raise HTTPException(400, "需要 JSON-RPC 2.0 对象")
+    method = body.get("method")
+    if "id" not in body:
+        return Response(status_code=202)
+    rid = body["id"]
+    if type(rid) not in (str, int):
+        raise HTTPException(422, "JSON-RPC id 需为字符串或整数")
+    if method == "initialize":
+        params = body.get("params")
+        version = params.get("protocolVersion") if isinstance(params, dict) else None
+        return {"jsonrpc": "2.0", "id": rid, "result": {
+            "protocolVersion": version or "2025-03-26",
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": f"nef-group-{group_id}", "version": "1.0"},
+        }}
+    if method == "ping":
+        return {"jsonrpc": "2.0", "id": rid, "result": {}}
+    if method == "tools/list":
+        return {"jsonrpc": "2.0", "id": rid, "result": {"tools": tools}}
+    if method == "tools/call":
+        _auth(authorization, required_scope="mcp:tools")
+        params = body.get("params")
+        names = {tool["name"] for tool in tools}
+        name = params.get("name") if isinstance(params, dict) else None
+        if not isinstance(name, str) or name not in names or not isinstance(params.get("arguments", {}), dict):
+            return {"jsonrpc": "2.0", "id": rid, "error": {
+                "code": -32602, "message": "该分类仅允许调用所属能力，arguments 需为对象"}}
         try:
             return await run_in_threadpool(
                 mcp_tools_call, McpCallReq(id=rid, params=params), authorization, "live"

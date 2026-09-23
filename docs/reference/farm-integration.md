@@ -114,7 +114,7 @@ CF-Access-Client-Secret: <Client Secret>
 |---|---|
 | `trf_mcp_servers_url` | TRF MCP 集合地址，发布 POST、查询 GET、撤回 DELETE 追加 serverName；空时不外发 |
 | `token_env` | NEF 向目录发送 Bearer Key 所用环境变量名 |
-| `nef_base_url` | 网络客户端能访问的 NEF 根地址，用于独立代理链路及首页三个分类登记的临时 url；AF 发布不依赖此字段 |
+| `nef_base_url` | 网络客户端能访问的 NEF 根地址，首页三个分类 MCP URL 的前缀；AF 发布不依赖此字段 |
 | `mcp_servers` | 精确匹配登记 URL 的允许列表；页面登记不会自动加入允许列表 |
 | `open_registration_account` | 开放登记来源账号，默认 `1` |
 | `allow_unlisted_mcp_servers` | 默认 false；获准隔离测试网才可放宽，风险见 6.0 |
@@ -244,7 +244,7 @@ initialize -> notifications/initialized -> tools/list（必要时继续分页）
 
 `DELETE /api/v1/network/servers/{server_id}`。发现失败、草稿、确认撤回后的记录可删除，页面对应“删除记录”。已发布、繁忙或 TRF 撤回未确认返回 409，需先完成撤回。私有登记仅归属账号可删，open 登记可由具有 af:register scope 的其他账号管理。
 
-自助套餐的 `/packages/{id}/publish`、`/unpublish` 在新协议下只更新本地展示，不发到 TRF MCP 集合。首页内部能力按 nf tool、computing tool、sensing tool 注册三个 MCP Server，url 暂用 NEF 根地址；场景不发送，详见 [首页同步](network-catalog.md#8-首页本地能力同步与-trf-读取模式)。
+自助套餐的 `/packages/{id}/publish`、`/unpublish` 在新协议下只更新本地展示，不发到 TRF MCP 集合。首页内部能力按 nf tool、computing tool、sensing tool 注册三个 MCP Server，各自 url 指向 NEF 的 `/mcp/groups/{group_id}/mcp`；场景不发送，详见 [首页同步](network-catalog.md#8-首页本地能力同步与-trf-读取模式)。
 
 ### 6.5 查看状态
 

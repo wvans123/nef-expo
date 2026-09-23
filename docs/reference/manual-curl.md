@@ -1,6 +1,6 @@
 # curl 联调手册
 
-分类：运行手册。更新：2026-09-21。用于获准内网测试，接口定义见[场景接口](integration.md)、[订购通知](subscription-query.md)、[农场 MCP](farm-integration.md)、[目录发布](network-catalog.md)。所有示例 `<...>` 都需替换；不要把命令中的 NEF 地址写为 `0.0.0.0`。
+分类：运行手册。更新：2026-09-23。用于获准内网测试，接口定义见[场景接口](integration.md)、[订购通知](subscription-query.md)、[农场 MCP](farm-integration.md)、[目录发布](network-catalog.md)。所有示例 `<...>` 都需替换；不要把命令中的 NEF 地址写为 `0.0.0.0`。
 
 ## 1. 最短验证顺序
 
@@ -57,9 +57,14 @@ nef GET '/api/v1/scene-feedback/robot_patrol?after=0'
 nef POST /api/v1/scene-feedback/collaborative_tracking '{"final_result":"目标已识别"}'
 nef GET '/api/v1/integration/subscriptions?account_id=1'
 nef POST /api/v1/af/mcp-servers '{"serverName":"farm-management","url":"http://<农场IP>:<端口>/mcp","description":"农场能力"}'
+nef GET /mcp/groups/nf/mcp
+nef POST /mcp/groups/computing/mcp '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+nef POST /mcp/groups/sensing/mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
-最后一条会立即连接所填 MCP 并发现工具，保持草稿，不自动发布到 TRF；之后用账号 Key 显式调用 publish。只对获准目标执行，未配允许列表默认拒绝连接，登记仍保留。对端不可达 502/504，别把“已登记”当工具已发现。
+`POST /api/v1/af/mcp-servers` 会立即连接所填外部 MCP 并发现工具，保持草稿，不自动发布到 TRF；之后用账号 Key 显式调用 publish。只对获准目标执行，未配允许列表默认拒绝连接，登记仍保留。对端不可达 502/504，别把“已登记”当工具已发现。
+
+三组 `/mcp/groups/{nf|computing|sensing}/mcp` 的工具定义无需 Key：标准 MCP 使用 JSON-RPC `POST tools/list`，普通 `GET` 同一地址返回 `{"tools":[...]}` 供直接 GET 的 TRF 读取（非 MCP SSE）；`Accept: text/event-stream` 的 GET 返回 405。旧的不以 `/mcp` 结尾的分类路径仍可用。各组只列本组能力，不返回账号订阅状态。`POST tools/call` 仍需 Bearer Key、`mcp:tools` 权限与权益，且可能请求现场服务；不要用本节无 Key 命令试运行工具。
 
 媒体上传以 JPEG 为例，PNG/MP4/WebM 修改 Content-Type 和文件名：
 
@@ -112,7 +117,7 @@ nef DELETE /api/v1/network/servers/<server_id>
 
 将 `<...>` 整段替换后执行。Intent 会真实发给配置的现场地址，场景开通/取消会通知农场；discover 只发现工具，publish 才在首页发布并 POST 至 TRF，unpublish 本地下架并向首次发布集合地址追加 serverName 发 DELETE，随后 GET 确认缺席；确认后才可 DELETE 本地登记。TRF 地址统一填 `registry.trf_mcp_servers_url`，正文与状态见 [TRF 契约](network-catalog.md)。发现失败/从未发布的记录可直接 DELETE。旧 sync 是 publish 别名；预览 publication 只返回报文。旧无路径回传 `POST /api/v1/scene-feedback` 要把 KEY 暂时换成 feedback-access 的 receiver_key，不能使用账号 Key 写入。媒体读取 `GET /api/v1/exhibition/channels/<id>/media/<asset_id>` 则用账号 Key。
 
-首页发布需先填写 nef_base_url；publish 按 nf tool、computing tool、sensing tool 发出最多三条 POST，七字段结构中 isThirdParty=false、url 暂用 NEF 自身根地址。summary 统计三个 MCP Server，capability_summary 统计它们覆盖的 23 项能力；GET 核对服务名、分类、URL 和可选标识，兼容驼峰/下划线字段、描述改写及尾斜杠。unpublish 撤回可核对归属的分类登记及旧版逐能力登记，不删除第三方条目。双向开放仍为 isThirdParty=true。GET catalog 只读缓存，POST refresh 才向相同的 /trf/api/v1/mcp-servers 发 GET；普通页对应“核对状态”，目录来源预览收在 `?ops=1` 的折叠设置中。
+首页发布需先填写 nef_base_url；publish 按 nf tool、computing tool、sensing tool 发出最多三条 POST，七字段结构中 isThirdParty=false、url 分别是 NEF 根地址加 `/mcp/groups/nf/mcp`、`/mcp/groups/computing/mcp`、`/mcp/groups/sensing/mcp`。summary 统计三个 MCP Server，capability_summary 统计它们覆盖的 23 项能力；GET 核对服务名、分类、URL 和可选标识，兼容驼峰/下划线字段、描述改写及尾斜杠。与旧同名根地址或旧分类路径精确匹配时先 DELETE、GET 确认缺席再 POST 新端点；其他冲突不自动覆盖。unpublish 撤回可核对归属的分类登记及旧版逐能力登记，不删除第三方条目。双向开放仍为 isThirdParty=true。GET catalog 只读缓存，POST refresh 才向相同的 /trf/api/v1/mcp-servers 发 GET；普通页对应“核对状态”，目录来源预览收在 `?ops=1` 的折叠设置中。
 
 使用订阅者账号 Key 执行市场订阅，不要复用发布者账号。订阅本身免费且不外发；真正 tools/call 使用 tools/list 返回的准确 mcp_name 和实际 inputSchema，可能触发现场操作，按获准业务意图调用。完整契约见 [第三方工具订阅](network-catalog.md#5-第三方工具的账号订阅与调用)。
 

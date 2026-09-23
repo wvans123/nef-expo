@@ -27,6 +27,7 @@ function wbTrfFailureText(item){
     redirect_not_allowed:'TRF 返回重定向，请配置最终集合地址',
     missing_operator_token:'TRF 鉴权凭证未配置',
     trf_name_conflict:'同名服务的地址、分类或第三方标识不同，未覆盖或删除',
+    trf_legacy_group_url:'此前登记的 NEF 地址需要迁移；点击同步可更新',
     trf_confirmation_unknown:'请求已提交，GET 尚未确认结果',
     nef_base_not_configured:'NEF 对外访问地址未配置',
     trf_not_configured:'TRF 集合地址未配置',
